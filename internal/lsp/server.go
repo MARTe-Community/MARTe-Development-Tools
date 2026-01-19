@@ -16,8 +16,8 @@ type JsonRpcMessage struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
-	ID      interface{}     `json:"id,omitempty"`
-	Result  interface{}     `json:"result,omitempty"`
+	ID      any             `json:"id,omitempty"`
+	Result  any             `json:"result,omitempty"`
 	Error   *JsonRpcError   `json:"error,omitempty"`
 }
 
@@ -31,7 +31,7 @@ type DidOpenTextDocumentParams struct {
 }
 
 type DidChangeTextDocumentParams struct {
-	TextDocument   VersionedTextDocumentIdentifier `json:"textDocument"`
+	TextDocument   VersionedTextDocumentIdentifier  `json:"textDocument"`
 	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
 }
 
@@ -66,7 +66,7 @@ type Position struct {
 }
 
 type Hover struct {
-	Contents interface{} `json:"contents"`
+	Contents any `json:"contents"`
 }
 
 type MarkupContent struct {
@@ -121,10 +121,10 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 func handleMessage(msg *JsonRpcMessage) {
 	switch msg.Method {
 	case "initialize":
-		respond(msg.ID, map[string]interface{}{
-			"capabilities": map[string]interface{}{
-				"textDocumentSync": 1, // Full sync
-				"hoverProvider":    true,
+		respond(msg.ID, map[string]any{
+			"capabilities": map[string]any{
+				"textDocumentSync":   1, // Full sync
+				"hoverProvider":      true,
 				"definitionProvider": true,
 				"referencesProvider": true,
 			},
@@ -188,14 +188,14 @@ func handleHover(params HoverParams) *Hover {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
-	
+
 	res := tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
-	
+
 	var content string
-	
+
 	if res.Node != nil {
 		content = formatNodeInfo(res.Node)
 	} else if res.Field != nil {
@@ -204,13 +204,13 @@ func handleHover(params HoverParams) *Hover {
 		targetName := "Unresolved"
 		fullInfo := ""
 		targetDoc := ""
-		
+
 		if res.Reference.Target != nil {
 			targetName = res.Reference.Target.RealName
 			targetDoc = res.Reference.Target.Doc
 			fullInfo = formatNodeInfo(res.Reference.Target)
 		}
-		
+
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
 		if fullInfo != "" {
 			content += fmt.Sprintf("\n\n---\n%s", fullInfo)
@@ -218,11 +218,11 @@ func handleHover(params HoverParams) *Hover {
 			content += fmt.Sprintf("\n\n%s", targetDoc)
 		}
 	}
-	
+
 	if content == "" {
 		return nil
 	}
-	
+
 	return &Hover{
 		Contents: MarkupContent{
 			Kind:  "markdown",
@@ -236,13 +236,13 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	if class == "" {
 		class = "Unknown"
 	}
-	
+
 	info := fmt.Sprintf("**Object**: `%s`\n\n**Class**: `%s`", node.RealName, class)
-	
+
 	// Check if it's a Signal (has Type or DataSource)
 	typ := node.Metadata["Type"]
 	ds := node.Metadata["DataSource"]
-	
+
 	if typ != "" || ds != "" {
 		sigInfo := "\n"
 		if typ != "" {
@@ -251,23 +251,23 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		if ds != "" {
 			sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
 		}
-		
+
 		// Size
-	dims := node.Metadata["NumberOfDimensions"]
-elems := node.Metadata["NumberOfElements"]
-	if dims != "" || elems != "" {
-		sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
-	}
+		dims := node.Metadata["NumberOfDimensions"]
+		elems := node.Metadata["NumberOfElements"]
+		if dims != "" || elems != "" {
+			sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
+		}
 		info += sigInfo
 	}
-	
+
 	if node.Doc != "" {
 		info += fmt.Sprintf("\n\n%s", node.Doc)
 	}
 	return info
 }
 
-func respond(id interface{}, result interface{}) {
+func respond(id any, result any) {
 	msg := JsonRpcMessage{
 		Jsonrpc: "2.0",
 		ID:      id,
@@ -276,7 +276,7 @@ func respond(id interface{}, result interface{}) {
 	send(msg)
 }
 
-func send(msg interface{}) {
+func send(msg any) {
 	body, _ := json.Marshal(msg)
 	fmt.Printf("Content-Length: %d\r\n\r\n%s", len(body), body)
 }
