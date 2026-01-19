@@ -65,8 +65,8 @@ func runCheck(args []string) {
 		os.Exit(1)
 	}
 
-	idx := index.NewIndex()
-	configs := make(map[string]*parser.Configuration)
+	tree := index.NewProjectTree()
+	// configs := make(map[string]*parser.Configuration) // We don't strictly need this map if we just build the tree
 
 	for _, file := range args {
 		content, err := ioutil.ReadFile(file)
@@ -82,16 +82,15 @@ func runCheck(args []string) {
 			continue
 		}
 
-		configs[file] = config
-		idx.IndexConfig(file, config)
+		tree.AddFile(file, config)
 	}
 
-	idx.ResolveReferences()
-	v := validator.NewValidator(idx)
+	// idx.ResolveReferences() // Not implemented in new tree yet, but Validator uses Tree directly
+	v := validator.NewValidator(tree)
+	v.ValidateProject()
 
-	for file, config := range configs {
-		v.Validate(file, config)
-	}
+	// Legacy loop removed as ValidateProject covers it via recursion
+	
 	v.CheckUnused()
 
 	for _, diag := range v.Diagnostics {

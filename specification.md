@@ -35,9 +35,12 @@ The LSP server should provide the following capabilities:
 - **Project Structure**: Files can be distributed across sub-folders.
 - **Namespaces**: The `#package` macro defines the namespace for the file.
     - **Semantic**: `#package PROJECT.NODE` implies that all definitions within the file are treated as children/fields of the node `NODE`.
+    - **URI Symbols**: The symbols `+` and `$` used for object nodes are **not** written in the URI of the `#package` macro (e.g., use `PROJECT.NODE` even if the node is defined as `+NODE`).
 - **Build Process**:
     - The build tool merges all files sharing the same base namespace.
     - **Multi-File Nodes**: Nodes can be defined across multiple files. The build tool and validator must merge these definitions before processing.
+    - **Merging Order**: For objects defined across multiple files, the **first file** to be considered is the one containing the `Class` field definition.
+    - **Field Order**: Within a single file, the relative order of defined fields must be maintained.
     - The LSP indexes only files belonging to the same project/namespace scope.
 - **Output**: The output format is the same as the input configuration but without the `#package` macro.
 
@@ -165,6 +168,7 @@ The LSP and `check` command should report the following:
 - **Errors**:
     - **Type Inconsistency**: A signal is referenced with a type different from its definition.
     - **Size Inconsistency**: A signal is referenced with a size (dimensions/elements) different from its definition.
+    - **Duplicate Field Definition**: A field is defined multiple times within the same node scope (including across multiple files).
     - **Validation Errors**:
         - Missing mandatory fields.
         - Field type mismatches.

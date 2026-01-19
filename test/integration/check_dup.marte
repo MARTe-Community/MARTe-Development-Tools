@@ -1,0 +1,6 @@
+#package TEST.DUP
++Node = {
+    Class = "DupClass"
+    Field = 1
+    Field = 2
+}

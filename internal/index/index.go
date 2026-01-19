@@ -1,125 +1,146 @@
 package index
 
 import (
+	"strings"
+
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
 )
 
-type SymbolType int
-
-const (
-	SymbolObject SymbolType = iota
-	SymbolSignal
-	SymbolDataSource
-	SymbolGAM
-)
-
-type Symbol struct {
-	Name     string
-	Type     SymbolType
-	Position parser.Position
-	File     string
-	Doc      string
-	Class    string
-	Parent   *Symbol
+type ProjectTree struct {
+	Root *ProjectNode
 }
 
-type Reference struct {
-	Name     string
-	Position parser.Position
-	File     string
-	Target   *Symbol
+type ProjectNode struct {
+	Name      string // Normalized name
+	RealName  string // The actual name used in definition (e.g. +Node)
+	Fragments []*Fragment
+	Children  map[string]*ProjectNode
 }
 
-type Index struct {
-	Symbols    map[string]*Symbol
-	References []Reference
-	Packages   map[string][]string // pkgURI -> list of files
+type Fragment struct {
+	File        string
+	Definitions []parser.Definition
+	IsObject    bool            // True if this fragment comes from an ObjectNode, False if from File/Package body
+	ObjectPos   parser.Position // Position of the object node if IsObject is true
 }
 
-func NewIndex() *Index {
-	return &Index{
-		Symbols:  make(map[string]*Symbol),
-		Packages: make(map[string][]string),
+func NewProjectTree() *ProjectTree {
+	return &ProjectTree{
+		Root: &ProjectNode{
+			Children: make(map[string]*ProjectNode),
+		},
 	}
 }
 
-func (idx *Index) IndexConfig(file string, config *parser.Configuration) {
-	pkgURI := ""
+func NormalizeName(name string) string {
+	if len(name) > 0 && (name[0] == '+' || name[0] == '$') {
+		return name[1:]
+	}
+	return name
+}
+
+func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
+	// Determine root node for this file based on package
+	node := pt.Root
 	if config.Package != nil {
-		pkgURI = config.Package.URI
-	}
-	idx.Packages[pkgURI] = append(idx.Packages[pkgURI], file)
-
-	for _, def := range config.Definitions {
-		idx.indexDefinition(file, "", nil, def)
-	}
-}
-
-func (idx *Index) indexDefinition(file string, path string, parent *Symbol, def parser.Definition) {
-	switch d := def.(type) {
-	case *parser.ObjectNode:
-		name := d.Name
-		fullPath := name
-		if path != "" {
-			fullPath = path + "." + name
-		}
-		
-		class := ""
-		for _, subDef := range d.Subnode.Definitions {
-			if f, ok := subDef.(*parser.Field); ok && f.Name == "Class" {
-				if s, ok := f.Value.(*parser.StringValue); ok {
-					class = s.Value
-				} else if r, ok := f.Value.(*parser.ReferenceValue); ok {
-					class = r.Value
+		parts := strings.Split(config.Package.URI, ".")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			// Navigate or Create
+			if _, ok := node.Children[part]; !ok {
+				node.Children[part] = &ProjectNode{
+					Name:     part,
+					RealName: part, // Default, might be updated if we find a +Part later? 
+					// Actually, package segments are just names. 
+					// If they refer to an object defined elsewhere as +Part, we hope to match it.
+					Children: make(map[string]*ProjectNode),
 				}
 			}
+			node = node.Children[part]
 		}
+	}
 
-		symType := SymbolObject
-		// Simple heuristic for GAM or DataSource if class name matches or node name starts with +/$
-		// In a real implementation we would check the class against known MARTe classes
-
-		sym := &Symbol{
-			Name:     fullPath,
-			Type:     symType,
-			Position: d.Position,
-			File:     file,
-			Class:    class,
-			Parent:   parent,
+	// Now 'node' is the container for the file's definitions.
+	// We add a Fragment to this node containing the top-level definitions.
+	// But wait, definitions can be ObjectNodes (which start NEW nodes) or Fields (which belong to 'node').
+	
+	// We need to split definitions:
+	// Fields -> go into a Fragment for 'node'.
+	// ObjectNodes -> create/find Child node and add Fragment there.
+	
+	// Actually, the Build Process says: "#package ... implies all definitions ... are children".
+	// So if I have "Field = 1", it is a child of the package node.
+	// If I have "+Sub = {}", it is a child of the package node.
+	
+	// So we can just iterate definitions.
+	
+	// But for merging, we need to treat "+Sub" as a Node, not just a field.
+	
+	fileFragment := &Fragment{
+		File: file,
+		IsObject: false,
+	}
+	
+	for _, def := range config.Definitions {
+		switch d := def.(type) {
+		case *parser.Field:
+			// Fields belong to the current package node
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+		case *parser.ObjectNode:
+			// Object starts a new child node
+			norm := NormalizeName(d.Name)
+			if _, ok := node.Children[norm]; !ok {
+				node.Children[norm] = &ProjectNode{
+					Name:     norm,
+					RealName: d.Name,
+					Children: make(map[string]*ProjectNode),
+				}
+			}
+			child := node.Children[norm]
+			if child.RealName == norm && d.Name != norm {
+				child.RealName = d.Name // Update to specific name if we had generic
+			}
+			
+			// Recursively add definitions of the object
+			pt.addObjectFragment(child, file, d)
 		}
-		idx.Symbols[fullPath] = sym
-
-		for _, subDef := range d.Subnode.Definitions {
-			idx.indexDefinition(file, fullPath, sym, subDef)
-		}
-
-	case *parser.Field:
-		idx.indexValue(file, d.Value)
+	}
+	
+	if len(fileFragment.Definitions) > 0 {
+		node.Fragments = append(node.Fragments, fileFragment)
 	}
 }
 
-func (idx *Index) indexValue(file string, val parser.Value) {
-	switch v := val.(type) {
-	case *parser.ReferenceValue:
-		idx.References = append(idx.References, Reference{
-			Name:     v.Value,
-			Position: v.Position,
-			File:     file,
-		})
-	case *parser.ArrayValue:
-		for _, elem := range v.Elements {
-			idx.indexValue(file, elem)
+func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode) {
+	frag := &Fragment{
+		File:        file,
+		IsObject:    true,
+		ObjectPos:   obj.Position,
+	}
+	
+	for _, def := range obj.Subnode.Definitions {
+		switch d := def.(type) {
+		case *parser.Field:
+			frag.Definitions = append(frag.Definitions, d)
+		case *parser.ObjectNode:
+			norm := NormalizeName(d.Name)
+			if _, ok := node.Children[norm]; !ok {
+				node.Children[norm] = &ProjectNode{
+					Name:     norm,
+					RealName: d.Name,
+					Children: make(map[string]*ProjectNode),
+				}
+			}
+			child := node.Children[norm]
+			if child.RealName == norm && d.Name != norm {
+				child.RealName = d.Name
+			}
+			pt.addObjectFragment(child, file, d)
 		}
 	}
-}
-
-func (idx *Index) ResolveReferences() {
-	for i := range idx.References {
-		ref := &idx.References[i]
-		if sym, ok := idx.Symbols[ref.Name]; ok {
-			ref.Target = sym
-		} else {
-			// Try relative resolution?
-		}
-	}
+	
+	node.Fragments = append(node.Fragments, frag)
 }

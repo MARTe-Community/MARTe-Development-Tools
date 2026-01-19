@@ -1,0 +1,4 @@
+#package TEST.MERGE
++Node = {
+    FieldB = 2
+}

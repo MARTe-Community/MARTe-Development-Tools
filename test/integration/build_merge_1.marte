@@ -1,0 +1,5 @@
+#package TEST.MERGE
++Node = {
+    Class = "MyClass"
+    FieldA = 1
+}

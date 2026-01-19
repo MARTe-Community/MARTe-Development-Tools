@@ -3,9 +3,11 @@ package integration
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/marte-dev/marte-dev-tools/internal/builder"
 	"github.com/marte-dev/marte-dev-tools/internal/formatter"
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -25,12 +27,11 @@ func TestCheckCommand(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	idx := index.NewIndex()
-	idx.IndexConfig(inputFile, config)
-	idx.ResolveReferences()
+	idx := index.NewProjectTree()
+	idx.AddFile(inputFile, config)
 
 	v := validator.NewValidator(idx)
-	v.Validate(inputFile, config)
+	v.ValidateProject()
 	v.CheckUnused()
 
 	foundError := false
@@ -43,6 +44,38 @@ func TestCheckCommand(t *testing.T) {
 
 	if !foundError {
 		t.Errorf("Expected 'Class' field error in %s, but found none", inputFile)
+	}
+}
+
+func TestCheckDuplicate(t *testing.T) {
+	inputFile := "integration/check_dup.marte"
+	content, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		t.Fatalf("Failed to read %s: %v", inputFile, err)
+	}
+
+	p := parser.NewParser(string(content))
+	config, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	idx := index.NewProjectTree()
+	idx.AddFile(inputFile, config)
+
+	v := validator.NewValidator(idx)
+	v.ValidateProject()
+
+	foundError := false
+	for _, diag := range v.Diagnostics {
+		if strings.Contains(diag.Message, "Duplicate Field Definition") {
+			foundError = true
+			break
+		}
+	}
+
+	if !foundError {
+		t.Errorf("Expected duplicate field error in %s, but found none", inputFile)
 	}
 }
 
@@ -70,11 +103,8 @@ func TestFmtCommand(t *testing.T) {
 	}
 
 	// Check for sticky comments (no blank line between comment and field)
-	// We expect:
-	//   // Sticky comment
-	//   Field = 123
 	if !strings.Contains(output, "  // Sticky comment\n  Field = 123") {
-		t.Errorf("Expected sticky comment to be immediately followed by field, got:\n%s", output)
+		t.Error("Expected sticky comment to be immediately followed by field")
 	}
 
 	if !strings.Contains(output, "Array = { 1 2 3 }") {
@@ -103,5 +133,54 @@ func TestFmtCommand(t *testing.T) {
 	}
 	if !strings.Contains(output2, "Field1 = \"Value\" // Comment after value") {
 		t.Error("Expected inline comment after field value")
+	}
+}
+
+func TestBuildCommand(t *testing.T) {
+	// Clean previous build
+	os.RemoveAll("build_test")
+	os.MkdirAll("build_test", 0755)
+	defer os.RemoveAll("build_test")
+
+	// Test Merge
+	files := []string{"integration/build_merge_1.marte", "integration/build_merge_2.marte"}
+	b := builder.NewBuilder(files)
+	err := b.Build("build_test")
+	if err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+	
+	// Check output existence
+	if _, err := os.Stat("build_test/TEST.marte"); os.IsNotExist(err) {
+		t.Fatalf("Expected output file build_test/TEST.marte not found")
+	}
+	
+	content, _ := ioutil.ReadFile("build_test/TEST.marte")
+	output := string(content)
+	
+	if !strings.Contains(output, "FieldA = 1") || !strings.Contains(output, "FieldB = 2") {
+		t.Error("Merged output missing fields")
+	}
+	
+	// Test Order (Class First)
+	filesOrder := []string{"integration/build_order_1.marte", "integration/build_order_2.marte"}
+	bOrder := builder.NewBuilder(filesOrder)
+	err = bOrder.Build("build_test")
+	if err != nil {
+		t.Fatalf("Build order test failed: %v", err)
+	}
+	
+	contentOrder, _ := ioutil.ReadFile("build_test/TEST.marte")
+	outputOrder := string(contentOrder)
+	
+	// Check for Class before Field
+	classIdx := strings.Index(outputOrder, "Class = \"Ordered\"")
+	fieldIdx := strings.Index(outputOrder, "Field = 1")
+	
+	if classIdx == -1 || fieldIdx == -1 {
+		t.Fatal("Missing Class or Field in ordered output")
+	}
+	if classIdx > fieldIdx {
+		t.Error("Expected Class to appear before Field in merged output")
 	}
 }
