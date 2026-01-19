@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+
+	"github.com/marte-dev/marte-dev-tools/internal/index"
+	"github.com/marte-dev/marte-dev-tools/internal/parser"
 )
 
 type JsonRpcMessage struct {
@@ -21,6 +25,56 @@ type JsonRpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
+
+type DidOpenTextDocumentParams struct {
+	TextDocument TextDocumentItem `json:"textDocument"`
+}
+
+type DidChangeTextDocumentParams struct {
+	TextDocument   VersionedTextDocumentIdentifier `json:"textDocument"`
+	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
+}
+
+type TextDocumentItem struct {
+	URI        string `json:"uri"`
+	LanguageID string `json:"languageId"`
+	Version    int    `json:"version"`
+	Text       string `json:"text"`
+}
+
+type VersionedTextDocumentIdentifier struct {
+	URI     string `json:"uri"`
+	Version int    `json:"version"`
+}
+
+type TextDocumentContentChangeEvent struct {
+	Text string `json:"text"`
+}
+
+type HoverParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type TextDocumentIdentifier struct {
+	URI string `json:"uri"`
+}
+
+type Position struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type Hover struct {
+	Contents interface{} `json:"contents"`
+}
+
+type MarkupContent struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+var tree = index.NewProjectTree()
 
 func RunServer() {
 	reader := bufio.NewReader(os.Stdin)
@@ -39,7 +93,6 @@ func RunServer() {
 }
 
 func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
-	// LSP uses Content-Length header
 	var contentLength int
 	for {
 		line, err := reader.ReadString('\n')
@@ -74,9 +127,6 @@ func handleMessage(msg *JsonRpcMessage) {
 				"hoverProvider":    true,
 				"definitionProvider": true,
 				"referencesProvider": true,
-				"completionProvider": map[string]interface{}{
-					"triggerCharacters": []string{"=", ".", "{", "+", "$"},
-				},
 			},
 		})
 	case "initialized":
@@ -86,11 +136,102 @@ func handleMessage(msg *JsonRpcMessage) {
 	case "exit":
 		os.Exit(0)
 	case "textDocument/didOpen":
-		// Handle file open
+		var params DidOpenTextDocumentParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			handleDidOpen(params)
+		}
 	case "textDocument/didChange":
-		// Handle file change
+		var params DidChangeTextDocumentParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			handleDidChange(params)
+		}
 	case "textDocument/hover":
-		// Handle hover
+		var params HoverParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			res := handleHover(params)
+			respond(msg.ID, res)
+		} else {
+			respond(msg.ID, nil)
+		}
+	}
+}
+
+func uriToPath(uri string) string {
+	return strings.TrimPrefix(uri, "file://")
+}
+
+func handleDidOpen(params DidOpenTextDocumentParams) {
+	path := uriToPath(params.TextDocument.URI)
+	p := parser.NewParser(params.TextDocument.Text)
+	config, err := p.Parse()
+	if err == nil {
+		tree.AddFile(path, config)
+		tree.ResolveReferences()
+	}
+}
+
+func handleDidChange(params DidChangeTextDocumentParams) {
+	if len(params.ContentChanges) == 0 {
+		return
+	}
+	// Full sync: text is in ContentChanges[0].Text
+	text := params.ContentChanges[0].Text
+	path := uriToPath(params.TextDocument.URI)
+	p := parser.NewParser(text)
+	config, err := p.Parse()
+	if err == nil {
+		tree.AddFile(path, config)
+		tree.ResolveReferences()
+	}
+}
+
+func handleHover(params HoverParams) *Hover {
+	path := uriToPath(params.TextDocument.URI)
+	// LSP 0-based to Parser 1-based
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+	
+	res := tree.Query(path, line, col)
+	if res == nil {
+		return nil
+	}
+	
+	var content string
+	
+	if res.Node != nil {
+		// Try to find Class field
+		class := "Unknown"
+		for _, frag := range res.Node.Fragments {
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok && f.Name == "Class" {
+					if s, ok := f.Value.(*parser.StringValue); ok {
+						class = s.Value
+					} else if r, ok := f.Value.(*parser.ReferenceValue); ok {
+						class = r.Value
+					}
+				}
+			}
+		}
+		content = fmt.Sprintf("**Object**: `%s`\n\n**Class**: `%s`", res.Node.RealName, class)
+	} else if res.Field != nil {
+		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
+	} else if res.Reference != nil {
+		targetName := "Unresolved"
+		if res.Reference.Target != nil {
+			targetName = res.Reference.Target.RealName
+		}
+		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
+	}
+	
+	if content == "" {
+		return nil
+	}
+	
+	return &Hover{
+		Contents: MarkupContent{
+			Kind:  "markdown",
+			Value: content,
+		},
 	}
 }
 

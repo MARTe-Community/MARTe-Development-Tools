@@ -7,7 +7,15 @@ import (
 )
 
 type ProjectTree struct {
-	Root *ProjectNode
+	Root       *ProjectNode
+	References []Reference
+}
+
+type Reference struct {
+	Name     string
+	Position parser.Position
+	File     string
+	Target   *ProjectNode // Resolved target
 }
 
 type ProjectNode struct {
@@ -15,13 +23,14 @@ type ProjectNode struct {
 	RealName  string // The actual name used in definition (e.g. +Node)
 	Fragments []*Fragment
 	Children  map[string]*ProjectNode
+	Parent    *ProjectNode
 }
 
 type Fragment struct {
 	File        string
 	Definitions []parser.Definition
-	IsObject    bool            // True if this fragment comes from an ObjectNode, False if from File/Package body
-	ObjectPos   parser.Position // Position of the object node if IsObject is true
+	IsObject    bool            
+	ObjectPos   parser.Position 
 }
 
 func NewProjectTree() *ProjectTree {
@@ -39,8 +48,37 @@ func NormalizeName(name string) string {
 	return name
 }
 
+func (pt *ProjectTree) RemoveFile(file string) {
+	// Remove references from this file
+	newRefs := []Reference{}
+	for _, ref := range pt.References {
+		if ref.File != file {
+			newRefs = append(newRefs, ref)
+		}
+	}
+	pt.References = newRefs
+
+	// Remove fragments from tree
+	pt.removeFileFromNode(pt.Root, file)
+}
+
+func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
+	newFragments := []*Fragment{}
+	for _, frag := range node.Fragments {
+		if frag.File != file {
+			newFragments = append(newFragments, frag)
+		}
+	}
+	node.Fragments = newFragments
+
+	for _, child := range node.Children {
+		pt.removeFileFromNode(child, file)
+	}
+}
+
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
-	// Determine root node for this file based on package
+	pt.RemoveFile(file) // Ensure clean state for this file
+
 	node := pt.Root
 	if config.Package != nil {
 		parts := strings.Split(config.Package.URI, ".")
@@ -49,62 +87,42 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 			if part == "" {
 				continue
 			}
-			// Navigate or Create
 			if _, ok := node.Children[part]; !ok {
 				node.Children[part] = &ProjectNode{
 					Name:     part,
-					RealName: part, // Default, might be updated if we find a +Part later? 
-					// Actually, package segments are just names. 
-					// If they refer to an object defined elsewhere as +Part, we hope to match it.
+					RealName: part, 
 					Children: make(map[string]*ProjectNode),
+					Parent:   node,
 				}
 			}
 			node = node.Children[part]
 		}
 	}
 
-	// Now 'node' is the container for the file's definitions.
-	// We add a Fragment to this node containing the top-level definitions.
-	// But wait, definitions can be ObjectNodes (which start NEW nodes) or Fields (which belong to 'node').
-	
-	// We need to split definitions:
-	// Fields -> go into a Fragment for 'node'.
-	// ObjectNodes -> create/find Child node and add Fragment there.
-	
-	// Actually, the Build Process says: "#package ... implies all definitions ... are children".
-	// So if I have "Field = 1", it is a child of the package node.
-	// If I have "+Sub = {}", it is a child of the package node.
-	
-	// So we can just iterate definitions.
-	
-	// But for merging, we need to treat "+Sub" as a Node, not just a field.
-	
 	fileFragment := &Fragment{
-		File: file,
+		File:     file,
 		IsObject: false,
 	}
 	
 	for _, def := range config.Definitions {
 		switch d := def.(type) {
 		case *parser.Field:
-			// Fields belong to the current package node
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.indexValue(file, d.Value)
 		case *parser.ObjectNode:
-			// Object starts a new child node
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
 					Name:     norm,
 					RealName: d.Name,
 					Children: make(map[string]*ProjectNode),
+					Parent:   node,
 				}
 			}
 			child := node.Children[norm]
 			if child.RealName == norm && d.Name != norm {
-				child.RealName = d.Name // Update to specific name if we had generic
+				child.RealName = d.Name
 			}
-			
-			// Recursively add definitions of the object
 			pt.addObjectFragment(child, file, d)
 		}
 	}
@@ -125,6 +143,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		switch d := def.(type) {
 		case *parser.Field:
 			frag.Definitions = append(frag.Definitions, d)
+			pt.indexValue(file, d.Value)
 		case *parser.ObjectNode:
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
@@ -132,6 +151,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 					Name:     norm,
 					RealName: d.Name,
 					Children: make(map[string]*ProjectNode),
+					Parent:   node,
 				}
 			}
 			child := node.Children[norm]
@@ -143,4 +163,94 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 	}
 	
 	node.Fragments = append(node.Fragments, frag)
+}
+
+func (pt *ProjectTree) indexValue(file string, val parser.Value) {
+	switch v := val.(type) {
+	case *parser.ReferenceValue:
+		pt.References = append(pt.References, Reference{
+			Name:     v.Value,
+			Position: v.Position,
+			File:     file,
+		})
+	case *parser.ArrayValue:
+		for _, elem := range v.Elements {
+			pt.indexValue(file, elem)
+		}
+	}
+}
+
+func (pt *ProjectTree) ResolveReferences() {
+	for i := range pt.References {
+		ref := &pt.References[i]
+		ref.Target = pt.findNode(pt.Root, ref.Name)
+	}
+}
+
+func (pt *ProjectTree) findNode(root *ProjectNode, name string) *ProjectNode {
+	if root.RealName == name || root.Name == name {
+		return root
+	}
+	for _, child := range root.Children {
+		if res := pt.findNode(child, name); res != nil {
+			return res
+		}
+	}
+	return nil
+}
+
+// QueryResult holds the result of a query at a position
+type QueryResult struct {
+	Node      *ProjectNode
+	Field     *parser.Field
+	Reference *Reference
+}
+
+func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
+	// 1. Check References
+	for i := range pt.References {
+		ref := &pt.References[i]
+		if ref.File == file {
+			// Check if pos is within reference range
+			// Approx length
+			if line == ref.Position.Line && col >= ref.Position.Column && col < ref.Position.Column+len(ref.Name) {
+				return &QueryResult{Reference: ref}
+			}
+		}
+	}
+
+	// 2. Check Definitions (traverse tree)
+	return pt.queryNode(pt.Root, file, line, col)
+}
+
+func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) *QueryResult {
+	for _, frag := range node.Fragments {
+		if frag.File == file {
+			// Check Object definition itself
+			if frag.IsObject {
+				// Object definition usually starts at 'Name'.
+				// Position is start of Name.
+				if line == frag.ObjectPos.Line && col >= frag.ObjectPos.Column && col < frag.ObjectPos.Column+len(node.RealName) {
+					return &QueryResult{Node: node}
+				}
+			}
+			
+			// Check definitions in fragment
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok {
+					// Check field name range
+					if line == f.Position.Line && col >= f.Position.Column && col < f.Position.Column+len(f.Name) {
+						return &QueryResult{Field: f}
+					}
+				}
+			}
+		}
+	}
+	
+	for _, child := range node.Children {
+		if res := pt.queryNode(child, file, line, col); res != nil {
+			return res
+		}
+	}
+	return nil
 }
