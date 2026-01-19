@@ -1,0 +1,11 @@
+#package TEST.FMT
+
+// Detached comment
+
++Node = {
+    Class = "MyClass"
+
+    // Sticky comment
+    Field = 123
+    Array = {1 2 3}
+}

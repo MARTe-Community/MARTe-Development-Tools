@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 
 	"github.com/marte-dev/marte-dev-tools/internal/builder"
+	"github.com/marte-dev/marte-dev-tools/internal/formatter"
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/lsp"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -28,7 +30,7 @@ func main() {
 	case "check":
 		runCheck(os.Args[2:])
 	case "fmt":
-		runFmt()
+		runFmt(os.Args[2:])
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		os.Exit(1)
@@ -107,7 +109,34 @@ func runCheck(args []string) {
 	}
 }
 
-func runFmt() {
-	fmt.Println("Formatting files...")
-	// TODO: Implement fmt
+func runFmt(args []string) {
+	if len(args) < 1 {
+		fmt.Println("Usage: mdt fmt <input_files...>")
+		os.Exit(1)
+	}
+
+	for _, file := range args {
+		content, err := ioutil.ReadFile(file)
+		if err != nil {
+			fmt.Printf("Error reading %s: %v\n", file, err)
+			continue
+		}
+
+		p := parser.NewParser(string(content))
+		config, err := p.Parse()
+		if err != nil {
+			fmt.Printf("Error parsing %s: %v\n", file, err)
+			continue
+		}
+
+		var buf bytes.Buffer
+		formatter.Format(config, &buf)
+
+		err = ioutil.WriteFile(file, buf.Bytes(), 0644)
+		if err != nil {
+			fmt.Printf("Error writing %s: %v\n", file, err)
+			continue
+		}
+		fmt.Printf("Formatted %s\n", file)
+	}
 }

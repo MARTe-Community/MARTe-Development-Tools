@@ -7,9 +7,11 @@ import (
 )
 
 type Parser struct {
-	lexer *Lexer
-	tok   Token
-	peeked bool
+	lexer    *Lexer
+	tok      Token
+	peeked   bool
+	comments []Comment
+	pragmas  []Pragma
 }
 
 func NewParser(input string) *Parser {
@@ -23,7 +25,7 @@ func (p *Parser) next() Token {
 		p.peeked = false
 		return p.tok
 	}
-	p.tok = p.lexer.NextToken()
+	p.tok = p.fetchToken()
 	return p.tok
 }
 
@@ -31,9 +33,25 @@ func (p *Parser) peek() Token {
 	if p.peeked {
 		return p.tok
 	}
-	p.tok = p.lexer.NextToken()
+	p.tok = p.fetchToken()
 	p.peeked = true
 	return p.tok
+}
+
+func (p *Parser) fetchToken() Token {
+	for {
+		tok := p.lexer.NextToken()
+		switch tok.Type {
+		case TokenComment:
+			p.comments = append(p.comments, Comment{Position: tok.Position, Text: tok.Value})
+		case TokenDocstring:
+			p.comments = append(p.comments, Comment{Position: tok.Position, Text: tok.Value, Doc: true})
+		case TokenPragma:
+			p.pragmas = append(p.pragmas, Pragma{Position: tok.Position, Text: tok.Value})
+		default:
+			return tok
+		}
+	}
 }
 
 func (p *Parser) Parse() (*Configuration, error) {
@@ -51,12 +69,6 @@ func (p *Parser) Parse() (*Configuration, error) {
 			}
 			continue
 		}
-		
-		// Skip comments, pragmas, docstrings for now in AST
-		if tok.Type == TokenComment || tok.Type == TokenDocstring || tok.Type == TokenPragma {
-			p.next()
-			continue
-		}
 
 		def, err := p.parseDefinition()
 		if err != nil {
@@ -64,6 +76,8 @@ func (p *Parser) Parse() (*Configuration, error) {
 		}
 		config.Definitions = append(config.Definitions, def)
 	}
+	config.Comments = p.comments
+	config.Pragmas = p.pragmas
 	return config, nil
 }
 
@@ -114,15 +128,12 @@ func (p *Parser) parseSubnode() (Subnode, error) {
 	for {
 		t := p.peek()
 		if t.Type == TokenRBrace {
-			p.next()
+			endTok := p.next()
+			sub.EndPosition = endTok.Position
 			break
 		}
 		if t.Type == TokenEOF {
 			return sub, fmt.Errorf("%d:%d: unexpected EOF, expected }", t.Position.Line, t.Position.Column)
-		}
-		if t.Type == TokenComment || t.Type == TokenDocstring || t.Type == TokenPragma {
-			p.next()
-			continue
 		}
 		def, err := p.parseDefinition()
 		if err != nil {
@@ -136,11 +147,13 @@ func (p *Parser) parseSubnode() (Subnode, error) {
 func (p *Parser) parseValue() (Value, error) {
 	tok := p.next()
 	switch tok.Type {
-	case TokenString:
-		return &StringValue{
-			Position: tok.Position,
-			Value:    strings.Trim(tok.Value, "\""),
-		}, nil
+		case TokenString:
+			return &StringValue{
+				Position: tok.Position,
+				Value:    strings.Trim(tok.Value, "\""),
+				Quoted:   true,
+			}, nil
+	
 	case TokenNumber:
 		// Simplistic handling
 		if strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") {
@@ -150,7 +163,8 @@ func (p *Parser) parseValue() (Value, error) {
 		i, _ := strconv.ParseInt(tok.Value, 0, 64)
 		return &IntValue{Position: tok.Position, Value: i, Raw: tok.Value}, nil
 	case TokenBool:
-		return &BoolValue{Position: tok.Position, Value: tok.Value == "true"}, nil
+		return &BoolValue{Position: tok.Position, Value: tok.Value == "true"},
+			nil
 	case TokenIdentifier:
 		// reference?
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, nil
@@ -160,7 +174,8 @@ func (p *Parser) parseValue() (Value, error) {
 		for {
 			t := p.peek()
 			if t.Type == TokenRBrace {
-				p.next()
+				endTok := p.next()
+				arr.EndPosition = endTok.Position
 				break
 			}
 			val, err := p.parseValue()

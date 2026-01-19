@@ -1,0 +1,9 @@
+#package TEST.INLINE
+
++Node = { // Comment after open brace
+  Field1 = "Value" // Comment after value
+  Field2 = 123 // Another comment
+  FieldArr = { 1 2 3 } // Comment after array
+  +Sub = {
+  } // Comment after object
+}

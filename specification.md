@@ -34,8 +34,10 @@ The LSP server should provide the following capabilities:
 - **File Extension**: `.marte`
 - **Project Structure**: Files can be distributed across sub-folders.
 - **Namespaces**: The `#package` macro defines the namespace for the file.
+    - **Semantic**: `#package PROJECT.NODE` implies that all definitions within the file are treated as children/fields of the node `NODE`.
 - **Build Process**:
     - The build tool merges all files sharing the same base namespace.
+    - **Multi-File Nodes**: Nodes can be defined across multiple files. The build tool and validator must merge these definitions before processing.
     - The LSP indexes only files belonging to the same project/namespace scope.
 - **Output**: The output format is the same as the input configuration but without the `#package` macro.
 
@@ -133,6 +135,23 @@ The tool must build an index of the configuration to support LSP features and va
     - **Schema Definition**:
         - Class validation rules must be defined in a separate schema file.
         - **Project-Specific Classes**: Developers can define their own project-specific classes and corresponding validation rules, expanding the validation capabilities for their specific needs.
+- **Duplicate Fields**:
+    - **Constraint**: A field must not be defined more than once within the same object/node scope.
+    - **Multi-File Consideration**: Validation must account for nodes being defined across multiple files (merged) when checking for duplicates.
+
+### Formatting Rules
+
+The `fmt` command must format the code according to the following rules:
+- **Indentation**: 2 spaces per indentation level.
+- **Assignment**: 1 space before and after the `=` operator (e.g., `Field = Value`).
+- **Comments**: 
+    - 1 space after `//`, `//#`, or `//!`.
+    - Comments should "stick" to the next definition (no empty lines between the comment and the code it documents).
+    - **Placement**: 
+        - Comments can be placed inline after a definition (e.g., `field = value // comment`).
+        - Comments can be placed after a subnode opening bracket (e.g., `node = { // comment`) or after an object definition.
+- **Arrays**: 1 space after the opening bracket `{` and 1 space before the closing bracket `}` (e.g., `{ 1 2 3 }`).
+- **Strings**: Quoted strings must preserve their quotes during formatting.
 
 ### Diagnostic Messages
 

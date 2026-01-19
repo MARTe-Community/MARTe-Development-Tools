@@ -31,18 +31,22 @@ type Token struct {
 }
 
 type Lexer struct {
-	input    string
-	start    int
-	pos      int
-	width    int
-	line     int
-	lineStart int
+	input       string
+	start       int
+	pos         int
+	width       int
+	line        int
+	lineStart   int
+	startLine   int
+	startColumn int
 }
 
 func NewLexer(input string) *Lexer {
 	return &Lexer{
-		input: input,
-		line:  1,
+		input:       input,
+		line:        1,
+		startLine:   1,
+		startColumn: 1,
 	}
 }
 
@@ -67,8 +71,8 @@ func (l *Lexer) backup() {
 		r, _ := utf8.DecodeRuneInString(l.input[l.pos:])
 		if r == '\n' {
 			l.line--
-			// This is tricky, we'd need to find the previous line start
-			// For simplicity, let's just not backup over newlines or handle it better
+			// We don't perfectly restore lineStart here as it's complex,
+			// but we mostly backup single characters within a line.
 		}
 	}
 }
@@ -79,16 +83,22 @@ func (l *Lexer) peek() rune {
 	return r
 }
 
+func (l *Lexer) ignore() {
+	l.start = l.pos
+	l.startLine = l.line
+	l.startColumn = l.pos - l.lineStart + 1
+}
+
 func (l *Lexer) emit(t TokenType) Token {
 	tok := Token{
-		Type: t,
+		Type:  t,
 		Value: l.input[l.start:l.pos],
 		Position: Position{
-			Line:   l.line,
-			Column: l.start - l.lineStart + 1,
+			Line:   l.startLine,
+			Column: l.startColumn,
 		},
 	}
-	l.start = l.pos
+	l.ignore()
 	return tok
 }
 
@@ -100,7 +110,7 @@ func (l *Lexer) NextToken() Token {
 		}
 
 		if unicode.IsSpace(r) {
-			l.start = l.pos
+			l.ignore()
 			continue
 		}
 
@@ -117,10 +127,6 @@ func (l *Lexer) NextToken() Token {
 			return l.lexComment()
 		case '#':
 			return l.lexPackage()
-		case '!':
-			// Might be part of pragma //! 
-			// But grammar says pragma is //!
-			// So it should start with //
 		case '+':
 			fallthrough
 		case '$':
@@ -178,7 +184,6 @@ func (l *Lexer) lexString() Token {
 }
 
 func (l *Lexer) lexNumber() Token {
-	// Simple number lexing, could be improved for hex, binary, float
 	for {
 		r := l.next()
 		if unicode.IsDigit(r) || r == '.' || r == 'x' || r == 'b' || r == 'e' || r == '-' {
@@ -192,7 +197,6 @@ func (l *Lexer) lexNumber() Token {
 func (l *Lexer) lexComment() Token {
 	r := l.next()
 	if r == '/' {
-		// It's a comment, docstring or pragma
 		r = l.next()
 		if r == '#' {
 			return l.lexUntilNewline(TokenDocstring)
@@ -209,15 +213,21 @@ func (l *Lexer) lexComment() Token {
 func (l *Lexer) lexUntilNewline(t TokenType) Token {
 	for {
 		r := l.next()
-		if r == '\n' || r == -1 {
+		if r == '\n' {
+			l.backup()
+			tok := l.emit(t)
+			l.next() // consume \n
+			l.ignore()
+			return tok
+		}
+		if r == -1 {
 			return l.emit(t)
 		}
 	}
 }
 
 func (l *Lexer) lexPackage() Token {
-	// #package
-	l.start = l.pos - 1 // Include '#'
+	// We are at '#', l.start is just before it
 	for {
 		r := l.next()
 		if unicode.IsLetter(r) {

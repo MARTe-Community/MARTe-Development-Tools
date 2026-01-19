@@ -12,6 +12,8 @@ type Position struct {
 type Configuration struct {
 	Definitions []Definition
 	Package     *Package
+	Comments    []Comment
+	Pragmas     []Pragma
 }
 
 type Definition interface {
@@ -39,6 +41,7 @@ func (o *ObjectNode) isDefinition() {}
 
 type Subnode struct {
 	Position    Position
+	EndPosition Position
 	Definitions []Definition
 }
 
@@ -50,6 +53,7 @@ type Value interface {
 type StringValue struct {
 	Position Position
 	Value    string
+	Quoted   bool
 }
 
 func (v *StringValue) Pos() Position { return v.Position }
@@ -90,8 +94,9 @@ func (v *ReferenceValue) Pos() Position { return v.Position }
 func (v *ReferenceValue) isValue()      {}
 
 type ArrayValue struct {
-	Position Position
-	Elements []Value
+	Position    Position
+	EndPosition Position
+	Elements    []Value
 }
 
 func (v *ArrayValue) Pos() Position { return v.Position }
