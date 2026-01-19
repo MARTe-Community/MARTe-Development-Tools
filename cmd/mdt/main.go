@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 
 	"github.com/marte-dev/marte-dev-tools/internal/builder"
@@ -46,17 +45,20 @@ func runBuild(args []string) {
 		fmt.Println("Usage: mdt build <input_files...>")
 		os.Exit(1)
 	}
-	
-	outputDir := "build"
-	os.MkdirAll(outputDir, 0755)
 
-	b := builder.NewBuilder(args)
-	err := b.Build(outputDir)
-	if err != nil {
+	outputDir := "build"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		fmt.Printf("Build failed: %v\n", err)
 		os.Exit(1)
+	} else {
+		b := builder.NewBuilder(args)
+		err = b.Build(outputDir)
+		if err != nil {
+			fmt.Printf("Build failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Build successful. Output in", outputDir)
 	}
-	fmt.Println("Build successful. Output in", outputDir)
 }
 
 func runCheck(args []string) {
@@ -69,7 +71,7 @@ func runCheck(args []string) {
 	// configs := make(map[string]*parser.Configuration) // We don't strictly need this map if we just build the tree
 
 	for _, file := range args {
-		content, err := ioutil.ReadFile(file)
+		content, err := os.ReadFile(file)
 		if err != nil {
 			fmt.Printf("Error reading %s: %v\n", file, err)
 			continue
@@ -90,7 +92,7 @@ func runCheck(args []string) {
 	v.ValidateProject()
 
 	// Legacy loop removed as ValidateProject covers it via recursion
-	
+
 	v.CheckUnused()
 
 	for _, diag := range v.Diagnostics {
@@ -115,7 +117,7 @@ func runFmt(args []string) {
 	}
 
 	for _, file := range args {
-		content, err := ioutil.ReadFile(file)
+		content, err := os.ReadFile(file)
 		if err != nil {
 			fmt.Printf("Error reading %s: %v\n", file, err)
 			continue
@@ -131,7 +133,7 @@ func runFmt(args []string) {
 		var buf bytes.Buffer
 		formatter.Format(config, &buf)
 
-		err = ioutil.WriteFile(file, buf.Bytes(), 0644)
+		err = os.WriteFile(file, buf.Bytes(), 0644)
 		if err != nil {
 			fmt.Printf("Error writing %s: %v\n", file, err)
 			continue
