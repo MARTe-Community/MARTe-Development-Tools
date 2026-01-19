@@ -74,6 +74,7 @@ The LSP server should provide the following capabilities:
 
 - **Nodes (`+` / `$`)**: The prefixes `+` and `$` indicate that the node represents an object.
     - **Constraint**: These nodes *must* contain a field named `Class` within their subnode definition.
+- **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored.
 - **Structure**: A configuration is composed by one or more definitions.
 

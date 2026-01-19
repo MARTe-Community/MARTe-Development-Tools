@@ -79,6 +79,30 @@ func TestCheckDuplicate(t *testing.T) {
 	}
 }
 
+func TestSignalNoClassValidation(t *testing.T) {
+	inputFile := "integration/signal_no_class.marte"
+	content, err := ioutil.ReadFile(inputFile)
+	if err != nil {
+		t.Fatalf("Failed to read %s: %v", inputFile, err)
+	}
+
+	p := parser.NewParser(string(content))
+	config, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	idx := index.NewProjectTree()
+	idx.AddFile(inputFile, config)
+
+	v := validator.NewValidator(idx)
+	v.ValidateProject()
+
+	if len(v.Diagnostics) > 0 {
+		t.Errorf("Expected no errors for signal without Class, but got: %v", v.Diagnostics)
+	}
+}
+
 func TestFmtCommand(t *testing.T) {
 	inputFile := "integration/fmt.marte"
 	content, err := ioutil.ReadFile(inputFile)

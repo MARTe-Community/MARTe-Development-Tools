@@ -62,11 +62,16 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	// Root node usually doesn't have a name or is implicit
 	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
 		hasClass := false
+		hasType := false
 		for _, frag := range node.Fragments {
 			for _, def := range frag.Definitions {
-				if f, ok := def.(*parser.Field); ok && f.Name == "Class" {
-					hasClass = true
-					break
+				if f, ok := def.(*parser.Field); ok {
+					if f.Name == "Class" {
+						hasClass = true
+					}
+					if f.Name == "Type" {
+						hasType = true
+					}
 				}
 			}
 			if hasClass {
@@ -74,7 +79,7 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 			}
 		}
 		
-		if !hasClass {
+		if !hasClass && !hasType {
 			// Report error on the first fragment's position
 			pos := parser.Position{Line: 1, Column: 1}
 			file := ""
@@ -84,7 +89,7 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 			}
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
-				Message:  fmt.Sprintf("Node %s is an object and must contain a 'Class' field", node.RealName),
+				Message:  fmt.Sprintf("Node %s is an object and must contain a 'Class' field (or be a Signal with 'Type')", node.RealName),
 				Position: pos,
 				File:     file,
 			})

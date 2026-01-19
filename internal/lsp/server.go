@@ -174,7 +174,6 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 	if len(params.ContentChanges) == 0 {
 		return
 	}
-	// Full sync: text is in ContentChanges[0].Text
 	text := params.ContentChanges[0].Text
 	path := uriToPath(params.TextDocument.URI)
 	p := parser.NewParser(text)
@@ -187,7 +186,6 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 
 func handleHover(params HoverParams) *Hover {
 	path := uriToPath(params.TextDocument.URI)
-	// LSP 0-based to Parser 1-based
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 	
@@ -199,28 +197,26 @@ func handleHover(params HoverParams) *Hover {
 	var content string
 	
 	if res.Node != nil {
-		// Try to find Class field
-		class := "Unknown"
-		for _, frag := range res.Node.Fragments {
-			for _, def := range frag.Definitions {
-				if f, ok := def.(*parser.Field); ok && f.Name == "Class" {
-					if s, ok := f.Value.(*parser.StringValue); ok {
-						class = s.Value
-					} else if r, ok := f.Value.(*parser.ReferenceValue); ok {
-						class = r.Value
-					}
-				}
-			}
-		}
-		content = fmt.Sprintf("**Object**: `%s`\n\n**Class**: `%s`", res.Node.RealName, class)
+		content = formatNodeInfo(res.Node)
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
 	} else if res.Reference != nil {
 		targetName := "Unresolved"
+		fullInfo := ""
+		targetDoc := ""
+		
 		if res.Reference.Target != nil {
 			targetName = res.Reference.Target.RealName
+			targetDoc = res.Reference.Target.Doc
+			fullInfo = formatNodeInfo(res.Reference.Target)
 		}
+		
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
+		if fullInfo != "" {
+			content += fmt.Sprintf("\n\n---\n%s", fullInfo)
+		} else if targetDoc != "" { // Fallback if formatNodeInfo returned empty (unlikely)
+			content += fmt.Sprintf("\n\n%s", targetDoc)
+		}
 	}
 	
 	if content == "" {
@@ -233,6 +229,42 @@ func handleHover(params HoverParams) *Hover {
 			Value: content,
 		},
 	}
+}
+
+func formatNodeInfo(node *index.ProjectNode) string {
+	class := node.Metadata["Class"]
+	if class == "" {
+		class = "Unknown"
+	}
+	
+	info := fmt.Sprintf("**Object**: `%s`\n\n**Class**: `%s`", node.RealName, class)
+	
+	// Check if it's a Signal (has Type or DataSource)
+	typ := node.Metadata["Type"]
+	ds := node.Metadata["DataSource"]
+	
+	if typ != "" || ds != "" {
+		sigInfo := "\n"
+		if typ != "" {
+			sigInfo += fmt.Sprintf("**Type**: `%s` ", typ)
+		}
+		if ds != "" {
+			sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
+		}
+		
+		// Size
+	dims := node.Metadata["NumberOfDimensions"]
+elems := node.Metadata["NumberOfElements"]
+	if dims != "" || elems != "" {
+		sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
+	}
+		info += sigInfo
+	}
+	
+	if node.Doc != "" {
+		info += fmt.Sprintf("\n\n%s", node.Doc)
+	}
+	return info
 }
 
 func respond(id interface{}, result interface{}) {
