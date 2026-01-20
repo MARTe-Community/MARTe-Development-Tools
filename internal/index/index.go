@@ -1,6 +1,8 @@
 package index
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -31,8 +33,8 @@ type ProjectNode struct {
 type Fragment struct {
 	File        string
 	Definitions []parser.Definition
-	IsObject    bool            
-	ObjectPos   parser.Position 
+	IsObject    bool
+	ObjectPos   parser.Position
 	Doc         string // Documentation for this fragment (if object)
 }
 
@@ -83,7 +85,7 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 			node.Doc += frag.Doc
 		}
 	}
-	
+
 	// Re-aggregate metadata
 	node.Metadata = make(map[string]string)
 	pt.rebuildMetadata(node)
@@ -114,7 +116,7 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 	case *parser.IntValue:
 		val = v.Raw
 	}
-	
+
 	if val == "" {
 		return
 	}
@@ -126,7 +128,7 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 }
 
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
-	pt.RemoveFile(file) 
+	pt.RemoveFile(file)
 
 	node := pt.Root
 	if config.Package != nil {
@@ -139,7 +141,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 			if _, ok := node.Children[part]; !ok {
 				node.Children[part] = &ProjectNode{
 					Name:     part,
-					RealName: part, 
+					RealName: part,
 					Children: make(map[string]*ProjectNode),
 					Parent:   node,
 					Metadata: make(map[string]string),
@@ -153,10 +155,10 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		File:     file,
 		IsObject: false,
 	}
-	
+
 	for _, def := range config.Definitions {
 		doc := pt.findDoc(config.Comments, def.Pos())
-		
+
 		switch d := def.(type) {
 		case *parser.Field:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
@@ -177,18 +179,18 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 			if child.RealName == norm && d.Name != norm {
 				child.RealName = d.Name
 			}
-			
+
 			if doc != "" {
 				if child.Doc != "" {
 					child.Doc += "\n\n"
 				}
 				child.Doc += doc
 			}
-			
+
 			pt.addObjectFragment(child, file, d, doc, config.Comments)
 		}
 	}
-	
+
 	if len(fileFragment.Definitions) > 0 {
 		node.Fragments = append(node.Fragments, fileFragment)
 	}
@@ -196,15 +198,15 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 
 func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment) {
 	frag := &Fragment{
-		File:        file,
-		IsObject:    true,
-		ObjectPos:   obj.Position,
-		Doc:         doc,
+		File:      file,
+		IsObject:  true,
+		ObjectPos: obj.Position,
+		Doc:       doc,
 	}
-	
+
 	for _, def := range obj.Subnode.Definitions {
 		subDoc := pt.findDoc(comments, def.Pos())
-		
+
 		switch d := def.(type) {
 		case *parser.Field:
 			frag.Definitions = append(frag.Definitions, d)
@@ -225,18 +227,18 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			if child.RealName == norm && d.Name != norm {
 				child.RealName = d.Name
 			}
-			
+
 			if subDoc != "" {
 				if child.Doc != "" {
 					child.Doc += "\n\n"
 				}
 				child.Doc += subDoc
 			}
-			
+
 			pt.addObjectFragment(child, file, d, subDoc, comments)
 		}
 	}
-	
+
 	node.Fragments = append(node.Fragments, frag)
 }
 
@@ -244,7 +246,7 @@ func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) s
 	var docBuilder strings.Builder
 	targetLine := pos.Line - 1
 	var docIndices []int
-	
+
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
 		if c.Position.Line > pos.Line {
@@ -253,7 +255,7 @@ func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) s
 		if c.Position.Line == pos.Line {
 			continue
 		}
-		
+
 		if c.Position.Line == targetLine {
 			if c.Doc {
 				docIndices = append(docIndices, i)
@@ -265,7 +267,7 @@ func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) s
 			break
 		}
 	}
-	
+
 	for i := len(docIndices) - 1; i >= 0; i-- {
 		txt := strings.TrimPrefix(comments[docIndices[i]].Text, "//#")
 		txt = strings.TrimSpace(txt)
@@ -274,7 +276,7 @@ func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) s
 		}
 		docBuilder.WriteString(txt)
 	}
-	
+
 	return docBuilder.String()
 }
 
@@ -319,7 +321,9 @@ type QueryResult struct {
 }
 
 func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
+	fmt.Fprintf(os.Stderr, "File: %s:%d:%d\n", file, line, col)
 	for i := range pt.References {
+		fmt.Fprintf(os.Stderr, "%s\n", pt.Root.Name)
 		ref := &pt.References[i]
 		if ref.File == file {
 			if line == ref.Position.Line && col >= ref.Position.Column && col < ref.Position.Column+len(ref.Name) {
@@ -339,7 +343,7 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 					return &QueryResult{Node: node}
 				}
 			}
-			
+
 			for _, def := range frag.Definitions {
 				if f, ok := def.(*parser.Field); ok {
 					if line == f.Position.Line && col >= f.Position.Column && col < f.Position.Column+len(f.Name) {
@@ -349,7 +353,7 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 			}
 		}
 	}
-	
+
 	for _, child := range node.Children {
 		if res := pt.queryNode(child, file, line, col); res != nil {
 			return res

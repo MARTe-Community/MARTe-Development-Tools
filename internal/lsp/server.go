@@ -148,9 +148,16 @@ func handleMessage(msg *JsonRpcMessage) {
 	case "textDocument/hover":
 		var params HoverParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			fmt.Fprintf(os.Stderr, "Hover: %s:%d\n", params.TextDocument.URI, params.Position.Line)
 			res := handleHover(params)
+			if res != nil {
+				fmt.Fprintf(os.Stderr, "Res: %v\n", res.Contents)
+			} else {
+				fmt.Fprint(os.Stderr, "Res: NIL\n")
+			}
 			respond(msg.ID, res)
 		} else {
+			fmt.Fprint(os.Stderr, "not recovered hover parameters\n")
 			respond(msg.ID, nil)
 		}
 	}
@@ -191,6 +198,7 @@ func handleHover(params HoverParams) *Hover {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
+		fmt.Fprint(os.Stderr, "No object/node/reference found\n")
 		return nil
 	}
 
