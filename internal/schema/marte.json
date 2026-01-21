@@ -1,0 +1,156 @@
+{
+  "classes": {
+    "RealTimeApplication": {
+      "fields": [
+        {"name": "Functions", "type": "node", "mandatory": true},
+        {"name": "Data", "type": "node", "mandatory": true},
+        {"name": "States", "type": "node", "mandatory": true}
+      ]
+    },
+    "StateMachine": {
+      "fields": [
+        {"name": "States", "type": "node", "mandatory": true}
+      ]
+    },
+    "GAMScheduler": {
+      "fields": [
+        {"name": "TimingDataSource", "type": "reference", "mandatory": true}
+      ]
+    },
+    "TimingDataSource": {
+      "fields": []
+    },
+    "IOGAM": {
+      "fields": [
+        {"name": "InputSignals", "type": "node", "mandatory": false},
+        {"name": "OutputSignals", "type": "node", "mandatory": false}
+      ]
+    },
+    "ReferenceContainer": {
+      "fields": []
+    },
+    "ConstantGAM": {
+      "fields": []
+    },
+    "PIDGAM": {
+      "fields": [
+        {"name": "Kp", "type": "float", "mandatory": true},
+        {"name": "Ki", "type": "float", "mandatory": true},
+        {"name": "Kd", "type": "float", "mandatory": true}
+      ]
+    },
+    "FileDataSource": {
+      "fields": [
+        {"name": "Filename", "type": "string", "mandatory": true},
+        {"name": "Format", "type": "string", "mandatory": false}
+      ]
+    },
+    "LoggerDataSource": {
+      "fields": []
+    },
+    "DANStream": {
+      "fields": [
+        {"name": "Timeout", "type": "int", "mandatory": false}
+      ]
+    },
+    "EPICSCAInput": {
+      "fields": []
+    },
+    "EPICSCAOutput": {
+      "fields": []
+    },
+    "EPICSPVAInput": {
+      "fields": []
+    },
+    "EPICSPVAOutput": {
+      "fields": []
+    },
+    "SDNSubscriber": {
+      "fields": [
+        {"name": "Address", "type": "string", "mandatory": true},
+        {"name": "Port", "type": "int", "mandatory": true},
+        {"name": "Interface", "type": "string", "mandatory": false}
+      ]
+    },
+    "SDNPublisher": {
+      "fields": [
+        {"name": "Address", "type": "string", "mandatory": true},
+        {"name": "Port", "type": "int", "mandatory": true},
+        {"name": "Interface", "type": "string", "mandatory": false}
+      ]
+    },
+    "UDPReceiver": {
+      "fields": [
+        {"name": "Port", "type": "int", "mandatory": true},
+        {"name": "Address", "type": "string", "mandatory": false}
+      ]
+    },
+    "UDPSender": {
+      "fields": [
+        {"name": "Destination", "type": "string", "mandatory": true}
+      ]
+    },
+    "FileReader": {
+      "fields": [
+        {"name": "Filename", "type": "string", "mandatory": true},
+        {"name": "Format", "type": "string", "mandatory": false},
+        {"name": "Interpolate", "type": "string", "mandatory": false}
+      ]
+    },
+    "FileWriter": {
+      "fields": [
+        {"name": "Filename", "type": "string", "mandatory": true},
+        {"name": "Format", "type": "string", "mandatory": false},
+        {"name": "StoreOnTrigger", "type": "int", "mandatory": false}
+      ]
+    },
+    "OrderedClass": {
+      "ordered": true,
+      "fields": [
+        {"name": "First", "type": "int", "mandatory": true},
+        {"name": "Second", "type": "string", "mandatory": true}
+      ]
+    },
+    "BaseLib2GAM": { "fields": [] },
+    "ConversionGAM": { "fields": [] },
+    "DoubleHandshakeGAM": { "fields": [] },
+    "FilterGAM": { "fields": [] },
+    "HistogramGAM": { "fields": [] },
+    "Interleaved2FlatGAM": { "fields": [] },
+    "FlattenedStructIOGAM": { "fields": [] },
+    "MathExpressionGAM": { "fields": [] },
+    "MessageGAM": { "fields": [] },
+    "MuxGAM": { "fields": [] },
+    "SimulinkWrapperGAM": { "fields": [] },
+    "SSMGAM": { "fields": [] },
+    "StatisticsGAM": { "fields": [] },
+    "TimeCorrectionGAM": { "fields": [] },
+    "TriggeredIOGAM": { "fields": [] },
+    "WaveformGAM": { "fields": [] },
+    "DAN": { "fields": [] },
+    "LinuxTimer": { "fields": [] },
+    "LinkDataSource": { "fields": [] },
+    "MDSReader": { "fields": [] },
+    "MDSWriter": { "fields": [] },
+    "NI1588TimeStamp": { "fields": [] },
+    "NI6259ADC": { "fields": [] },
+    "NI6259DAC": { "fields": [] },
+    "NI6259DIO": { "fields": [] },
+    "NI6368ADC": { "fields": [] },
+    "NI6368DAC": { "fields": [] },
+    "NI6368DIO": { "fields": [] },
+    "NI9157CircularFifoReader": { "fields": [] },
+    "NI9157MxiDataSource": { "fields": [] },
+    "OPCUADSInput": { "fields": [] },
+    "OPCUADSOutput": { "fields": [] },
+    "RealTimeThreadAsyncBridge": { "fields": [] },
+    "RealTimeThreadSynchronisation": { "fields": [] },
+    "UARTDataSource": { "fields": [] },
+    "BaseLib2Wrapper": { "fields": [] },
+    "EPICSCAClient": { "fields": [] },
+    "EPICSPVA": { "fields": [] },
+    "MemoryGate": { "fields": [] },
+    "OPCUA": { "fields": [] },
+    "SysLogger": { "fields": [] }
+  }
+}

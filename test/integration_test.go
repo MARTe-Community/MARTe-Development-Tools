@@ -169,7 +169,14 @@ func TestBuildCommand(t *testing.T) {
 	// Test Merge
 	files := []string{"integration/build_merge_1.marte", "integration/build_merge_2.marte"}
 	b := builder.NewBuilder(files)
-	err := b.Build("build_test")
+	
+	outputFile, err := os.Create("build_test/TEST.marte")
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outputFile.Close()
+
+	err = b.Build(outputFile)
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
@@ -189,12 +196,19 @@ func TestBuildCommand(t *testing.T) {
 	// Test Order (Class First)
 	filesOrder := []string{"integration/build_order_1.marte", "integration/build_order_2.marte"}
 	bOrder := builder.NewBuilder(filesOrder)
-	err = bOrder.Build("build_test")
+	
+	outputFileOrder, err := os.Create("build_test/ORDER.marte")
+	if err != nil {
+		t.Fatalf("Failed to create output file: %v", err)
+	}
+	defer outputFileOrder.Close()
+
+	err = bOrder.Build(outputFileOrder)
 	if err != nil {
 		t.Fatalf("Build order test failed: %v", err)
 	}
 	
-	contentOrder, _ := ioutil.ReadFile("build_test/TEST.marte")
+	contentOrder, _ := ioutil.ReadFile("build_test/ORDER.marte")
 	outputOrder := string(contentOrder)
 	
 	// Check for Class before Field

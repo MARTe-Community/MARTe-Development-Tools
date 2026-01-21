@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -29,8 +28,8 @@ FieldA = 10
 Class = "MyClass"
 FieldB = 20
 `
-	ioutil.WriteFile("build_multi_test/f1.marte", []byte(f1Content), 0644)
-	ioutil.WriteFile("build_multi_test/f2.marte", []byte(f2Content), 0644)
+	os.WriteFile("build_multi_test/f1.marte", []byte(f1Content), 0644)
+	os.WriteFile("build_multi_test/f2.marte", []byte(f2Content), 0644)
 	
 	// Execute Build
 	b := builder.NewBuilder([]string{"build_multi_test/f1.marte", "build_multi_test/f2.marte"})
@@ -55,7 +54,7 @@ FieldB = 20
 		t.Fatalf("Expected output file not found")
 	}
 	
-	content, err := ioutil.ReadFile(outputFile)
+	content, err := os.ReadFile(outputFile)
 	if err != nil {
 		t.Fatalf("Failed to read output: %v", err)
 	}
