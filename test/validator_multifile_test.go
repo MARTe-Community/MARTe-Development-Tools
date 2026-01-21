@@ -37,7 +37,7 @@ func TestMultiFileNodeValidation(t *testing.T) {
     // However, the spec says "The build tool, validator, and LSP must merge these definitions".
     // Let's assume the Validator or Index does the merging logic.
 	
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	// +MyNode is split. 
@@ -57,7 +57,7 @@ func TestMultiFileDuplicateField(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/multifile_dup_1.marte")
 	parseAndAddToIndex(t, idx, "integration/multifile_dup_2.marte")
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	foundError := false
@@ -81,7 +81,7 @@ func TestMultiFileReference(t *testing.T) {
 	idx.ResolveReferences()
     
     // Check if the reference in +SourceNode to TargetNode is resolved.
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
     
     if len(v.Diagnostics) > 0 {
@@ -94,7 +94,7 @@ func TestHierarchicalPackageMerge(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/hierarchical_pkg_1.marte")
 	parseAndAddToIndex(t, idx, "integration/hierarchical_pkg_2.marte")
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	// +MyObj should have Class (from file 1) and FieldX (from file 2).
@@ -135,7 +135,7 @@ func TestHierarchicalDuplicate(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/hierarchical_dup_1.marte")
 	parseAndAddToIndex(t, idx, "integration/hierarchical_dup_2.marte")
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	foundError := false

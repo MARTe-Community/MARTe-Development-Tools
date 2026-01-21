@@ -137,6 +137,7 @@ type TextEdit struct {
 
 var tree = index.NewProjectTree()
 var documents = make(map[string]string)
+var projectRoot string
 
 func RunServer() {
 	reader := bufio.NewReader(os.Stdin)
@@ -193,6 +194,7 @@ func handleMessage(msg *JsonRpcMessage) {
 			}
 			
 			if root != "" {
+				projectRoot = root
 				logger.Printf("Scanning workspace: %s\n", root)
 				tree.ScanDirectory(root)
 				tree.ResolveReferences()
@@ -323,7 +325,7 @@ func handleFormatting(params DocumentFormattingParams) []TextEdit {
 }
 
 func runValidation(uri string) {
-	v := validator.NewValidator(tree)
+	v := validator.NewValidator(tree, projectRoot)
 	v.ValidateProject()
 	v.CheckUnused()
 

@@ -9,13 +9,19 @@ import (
 	"github.com/marte-dev/marte-dev-tools/internal/validator"
 )
 
-func TestSDNSubscriberValidation(t *testing.T) {
-	// SDNSubscriber requires Address and Port
+func TestMDSWriterValidation(t *testing.T) {
+	// MDSWriter requires TreeName, NumberOfBuffers, etc.
 	content := `
-+MySDN = {
-    Class = SDNSubscriber
-    Address = "239.0.0.1"
-    // Missing Port
++MyMDSWriter = {
+    Class = MDSWriter
+    NumberOfBuffers = 10
+    CPUMask = 1
+    StackSize = 1000000
+    // Missing TreeName
+    StoreOnTrigger = 0
+    EventName = "Update"
+    TimeRefresh = 1.0
+    +Signals = {}
 }
 `
 	p := parser.NewParser(content)
@@ -25,30 +31,30 @@ func TestSDNSubscriberValidation(t *testing.T) {
 	}
 
 	idx := index.NewProjectTree()
-	idx.AddFile("sdn.marte", config)
+	idx.AddFile("mdswriter.marte", config)
 
 	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Port'") {
+		if strings.Contains(d.Message, "Missing mandatory field 'TreeName'") {
 			found = true
 			break
 		}
 	}
 
 	if !found {
-		t.Error("Expected error for missing 'Port' in SDNSubscriber")
+		t.Error("Expected error for missing 'TreeName' in MDSWriter")
 	}
 }
 
-func TestFileWriterValidation(t *testing.T) {
-	// FileWriter requires Filename
+func TestMathExpressionGAMValidation(t *testing.T) {
+	// MathExpressionGAM requires Expression
 	content := `
-+MyWriter = {
-    Class = FileWriter
-    // Missing Filename
++MyMath = {
+    Class = MathExpressionGAM
+    // Missing Expression
 }
 `
 	p := parser.NewParser(content)
@@ -58,20 +64,20 @@ func TestFileWriterValidation(t *testing.T) {
 	}
 
 	idx := index.NewProjectTree()
-	idx.AddFile("writer.marte", config)
+	idx.AddFile("math.marte", config)
 
 	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Filename'") {
+		if strings.Contains(d.Message, "Missing mandatory field 'Expression'") {
 			found = true
 			break
 		}
 	}
 
 	if !found {
-		t.Error("Expected error for missing 'Filename' in FileWriter")
+		t.Error("Expected error for missing 'Expression' in MathExpressionGAM")
 	}
 }

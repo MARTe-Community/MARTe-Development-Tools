@@ -114,11 +114,32 @@
     "BaseLib2GAM": { "fields": [] },
     "ConversionGAM": { "fields": [] },
     "DoubleHandshakeGAM": { "fields": [] },
-    "FilterGAM": { "fields": [] },
-    "HistogramGAM": { "fields": [] },
+    "FilterGAM": { 
+      "fields": [
+        {"name": "Num", "type": "array", "mandatory": true},
+        {"name": "Den", "type": "array", "mandatory": true},
+        {"name": "ResetInEachState", "type": "any", "mandatory": false},
+        {"name": "InputSignals", "type": "node", "mandatory": false},
+        {"name": "OutputSignals", "type": "node", "mandatory": false}
+      ] 
+    },
+    "HistogramGAM": { 
+      "fields": [
+        {"name": "BeginCycleNumber", "type": "int", "mandatory": false},
+        {"name": "StateChangeResetName", "type": "string", "mandatory": false},
+        {"name": "InputSignals", "type": "node", "mandatory": false},
+        {"name": "OutputSignals", "type": "node", "mandatory": false}
+      ]
+    },
     "Interleaved2FlatGAM": { "fields": [] },
     "FlattenedStructIOGAM": { "fields": [] },
-    "MathExpressionGAM": { "fields": [] },
+    "MathExpressionGAM": { 
+      "fields": [
+        {"name": "Expression", "type": "string", "mandatory": true},
+        {"name": "InputSignals", "type": "node", "mandatory": false},
+        {"name": "OutputSignals", "type": "node", "mandatory": false}
+      ]
+    },
     "MessageGAM": { "fields": [] },
     "MuxGAM": { "fields": [] },
     "SimulinkWrapperGAM": { "fields": [] },
@@ -128,10 +149,42 @@
     "TriggeredIOGAM": { "fields": [] },
     "WaveformGAM": { "fields": [] },
     "DAN": { "fields": [] },
-    "LinuxTimer": { "fields": [] },
+    "LinuxTimer": { 
+      "fields": [
+        {"name": "ExecutionMode", "type": "string", "mandatory": false},
+        {"name": "SleepNature", "type": "string", "mandatory": false},
+        {"name": "SleepPercentage", "type": "any", "mandatory": false},
+        {"name": "Phase", "type": "int", "mandatory": false},
+        {"name": "CPUMask", "type": "int", "mandatory": false},
+        {"name": "TimeProvider", "type": "node", "mandatory": false},
+        {"name": "Signals", "type": "node", "mandatory": true}
+      ] 
+    },
     "LinkDataSource": { "fields": [] },
-    "MDSReader": { "fields": [] },
-    "MDSWriter": { "fields": [] },
+    "MDSReader": { 
+      "fields": [
+        {"name": "TreeName", "type": "string", "mandatory": true},
+        {"name": "ShotNumber", "type": "int", "mandatory": true},
+        {"name": "Frequency", "type": "float", "mandatory": true},
+        {"name": "Signals", "type": "node", "mandatory": true}
+      ]
+    },
+    "MDSWriter": { 
+      "fields": [
+        {"name": "NumberOfBuffers", "type": "int", "mandatory": true},
+        {"name": "CPUMask", "type": "int", "mandatory": true},
+        {"name": "StackSize", "type": "int", "mandatory": true},
+        {"name": "TreeName", "type": "string", "mandatory": true},
+        {"name": "PulseNumber", "type": "int", "mandatory": false},
+        {"name": "StoreOnTrigger", "type": "int", "mandatory": true},
+        {"name": "EventName", "type": "string", "mandatory": true},
+        {"name": "TimeRefresh", "type": "float", "mandatory": true},
+        {"name": "NumberOfPreTriggers", "type": "int", "mandatory": false},
+        {"name": "NumberOfPostTriggers", "type": "int", "mandatory": false},
+        {"name": "Signals", "type": "node", "mandatory": true},
+        {"name": "Messages", "type": "node", "mandatory": false}
+      ]
+    },
     "NI1588TimeStamp": { "fields": [] },
     "NI6259ADC": { "fields": [] },
     "NI6259DAC": { "fields": [] },

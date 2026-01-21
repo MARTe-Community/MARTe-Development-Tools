@@ -31,7 +31,7 @@ func TestLSPDiagnostics(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile(inputFile, config)
 	
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 	
 	// Check for expected diagnostics

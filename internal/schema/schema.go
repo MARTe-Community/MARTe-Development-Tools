@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 //go:embed marte.json
@@ -45,11 +46,89 @@ func LoadSchema(path string) (*Schema, error) {
 	return &s, nil
 }
 
-// DefaultSchema returns a built-in schema with core MARTe classes
+// DefaultSchema returns the built-in embedded schema
 func DefaultSchema() *Schema {
 	var s Schema
 	if err := json.Unmarshal(defaultSchemaJSON, &s); err != nil {
 		panic(fmt.Sprintf("failed to parse default embedded schema: %v", err))
 	}
+	if s.Classes == nil {
+		s.Classes = make(map[string]ClassDefinition)
+	}
 	return &s
+}
+
+// Merge adds rules from 'other' to 's'.
+// Rules for the same class are merged (new fields added, existing fields updated).
+func (s *Schema) Merge(other *Schema) {
+	if other == nil {
+		return
+	}
+	for className, classDef := range other.Classes {
+		if existingClass, ok := s.Classes[className]; ok {
+			// Merge fields
+			fieldMap := make(map[string]FieldDefinition)
+			for _, f := range classDef.Fields {
+				fieldMap[f.Name] = f
+			}
+
+			var mergedFields []FieldDefinition
+			seen := make(map[string]bool)
+
+			// Keep existing fields, update if present in other
+			for _, f := range existingClass.Fields {
+				if newF, ok := fieldMap[f.Name]; ok {
+					mergedFields = append(mergedFields, newF)
+				} else {
+					mergedFields = append(mergedFields, f)
+				}
+				seen[f.Name] = true
+			}
+
+			// Append new fields
+			for _, f := range classDef.Fields {
+				if !seen[f.Name] {
+					mergedFields = append(mergedFields, f)
+				}
+			}
+
+			existingClass.Fields = mergedFields
+			if classDef.Ordered {
+				existingClass.Ordered = true
+			}
+			s.Classes[className] = existingClass
+		} else {
+			s.Classes[className] = classDef
+		}
+	}
+}
+
+func LoadFullSchema(projectRoot string) *Schema {
+	s := DefaultSchema()
+
+	// 1. System Paths
+	sysPaths := []string{
+		"/usr/share/mdt/marte_schema.json",
+	}
+	
+	home, err := os.UserHomeDir()
+	if err == nil {
+		sysPaths = append(sysPaths, filepath.Join(home, ".local/share/mdt/marte_schema.json"))
+	}
+
+	for _, path := range sysPaths {
+		if sysSchema, err := LoadSchema(path); err == nil {
+			s.Merge(sysSchema)
+		}
+	}
+
+	// 2. Project Path
+	if projectRoot != "" {
+		projectSchemaPath := filepath.Join(projectRoot, ".marte_schema.json")
+		if projSchema, err := LoadSchema(projectSchemaPath); err == nil {
+			s.Merge(projSchema)
+		}
+	}
+
+	return s
 }

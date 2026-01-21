@@ -27,10 +27,10 @@ type Validator struct {
 	Schema      *schema.Schema
 }
 
-func NewValidator(tree *index.ProjectTree) *Validator {
+func NewValidator(tree *index.ProjectTree, projectRoot string) *Validator {
 	return &Validator{
 		Tree:   tree,
-		Schema: schema.DefaultSchema(),
+		Schema: schema.LoadFullSchema(projectRoot),
 	}
 }
 

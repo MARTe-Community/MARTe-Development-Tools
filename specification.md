@@ -153,6 +153,12 @@ The tool must build an index of the configuration to support LSP features and va
   - **Schema Definition**:
     - Class validation rules must be defined in a separate schema file.
     - **Project-Specific Classes**: Developers can define their own project-specific classes and corresponding validation rules, expanding the validation capabilities for their specific needs.
+  - **Schema Loading**:
+    - **Default Schema**: The tool should look for a default schema file `marte_schema.json` in standard system locations:
+      - `/usr/share/mdt/marte_schema.json`
+      - `$HOME/.local/share/mdt/marte_schema.json`
+    - **Project Schema**: If a file named `.marte_schema.json` exists in the project root, it must be loaded.
+    - **Merging**: The final schema is a merge of the built-in schema, the system default schema (if found), and the project-specific schema. Rules in later sources (Project > System > Built-in) append to or override earlier ones.
 - **Duplicate Fields**:
   - **Constraint**: A field must not be defined more than once within the same object/node scope, even if those definitions are spread across different files.
   - **Multi-File Consideration**: Validation must account for nodes being defined across multiple files (merged) when checking for duplicates.

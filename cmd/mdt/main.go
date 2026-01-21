@@ -81,7 +81,7 @@ func runCheck(args []string) {
 	}
 
 	// idx.ResolveReferences() // Not implemented in new tree yet, but Validator uses Tree directly
-	v := validator.NewValidator(tree)
+	v := validator.NewValidator(tree, ".")
 	v.ValidateProject()
 
 	// Legacy loop removed as ValidateProject covers it via recursion

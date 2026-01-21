@@ -30,7 +30,7 @@ func TestCheckCommand(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile(inputFile, config)
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 	v.CheckUnused()
 
@@ -63,7 +63,7 @@ func TestCheckDuplicate(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile(inputFile, config)
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	foundError := false
@@ -95,7 +95,7 @@ func TestSignalNoClassValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile(inputFile, config)
 
-	v := validator.NewValidator(idx)
+	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
 
 	if len(v.Diagnostics) > 0 {
