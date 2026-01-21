@@ -30,16 +30,22 @@ The LSP server should provide the following capabilities:
 - **Go to References**: Find usages of a node or field, supporting navigation across any file in the current project.
 - **Code Completion**: Autocomplete fields, values, and references.
 - **Code Snippets**: Provide snippets for common patterns.
+- **Formatting**: Format the document using the same rules and engine as the `fmt` command.
 
 ## Build System & File Structure
 
 - **File Extension**: `.marte`
 - **Project Structure**: Files can be distributed across sub-folders.
 - **Namespaces**: The `#package` macro defines the namespace for the file.
-  - **Semantic**: `#package PROJECT.NODE` implies that all definitions within the file are treated as children/fields of the node `NODE`.
+  - **Single File Context**: If no `#package` is defined in a file, the LSP, build tool, and validator must consider **only** that file (no project-wide merging or referencing).
+  - **Semantic**: `#package PROJECT_NAME.SUB_URI` implies that:
+    - `PROJECT_NAME` is a namespace identifier used to group files from the same project. It does **not** create a node in the configuration tree.
+    - `SUB_URI` defines the path of nodes where the file's definitions are placed. All definitions within the file are treated as children/fields of the node defined by `SUB_URI`.
   - **URI Symbols**: The symbols `+` and `$` used for object nodes are **not** written in the URI of the `#package` macro (e.g., use `PROJECT.NODE` even if the node is defined as `+NODE`).
 - **Build Process**:
-  - The build tool merges all files sharing the same base namespace.
+  - The build tool merges all files sharing the same base namespace into a **single output configuration**.
+  - **Namespace Consistency**: The build tool must verify that all input files belong to the same project namespace (the first segment of the `#package` URI). If multiple project namespaces are detected, the build must fail with an error.
+  - **Target**: The build output is written to a single target file (e.g., provided via CLI or API).
   - **Multi-File Definitions**: Nodes and objects can be defined across multiple files. The build tool, validator, and LSP must merge these definitions (including all fields and sub-nodes) from the entire project to create a unified view before processing or validating.
   - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project.
   - **Merging Order**: For objects defined across multiple files, the **first file** to be considered is the one containing the `Class` field definition.
@@ -183,3 +189,8 @@ The LSP and `check` command should report the following:
     - Missing mandatory fields.
     - Field type mismatches.
     - Grammar errors (e.g., missing closing brackets).
+
+## Logging
+
+- **Requirement**: All logs must be managed through a centralized logger.
+- **Output**: Logs should be written to `stderr` by default to avoid interfering with `stdout` which might be used for CLI output (e.g., build artifacts or formatted text).

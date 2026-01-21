@@ -2,13 +2,16 @@ package lsp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/marte-dev/marte-dev-tools/internal/formatter"
 	"github.com/marte-dev/marte-dev-tools/internal/index"
+	"github.com/marte-dev/marte-dev-tools/internal/logger"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
 	"github.com/marte-dev/marte-dev-tools/internal/validator"
 )
@@ -117,7 +120,23 @@ type LSPDiagnostic struct {
 	Source   string `json:"source"`
 }
 
+type DocumentFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type FormattingOptions struct {
+	TabSize      int  `json:"tabSize"`
+	InsertSpaces bool `json:"insertSpaces"`
+}
+
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
 var tree = index.NewProjectTree()
+var documents = make(map[string]string)
 
 func RunServer() {
 	reader := bufio.NewReader(os.Stdin)
@@ -127,7 +146,7 @@ func RunServer() {
 			if err == io.EOF {
 				break
 			}
-			fmt.Fprintf(os.Stderr, "Error reading message: %v\n", err)
+			logger.Printf("Error reading message: %v\n", err)
 			continue
 		}
 
@@ -174,7 +193,7 @@ func handleMessage(msg *JsonRpcMessage) {
 			}
 			
 			if root != "" {
-				fmt.Fprintf(os.Stderr, "Scanning workspace: %s\n", root)
+				logger.Printf("Scanning workspace: %s\n", root)
 				tree.ScanDirectory(root)
 				tree.ResolveReferences()
 			}
@@ -182,10 +201,11 @@ func handleMessage(msg *JsonRpcMessage) {
 
 		respond(msg.ID, map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync":   1, // Full sync
-				"hoverProvider":      true,
-				"definitionProvider": true,
-				"referencesProvider": true,
+				"textDocumentSync":           1, // Full sync
+				"hoverProvider":              true,
+				"definitionProvider":         true,
+				"referencesProvider":         true,
+				"documentFormattingProvider": true,
 			},
 		})
 	case "initialized":
@@ -207,16 +227,16 @@ func handleMessage(msg *JsonRpcMessage) {
 	case "textDocument/hover":
 		var params HoverParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			fmt.Fprintf(os.Stderr, "Hover: %s:%d\n", params.TextDocument.URI, params.Position.Line)
+			logger.Printf("Hover: %s:%d", params.TextDocument.URI, params.Position.Line)
 			res := handleHover(params)
 			if res != nil {
-				fmt.Fprintf(os.Stderr, "Res: %v\n", res.Contents)
+				logger.Printf("Res: %v", res.Contents)
 			} else {
-				fmt.Fprint(os.Stderr, "Res: NIL\n")
+				logger.Printf("Res: NIL")
 			}
 			respond(msg.ID, res)
 		} else {
-			fmt.Fprint(os.Stderr, "not recovered hover parameters\n")
+			logger.Printf("not recovered hover parameters")
 			respond(msg.ID, nil)
 		}
 	case "textDocument/definition":
@@ -229,6 +249,11 @@ func handleMessage(msg *JsonRpcMessage) {
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, handleReferences(params))
 		}
+	case "textDocument/formatting":
+		var params DocumentFormattingParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, handleFormatting(params))
+		}
 	}
 }
 
@@ -238,6 +263,7 @@ func uriToPath(uri string) string {
 
 func handleDidOpen(params DidOpenTextDocumentParams) {
 	path := uriToPath(params.TextDocument.URI)
+	documents[params.TextDocument.URI] = params.TextDocument.Text
 	p := parser.NewParser(params.TextDocument.Text)
 	config, err := p.Parse()
 	if err == nil {
@@ -252,6 +278,7 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 		return
 	}
 	text := params.ContentChanges[0].Text
+	documents[params.TextDocument.URI] = text
 	path := uriToPath(params.TextDocument.URI)
 	p := parser.NewParser(text)
 	config, err := p.Parse()
@@ -259,6 +286,39 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 		tree.AddFile(path, config)
 		tree.ResolveReferences()
 		runValidation(params.TextDocument.URI)
+	}
+}
+
+func handleFormatting(params DocumentFormattingParams) []TextEdit {
+	uri := params.TextDocument.URI
+	text, ok := documents[uri]
+	if !ok {
+		return nil
+	}
+
+	p := parser.NewParser(text)
+	config, err := p.Parse()
+	if err != nil {
+		return nil
+	}
+
+	var buf bytes.Buffer
+	formatter.Format(config, &buf)
+	newText := buf.String()
+
+	lines := strings.Count(text, "\n")
+	if len(text) > 0 && !strings.HasSuffix(text, "\n") {
+		lines++
+	}
+
+	return []TextEdit{
+		{
+			Range: Range{
+				Start: Position{0, 0},
+				End:   Position{lines + 1, 0},
+			},
+			NewText: newText,
+		},
 	}
 }
 
@@ -337,7 +397,7 @@ func handleHover(params HoverParams) *Hover {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
-		fmt.Fprint(os.Stderr, "No object/node/reference found\n")
+		logger.Printf("No object/node/reference found")
 		return nil
 	}
 

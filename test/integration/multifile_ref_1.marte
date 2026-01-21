@@ -1,0 +1,5 @@
+#package Proj.TestPackage
+
++TargetNode = {
+    Class = "TargetClass"
+}

@@ -1,17 +1,18 @@
 package index
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/marte-dev/marte-dev-tools/internal/logger"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
 )
 
 type ProjectTree struct {
-	Root       *ProjectNode
-	References []Reference
+	Root          *ProjectNode
+	References    []Reference
+	IsolatedFiles map[string]*ProjectNode
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -65,6 +66,7 @@ func NewProjectTree() *ProjectTree {
 			Children: make(map[string]*ProjectNode),
 			Metadata: make(map[string]string),
 		},
+		IsolatedFiles: make(map[string]*ProjectNode),
 	}
 }
 
@@ -84,6 +86,7 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	}
 	pt.References = newRefs
 
+	delete(pt.IsolatedFiles, file)
 	pt.removeFileFromNode(pt.Root, file)
 }
 
@@ -151,27 +154,45 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.RemoveFile(file)
 
-	node := pt.Root
-	if config.Package != nil {
-		parts := strings.Split(config.Package.URI, ".")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-			if _, ok := node.Children[part]; !ok {
-				node.Children[part] = &ProjectNode{
-					Name:     part,
-					RealName: part,
-					Children: make(map[string]*ProjectNode),
-					Parent:   node,
-					Metadata: make(map[string]string),
-				}
-			}
-			node = node.Children[part]
+	if config.Package == nil {
+		node := &ProjectNode{
+			Children: make(map[string]*ProjectNode),
+			Metadata: make(map[string]string),
 		}
+		pt.IsolatedFiles[file] = node
+		pt.populateNode(node, file, config)
+		return
 	}
 
+	node := pt.Root
+	parts := strings.Split(config.Package.URI, ".")
+	// Skip first part as per spec (Project Name is namespace only)
+	startIdx := 0
+	if len(parts) > 0 {
+		startIdx = 1
+	}
+
+	for i := startIdx; i < len(parts); i++ {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
+			continue
+		}
+		if _, ok := node.Children[part]; !ok {
+			node.Children[part] = &ProjectNode{
+				Name:     part,
+				RealName: part,
+				Children: make(map[string]*ProjectNode),
+				Parent:   node,
+				Metadata: make(map[string]string),
+			}
+		}
+		node = node.Children[part]
+	}
+
+	pt.populateNode(node, file, config)
+}
+
+func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *parser.Configuration) {
 	fileFragment := &Fragment{
 		File:     file,
 		IsObject: false,
@@ -184,7 +205,6 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		case *parser.Field:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.indexValue(file, d.Value)
-			// Metadata update not really relevant for package node usually, but consistency
 		case *parser.ObjectNode:
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
@@ -319,7 +339,11 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 func (pt *ProjectTree) ResolveReferences() {
 	for i := range pt.References {
 		ref := &pt.References[i]
-		ref.Target = pt.findNode(pt.Root, ref.Name)
+		if isoNode, ok := pt.IsolatedFiles[ref.File]; ok {
+			ref.Target = pt.findNode(isoNode, ref.Name)
+		} else {
+			ref.Target = pt.findNode(pt.Root, ref.Name)
+		}
 	}
 }
 
@@ -342,15 +366,19 @@ type QueryResult struct {
 }
 
 func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
-	fmt.Fprintf(os.Stderr, "File: %s:%d:%d\n", file, line, col)
+	logger.Printf("File: %s:%d:%d", file, line, col)
 	for i := range pt.References {
-		fmt.Fprintf(os.Stderr, "%s\n", pt.Root.Name)
+		logger.Printf("%s", pt.Root.Name)
 		ref := &pt.References[i]
 		if ref.File == file {
 			if line == ref.Position.Line && col >= ref.Position.Column && col < ref.Position.Column+len(ref.Name) {
 				return &QueryResult{Reference: ref}
 			}
 		}
+	}
+
+	if isoNode, ok := pt.IsolatedFiles[file]; ok {
+		return pt.queryNode(isoNode, file, line, col)
 	}
 
 	return pt.queryNode(pt.Root, file, line, col)

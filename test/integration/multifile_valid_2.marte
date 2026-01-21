@@ -1,0 +1,6 @@
+#package Proj.TestPackage
+
++MyNode = {
+    Class = "MyClass"
+    FieldB = 20
+}

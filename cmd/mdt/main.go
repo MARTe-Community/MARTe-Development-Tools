@@ -2,12 +2,12 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 
 	"github.com/marte-dev/marte-dev-tools/internal/builder"
 	"github.com/marte-dev/marte-dev-tools/internal/formatter"
 	"github.com/marte-dev/marte-dev-tools/internal/index"
+	"github.com/marte-dev/marte-dev-tools/internal/logger"
 	"github.com/marte-dev/marte-dev-tools/internal/lsp"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
 	"github.com/marte-dev/marte-dev-tools/internal/validator"
@@ -15,8 +15,8 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: mdt <command> [arguments]")
-		fmt.Println("Commands: lsp, build, check, fmt")
+		logger.Println("Usage: mdt <command> [arguments]")
+		logger.Println("Commands: lsp, build, check, fmt")
 		os.Exit(1)
 	}
 
@@ -31,7 +31,7 @@ func main() {
 	case "fmt":
 		runFmt(os.Args[2:])
 	default:
-		fmt.Printf("Unknown command: %s\n", command)
+		logger.Printf("Unknown command: %s\n", command)
 		os.Exit(1)
 	}
 }
@@ -42,28 +42,21 @@ func runLSP() {
 
 func runBuild(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: mdt build <input_files...>")
+		logger.Println("Usage: mdt build <input_files...>")
 		os.Exit(1)
 	}
 
-	outputDir := "build"
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		fmt.Printf("Build failed: %v\n", err)
+	b := builder.NewBuilder(args)
+	err := b.Build(os.Stdout)
+	if err != nil {
+		logger.Printf("Build failed: %v\n", err)
 		os.Exit(1)
-	} else {
-		b := builder.NewBuilder(args)
-		err = b.Build(outputDir)
-		if err != nil {
-			fmt.Printf("Build failed: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("Build successful. Output in", outputDir)
 	}
 }
 
 func runCheck(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: mdt check <input_files...>")
+		logger.Println("Usage: mdt check <input_files...>")
 		os.Exit(1)
 	}
 
@@ -73,14 +66,14 @@ func runCheck(args []string) {
 	for _, file := range args {
 		content, err := os.ReadFile(file)
 		if err != nil {
-			fmt.Printf("Error reading %s: %v\n", file, err)
+			logger.Printf("Error reading %s: %v\n", file, err)
 			continue
 		}
 
 		p := parser.NewParser(string(content))
 		config, err := p.Parse()
 		if err != nil {
-			fmt.Printf("%s: Grammar error: %v\n", file, err)
+			logger.Printf("%s: Grammar error: %v\n", file, err)
 			continue
 		}
 
@@ -100,33 +93,33 @@ func runCheck(args []string) {
 		if diag.Level == validator.LevelWarning {
 			level = "WARNING"
 		}
-		fmt.Printf("%s:%d:%d: %s: %s\n", diag.File, diag.Position.Line, diag.Position.Column, level, diag.Message)
+		logger.Printf("%s:%d:%d: %s: %s\n", diag.File, diag.Position.Line, diag.Position.Column, level, diag.Message)
 	}
 
 	if len(v.Diagnostics) > 0 {
-		fmt.Printf("\nFound %d issues.\n", len(v.Diagnostics))
+		logger.Printf("\nFound %d issues.\n", len(v.Diagnostics))
 	} else {
-		fmt.Println("No issues found.")
+		logger.Println("No issues found.")
 	}
 }
 
 func runFmt(args []string) {
 	if len(args) < 1 {
-		fmt.Println("Usage: mdt fmt <input_files...>")
+		logger.Println("Usage: mdt fmt <input_files...>")
 		os.Exit(1)
 	}
 
 	for _, file := range args {
 		content, err := os.ReadFile(file)
 		if err != nil {
-			fmt.Printf("Error reading %s: %v\n", file, err)
+			logger.Printf("Error reading %s: %v\n", file, err)
 			continue
 		}
 
 		p := parser.NewParser(string(content))
 		config, err := p.Parse()
 		if err != nil {
-			fmt.Printf("Error parsing %s: %v\n", file, err)
+			logger.Printf("Error parsing %s: %v\n", file, err)
 			continue
 		}
 
@@ -135,9 +128,9 @@ func runFmt(args []string) {
 
 		err = os.WriteFile(file, buf.Bytes(), 0644)
 		if err != nil {
-			fmt.Printf("Error writing %s: %v\n", file, err)
+			logger.Printf("Error writing %s: %v\n", file, err)
 			continue
 		}
-		fmt.Printf("Formatted %s\n", file)
+		logger.Printf("Formatted %s\n", file)
 	}
 }

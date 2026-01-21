@@ -1,0 +1,6 @@
+#package Proj.DupBase
+
++DupObj = {
+    Class = "DupClass"
+    FieldY = 1
+}

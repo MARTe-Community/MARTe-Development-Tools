@@ -1,0 +1,6 @@
+#package Proj.TestPackage
+
++SourceNode = {
+    Class = "SourceClass"
+    Target = TargetNode
+}

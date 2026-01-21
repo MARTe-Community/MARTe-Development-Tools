@@ -1,0 +1,5 @@
+#package Proj.TestPackage
+
++DupNode = {
+    FieldX = 2
+}
