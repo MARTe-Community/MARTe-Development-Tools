@@ -10,6 +10,7 @@ import (
 
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
+	"github.com/marte-dev/marte-dev-tools/internal/validator"
 )
 
 type JsonRpcMessage struct {
@@ -24,6 +25,11 @@ type JsonRpcMessage struct {
 type JsonRpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type InitializeParams struct {
+	RootURI  string `json:"rootUri"`
+	RootPath string `json:"rootPath"`
 }
 
 type DidOpenTextDocumentParams struct {
@@ -60,6 +66,31 @@ type TextDocumentIdentifier struct {
 	URI string `json:"uri"`
 }
 
+type DefinitionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      ReferenceContext       `json:"context"`
+}
+
+type ReferenceContext struct {
+	IncludeDeclaration bool `json:"includeDeclaration"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+}
+
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
 type Position struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
@@ -72,6 +103,18 @@ type Hover struct {
 type MarkupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
+}
+
+type PublishDiagnosticsParams struct {
+	URI         string          `json:"uri"`
+	Diagnostics []LSPDiagnostic `json:"diagnostics"`
+}
+
+type LSPDiagnostic struct {
+	Range    Range  `json:"range"`
+	Severity int    `json:"severity"`
+	Message  string `json:"message"`
+	Source   string `json:"source"`
 }
 
 var tree = index.NewProjectTree()
@@ -121,6 +164,22 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 func handleMessage(msg *JsonRpcMessage) {
 	switch msg.Method {
 	case "initialize":
+		var params InitializeParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			root := ""
+			if params.RootURI != "" {
+				root = uriToPath(params.RootURI)
+			} else if params.RootPath != "" {
+				root = params.RootPath
+			}
+			
+			if root != "" {
+				fmt.Fprintf(os.Stderr, "Scanning workspace: %s\n", root)
+				tree.ScanDirectory(root)
+				tree.ResolveReferences()
+			}
+		}
+
 		respond(msg.ID, map[string]any{
 			"capabilities": map[string]any{
 				"textDocumentSync":   1, // Full sync
@@ -130,7 +189,7 @@ func handleMessage(msg *JsonRpcMessage) {
 			},
 		})
 	case "initialized":
-		// Do nothing
+		runValidation("")
 	case "shutdown":
 		respond(msg.ID, nil)
 	case "exit":
@@ -160,6 +219,16 @@ func handleMessage(msg *JsonRpcMessage) {
 			fmt.Fprint(os.Stderr, "not recovered hover parameters\n")
 			respond(msg.ID, nil)
 		}
+	case "textDocument/definition":
+		var params DefinitionParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, handleDefinition(params))
+		}
+	case "textDocument/references":
+		var params ReferenceParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, handleReferences(params))
+		}
 	}
 }
 
@@ -174,6 +243,7 @@ func handleDidOpen(params DidOpenTextDocumentParams) {
 	if err == nil {
 		tree.AddFile(path, config)
 		tree.ResolveReferences()
+		runValidation(params.TextDocument.URI)
 	}
 }
 
@@ -188,7 +258,76 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 	if err == nil {
 		tree.AddFile(path, config)
 		tree.ResolveReferences()
+		runValidation(params.TextDocument.URI)
 	}
+}
+
+func runValidation(uri string) {
+	v := validator.NewValidator(tree)
+	v.ValidateProject()
+	v.CheckUnused()
+
+	// Group diagnostics by file
+	fileDiags := make(map[string][]LSPDiagnostic)
+	
+	// Collect all known files to ensure we clear diagnostics for fixed files
+	knownFiles := make(map[string]bool)
+	collectFiles(tree.Root, knownFiles)
+	
+	// Initialize all known files with empty diagnostics
+	for f := range knownFiles {
+		fileDiags[f] = []LSPDiagnostic{}
+	}
+
+	for _, d := range v.Diagnostics {
+		severity := 1 // Error
+		if d.Level == validator.LevelWarning {
+			severity = 2 // Warning
+		}
+
+		diag := LSPDiagnostic{
+			Range: Range{
+				Start: Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1},
+				End:   Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1 + 10}, // Arbitrary length
+			},
+			Severity: severity,
+			Message:  d.Message,
+			Source:   "mdt",
+		}
+		
+		path := d.File
+		if path != "" {
+			fileDiags[path] = append(fileDiags[path], diag)
+		}
+	}
+
+	// Send diagnostics for all known files
+	for path, diags := range fileDiags {
+		fileURI := "file://" + path
+		notification := JsonRpcMessage{
+			Jsonrpc: "2.0",
+			Method:  "textDocument/publishDiagnostics",
+			Params:  mustMarshal(PublishDiagnosticsParams{
+				URI:         fileURI,
+				Diagnostics: diags,
+			}),
+		}
+		send(notification)
+	}
+}
+
+func collectFiles(node *index.ProjectNode, files map[string]bool) {
+	for _, frag := range node.Fragments {
+		files[frag.File] = true
+	}
+	for _, child := range node.Children {
+		collectFiles(child, files)
+	}
+}
+
+func mustMarshal(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func handleHover(params HoverParams) *Hover {
@@ -239,6 +378,93 @@ func handleHover(params HoverParams) *Hover {
 	}
 }
 
+func handleDefinition(params DefinitionParams) any {
+	path := uriToPath(params.TextDocument.URI)
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+
+	res := tree.Query(path, line, col)
+	if res == nil {
+		return nil
+	}
+
+	var targetNode *index.ProjectNode
+	if res.Reference != nil && res.Reference.Target != nil {
+		targetNode = res.Reference.Target
+	} else if res.Node != nil {
+		targetNode = res.Node
+	}
+
+	if targetNode != nil {
+		var locations []Location
+		for _, frag := range targetNode.Fragments {
+			if frag.IsObject {
+				locations = append(locations, Location{
+					URI: "file://" + frag.File,
+					Range: Range{
+						Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+						End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(targetNode.RealName)},
+					},
+				})
+			}
+		}
+		return locations
+	}
+
+	return nil
+}
+
+func handleReferences(params ReferenceParams) []Location {
+	path := uriToPath(params.TextDocument.URI)
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+
+	res := tree.Query(path, line, col)
+	if res == nil {
+		return nil
+	}
+
+	var targetNode *index.ProjectNode
+	if res.Node != nil {
+		targetNode = res.Node
+	} else if res.Reference != nil && res.Reference.Target != nil {
+		targetNode = res.Reference.Target
+	}
+
+	if targetNode == nil {
+		return nil
+	}
+
+	var locations []Location
+	if params.Context.IncludeDeclaration {
+		for _, frag := range targetNode.Fragments {
+			if frag.IsObject {
+				locations = append(locations, Location{
+					URI: "file://" + frag.File,
+					Range: Range{
+						Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+						End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(targetNode.RealName)},
+					},
+				})
+			}
+		}
+	}
+
+	for _, ref := range tree.References {
+		if ref.Target == targetNode {
+			locations = append(locations, Location{
+				URI: "file://" + ref.File,
+				Range: Range{
+					Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+					End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+				},
+			})
+		}
+	}
+
+	return locations
+}
+
 func formatNodeInfo(node *index.ProjectNode) string {
 	class := node.Metadata["Class"]
 	if class == "" {
@@ -261,8 +487,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 
 		// Size
-		dims := node.Metadata["NumberOfDimensions"]
-		elems := node.Metadata["NumberOfElements"]
+	dims := node.Metadata["NumberOfDimensions"]
+elems := node.Metadata["NumberOfElements"]
 		if dims != "" || elems != "" {
 			sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
 		}

@@ -8,8 +8,7 @@ import (
 
 type Parser struct {
 	lexer    *Lexer
-	tok      Token
-	peeked   bool
+	buf      []Token
 	comments []Comment
 	pragmas  []Pragma
 }
@@ -21,21 +20,23 @@ func NewParser(input string) *Parser {
 }
 
 func (p *Parser) next() Token {
-	if p.peeked {
-		p.peeked = false
-		return p.tok
+	if len(p.buf) > 0 {
+		t := p.buf[0]
+		p.buf = p.buf[1:]
+		return t
 	}
-	p.tok = p.fetchToken()
-	return p.tok
+	return p.fetchToken()
 }
 
 func (p *Parser) peek() Token {
-	if p.peeked {
-		return p.tok
+	return p.peekN(0)
+}
+
+func (p *Parser) peekN(n int) Token {
+	for len(p.buf) <= n {
+		p.buf = append(p.buf, p.fetchToken())
 	}
-	p.tok = p.fetchToken()
-	p.peeked = true
-	return p.tok
+	return p.buf[n]
 }
 
 func (p *Parser) fetchToken() Token {
@@ -85,11 +86,30 @@ func (p *Parser) parseDefinition() (Definition, error) {
 	tok := p.next()
 	switch tok.Type {
 	case TokenIdentifier:
-		// field = value
+		// Could be Field = Value OR Node = { ... }
 		name := tok.Value
 		if p.next().Type != TokenEqual {
-			return nil, fmt.Errorf("%d:%d: expected =", p.tok.Position.Line, p.tok.Position.Column)
+			return nil, fmt.Errorf("%d:%d: expected =", tok.Position.Line, tok.Position.Column)
 		}
+
+		// Disambiguate based on RHS
+		nextTok := p.peek()
+		if nextTok.Type == TokenLBrace {
+			// Check if it looks like a Subnode (contains definitions) or Array (contains values)
+			if p.isSubnodeLookahead() {
+				sub, err := p.parseSubnode()
+				if err != nil {
+					return nil, err
+				}
+				return &ObjectNode{
+					Position: tok.Position,
+					Name:     name,
+					Subnode:  sub,
+				}, nil
+			}
+		}
+
+		// Default to Field
 		val, err := p.parseValue()
 		if err != nil {
 			return nil, err
@@ -99,11 +119,12 @@ func (p *Parser) parseDefinition() (Definition, error) {
 			Name:     name,
 			Value:    val,
 		}, nil
+
 	case TokenObjectIdentifier:
 		// node = subnode
 		name := tok.Value
 		if p.next().Type != TokenEqual {
-			return nil, fmt.Errorf("%d:%d: expected =", p.tok.Position.Line, p.tok.Position.Column)
+			return nil, fmt.Errorf("%d:%d: expected =", tok.Position.Line, tok.Position.Column)
 		}
 		sub, err := p.parseSubnode()
 		if err != nil {
@@ -117,6 +138,42 @@ func (p *Parser) parseDefinition() (Definition, error) {
 	default:
 		return nil, fmt.Errorf("%d:%d: unexpected token %v", tok.Position.Line, tok.Position.Column, tok.Value)
 	}
+}
+
+func (p *Parser) isSubnodeLookahead() bool {
+	// We are before '{'.
+	// Look inside:
+	// peek(0) is '{'
+	// peek(1) is first token inside
+	
+	t1 := p.peekN(1)
+	if t1.Type == TokenRBrace {
+		// {} -> Empty. Assume Array (Value) by default, unless forced? 
+		// If we return false, it parses as ArrayValue.
+		// If user writes "Sig = {}", is it an empty signal?
+		// Empty array is more common for value. 
+		// If "Sig" is a node, it should probably have content or use +Sig.
+		return false 
+	}
+	
+	if t1.Type == TokenIdentifier {
+		// Identifier inside.
+		// If followed by '=', it's a definition -> Subnode.
+		t2 := p.peekN(2)
+		if t2.Type == TokenEqual {
+			return true
+		}
+		// Identifier alone or followed by something else -> Reference/Value -> Array
+		return false
+	}
+	
+	if t1.Type == TokenObjectIdentifier {
+		// +Node = ... -> Definition -> Subnode
+		return true
+	}
+	
+	// Literals -> Array
+	return false
 }
 
 func (p *Parser) parseSubnode() (Subnode, error) {

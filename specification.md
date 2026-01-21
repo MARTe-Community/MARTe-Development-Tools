@@ -40,7 +40,8 @@ The LSP server should provide the following capabilities:
   - **URI Symbols**: The symbols `+` and `$` used for object nodes are **not** written in the URI of the `#package` macro (e.g., use `PROJECT.NODE` even if the node is defined as `+NODE`).
 - **Build Process**:
   - The build tool merges all files sharing the same base namespace.
-  - **Multi-File Nodes**: Nodes can be defined across multiple files. The build tool and validator must merge these definitions before processing.
+  - **Multi-File Definitions**: Nodes and objects can be defined across multiple files. The build tool, validator, and LSP must merge these definitions (including all fields and sub-nodes) from the entire project to create a unified view before processing or validating.
+  - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project.
   - **Merging Order**: For objects defined across multiple files, the **first file** to be considered is the one containing the `Class` field definition.
   - **Field Order**: Within a single file, the relative order of defined fields must be maintained.
   - The LSP indexes only files belonging to the same project/namespace scope.
@@ -75,7 +76,7 @@ The LSP server should provide the following capabilities:
 ### Semantics
 
 - **Nodes (`+` / `$`)**: The prefixes `+` and `$` indicate that the node represents an object.
-  - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition.
+  - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition (across all files where the node is defined).
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored.
 - **Structure**: A configuration is composed by one or more definitions.
@@ -134,6 +135,9 @@ The tool must build an index of the configuration to support LSP features and va
 ### Validation Rules
 
 - **Consistency**: The `lsp`, `check`, and `build` commands **must share the same validation engine** to ensure consistent results across all tools.
+- **Global Validation Context**:
+  - All validation steps must operate on the aggregated view of the project.
+  - A node's validity is determined by the combination of all its fields and sub-nodes defined across all project files.
 - **Class Validation**:
   - For each known `Class`, the validator checks:
     - **Mandatory Fields**: Verification that all required fields are present.
@@ -144,7 +148,7 @@ The tool must build an index of the configuration to support LSP features and va
     - Class validation rules must be defined in a separate schema file.
     - **Project-Specific Classes**: Developers can define their own project-specific classes and corresponding validation rules, expanding the validation capabilities for their specific needs.
 - **Duplicate Fields**:
-  - **Constraint**: A field must not be defined more than once within the same object/node scope.
+  - **Constraint**: A field must not be defined more than once within the same object/node scope, even if those definitions are spread across different files.
   - **Multi-File Consideration**: Validation must account for nodes being defined across multiple files (merged) when checking for duplicates.
 
 ### Formatting Rules

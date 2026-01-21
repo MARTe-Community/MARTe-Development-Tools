@@ -3,6 +3,7 @@ package index
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -11,6 +12,26 @@ import (
 type ProjectTree struct {
 	Root       *ProjectNode
 	References []Reference
+}
+
+func (pt *ProjectTree) ScanDirectory(rootPath string) error {
+	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".marte") {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err // Or log and continue
+			}
+			p := parser.NewParser(string(content))
+			config, err := p.Parse()
+			if err == nil {
+				pt.AddFile(path, config)
+			}
+		}
+		return nil
+	})
 }
 
 type Reference struct {
