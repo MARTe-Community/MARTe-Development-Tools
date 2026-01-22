@@ -285,7 +285,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		return // Ignore implicit signals or missing datasource (handled elsewhere if mandatory)
 	}
 
-	dsNode := v.resolveReference(dsName, v.getNodeFile(signalNode))
+	dsNode := v.resolveReference(dsName, v.getNodeFile(signalNode), isDataSource)
 	if dsNode == nil {
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
@@ -335,8 +335,8 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		targetSignalName = v.getFieldValue(aliasFields[0]) // Alias is usually the name in DataSource
 	}
 
+	var targetNode *index.ProjectNode
 	if signalsContainer, ok := dsNode.Children["Signals"]; ok {
-		var targetNode *index.ProjectNode
 		targetNorm := index.NormalizeName(targetSignalName)
 		
 		if child, ok := signalsContainer.Children[targetNorm]; ok {
@@ -350,20 +350,30 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				}
 			}
 		}
+	}
 
-		if targetNode == nil {
+	if targetNode == nil {
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelWarning,
+			Message:  fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
+			Position: v.getNodePosition(signalNode),
+			File:     v.getNodeFile(signalNode),
+		})
+
+		if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
-				Message:  fmt.Sprintf("Signal '%s' not found in DataSource '%s'", targetSignalName, dsName),
+				Message:  fmt.Sprintf("Implicit signal '%s' must define Type", targetSignalName),
 				Position: v.getNodePosition(signalNode),
 				File:     v.getNodeFile(signalNode),
 			})
-		} else {
-			// Link Alias reference
-			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
-				if val, ok := aliasFields[0].Value.(*parser.ReferenceValue); ok {
-					v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
-				}
+		}
+	} else {
+		signalNode.Target = targetNode
+		// Link Alias reference
+		if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
+			if val, ok := aliasFields[0].Value.(*parser.ReferenceValue); ok {
+				v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
 			}
 		}
 	}
@@ -403,9 +413,9 @@ func (v *Validator) getFieldValue(f *parser.Field) string {
 	return ""
 }
 
-func (v *Validator) resolveReference(name string, file string) *index.ProjectNode {
+func (v *Validator) resolveReference(name string, file string, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
 	if isoNode, ok := v.Tree.IsolatedFiles[file]; ok {
-		if found := v.findNodeRecursive(isoNode, name); found != nil {
+		if found := v.findNodeRecursive(isoNode, name, predicate); found != nil {
 			return found
 		}
 		return nil
@@ -413,24 +423,20 @@ func (v *Validator) resolveReference(name string, file string) *index.ProjectNod
 	if v.Tree.Root == nil {
 		return nil
 	}
-	return v.findNodeRecursive(v.Tree.Root, name)
+	return v.findNodeRecursive(v.Tree.Root, name, predicate)
 }
 
-func (v *Validator) findNodeRecursive(root *index.ProjectNode, name string) *index.ProjectNode {
+func (v *Validator) findNodeRecursive(root *index.ProjectNode, name string, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
 	// Simple recursive search matching name
 	if root.RealName == name || root.Name == index.NormalizeName(name) {
-		return root
-	}
-	
-	// Fast lookup in children
-	norm := index.NormalizeName(name)
-	if child, ok := root.Children[norm]; ok {
-		return child
+		if predicate == nil || predicate(root) {
+			return root
+		}
 	}
 	
 	// Recursive
 	for _, child := range root.Children {
-		if found := v.findNodeRecursive(child, name); found != nil {
+		if found := v.findNodeRecursive(child, name, predicate); found != nil {
 			return found
 		}
 	}
@@ -495,12 +501,18 @@ func (v *Validator) getFileForField(f *parser.Field, node *index.ProjectNode) st
 }
 
 func (v *Validator) CheckUnused() {
-    // ... (same as before)
 	referencedNodes := make(map[*index.ProjectNode]bool)
 	for _, ref := range v.Tree.References {
 		if ref.Target != nil {
 			referencedNodes[ref.Target] = true
 		}
+	}
+
+	if v.Tree.Root != nil {
+		v.collectTargetUsage(v.Tree.Root, referencedNodes)
+	}
+	for _, node := range v.Tree.IsolatedFiles {
+		v.collectTargetUsage(node, referencedNodes)
 	}
 
 	if v.Tree.Root != nil {
@@ -511,9 +523,16 @@ func (v *Validator) CheckUnused() {
 	}
 }
 
+func (v *Validator) collectTargetUsage(node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
+	if node.Target != nil {
+		referenced[node.Target] = true
+	}
+	for _, child := range node.Children {
+		v.collectTargetUsage(child, referenced)
+	}
+}
+
 func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
-    // ... (same as before)
-	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{

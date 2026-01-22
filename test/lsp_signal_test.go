@@ -5,16 +5,30 @@ import (
 
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
+	"github.com/marte-dev/marte-dev-tools/internal/validator"
 )
 
-func TestLSPSignalMetadata(t *testing.T) {
+func TestLSPSignalReferences(t *testing.T) {
 	content := `
-+MySignal = {
-    Class = Signal
-    Type = uint32
-    NumberOfElements = 10
-    NumberOfDimensions = 1
-    DataSource = DDB1
++Data = {
+    Class = ReferenceContainer
+    +MyDS = {
+        Class = FileReader
+        Filename = "test"
+        Signals = {
+            MySig = { Type = uint32 }
+        }
+    }
+}
+
++MyGAM = {
+    Class = IOGAM
+    InputSignals = {
+        MySig = {
+            DataSource = MyDS
+            Type = uint32
+        }
+    }
 }
 `
 	p := parser.NewParser(content)
@@ -24,26 +38,50 @@ func TestLSPSignalMetadata(t *testing.T) {
 	}
 
 	idx := index.NewProjectTree()
-	file := "signal.marte"
-	idx.AddFile(file, config)
-	
-	res := idx.Query(file, 2, 2) // Query +MySignal
-	if res == nil || res.Node == nil {
-		t.Fatal("Query failed for signal definition")
+	idx.AddFile("signal_refs.marte", config)
+	idx.ResolveReferences()
+
+	v := validator.NewValidator(idx, ".")
+	v.ValidateProject()
+
+	// Find definition of MySig in MyDS
+	root := idx.IsolatedFiles["signal_refs.marte"]
+	if root == nil {
+		t.Fatal("Root node not found")
 	}
 	
-	meta := res.Node.Metadata
-	if meta["Class"] != "Signal" {
-		t.Errorf("Expected Class Signal, got %s", meta["Class"])
-	}
-	if meta["Type"] != "uint32" {
-		t.Errorf("Expected Type uint32, got %s", meta["Type"])
-	}
-	if meta["NumberOfElements"] != "10" {
-		t.Errorf("Expected 10 elements, got %s", meta["NumberOfElements"])
-	}
+	// Traverse to MySig
+	dataNode := root.Children["Data"]
+	if dataNode == nil { t.Fatal("Data node not found") }
 	
-	// Since handleHover logic is in internal/lsp which we can't easily test directly without
-	// exposing formatNodeInfo, we rely on the fact that Metadata is populated correctly.
-	// If Metadata is correct, server.go logic (verified by code review) should display it.
+	myDS := dataNode.Children["MyDS"]
+	if myDS == nil { t.Fatal("MyDS node not found") }
+	
+	signals := myDS.Children["Signals"]
+	if signals == nil { t.Fatal("Signals node not found") }
+	
+	mySigDef := signals.Children["MySig"]
+	if mySigDef == nil {
+		t.Fatal("Definition of MySig not found in tree")
+	}
+
+	// Now simulate "Find References" on mySigDef
+	foundRefs := 0
+	idx.Walk(func(node *index.ProjectNode) {
+		if node.Target == mySigDef {
+			foundRefs++
+			// Check if node is the GAM signal
+			if node.RealName != "MySig" { // In GAM it is MySig
+				t.Errorf("Unexpected reference node name: %s", node.RealName)
+			}
+			// Check parent is InputSignals -> MyGAM
+			if node.Parent == nil || node.Parent.Parent == nil || node.Parent.Parent.RealName != "+MyGAM" {
+				t.Errorf("Reference node not in MyGAM")
+			}
+		}
+	})
+
+	if foundRefs != 1 {
+		t.Errorf("Expected 1 reference (Direct), found %d", foundRefs)
+	}
 }

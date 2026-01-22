@@ -406,7 +406,11 @@ func handleHover(params HoverParams) *Hover {
 	var content string
 
 	if res.Node != nil {
-		content = formatNodeInfo(res.Node)
+		if res.Node.Target != nil {
+			content = fmt.Sprintf("**Link**: `%s` -> `%s`\n\n%s", res.Node.RealName, res.Node.Target.RealName, formatNodeInfo(res.Node.Target))
+		} else {
+			content = formatNodeInfo(res.Node)
+		}
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
 	} else if res.Reference != nil {
@@ -454,7 +458,11 @@ func handleDefinition(params DefinitionParams) any {
 	if res.Reference != nil && res.Reference.Target != nil {
 		targetNode = res.Reference.Target
 	} else if res.Node != nil {
-		targetNode = res.Node
+		if res.Node.Target != nil {
+			targetNode = res.Node.Target
+		} else {
+			targetNode = res.Node
+		}
 	}
 
 	if targetNode != nil {
@@ -497,23 +505,30 @@ func handleReferences(params ReferenceParams) []Location {
 		return nil
 	}
 
+	// Resolve canonical target (follow link if present)
+	canonical := targetNode
+	if targetNode.Target != nil {
+		canonical = targetNode.Target
+	}
+
 	var locations []Location
 	if params.Context.IncludeDeclaration {
-		for _, frag := range targetNode.Fragments {
+		for _, frag := range canonical.Fragments {
 			if frag.IsObject {
 				locations = append(locations, Location{
 					URI: "file://" + frag.File,
 					Range: Range{
 						Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
-						End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(targetNode.RealName)},
+						End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(canonical.RealName)},
 					},
 				})
 			}
 		}
 	}
 
+	// 1. References from index (Aliases)
 	for _, ref := range tree.References {
-		if ref.Target == targetNode {
+		if ref.Target == canonical {
 			locations = append(locations, Location{
 				URI: "file://" + ref.File,
 				Range: Range{
@@ -523,6 +538,23 @@ func handleReferences(params ReferenceParams) []Location {
 			})
 		}
 	}
+
+	// 2. References from Node Targets (Direct References)
+	tree.Walk(func(node *index.ProjectNode) {
+		if node.Target == canonical {
+			for _, frag := range node.Fragments {
+				if frag.IsObject {
+					locations = append(locations, Location{
+						URI: "file://" + frag.File,
+						Range: Range{
+							Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+							End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(node.RealName)},
+						},
+					})
+				}
+			}
+		}
+	})
 
 	return locations
 }

@@ -50,6 +50,7 @@ type ProjectNode struct {
 	Children  map[string]*ProjectNode
 	Parent    *ProjectNode
 	Metadata  map[string]string // Store extra info like Class, Type, Size
+	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
 }
 
 type Fragment struct {
@@ -382,6 +383,22 @@ func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
 	}
 
 	return pt.queryNode(pt.Root, file, line, col)
+}
+
+func (pt *ProjectTree) Walk(visitor func(*ProjectNode)) {
+	if pt.Root != nil {
+		pt.walkRecursive(pt.Root, visitor)
+	}
+	for _, node := range pt.IsolatedFiles {
+		pt.walkRecursive(node, visitor)
+	}
+}
+
+func (pt *ProjectTree) walkRecursive(node *ProjectNode, visitor func(*ProjectNode)) {
+	visitor(node)
+	for _, child := range node.Children {
+		pt.walkRecursive(child, visitor)
+	}
 }
 
 func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) *QueryResult {
