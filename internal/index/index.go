@@ -51,6 +51,7 @@ type ProjectNode struct {
 	Parent    *ProjectNode
 	Metadata  map[string]string // Store extra info like Class, Type, Size
 	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
+	Pragmas   []string
 }
 
 type Fragment struct {
@@ -201,6 +202,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 
 	for _, def := range config.Definitions {
 		doc := pt.findDoc(config.Comments, def.Pos())
+		pragmas := pt.findPragmas(config.Pragmas, def.Pos())
 
 		switch d := def.(type) {
 		case *parser.Field:
@@ -229,7 +231,11 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				child.Doc += doc
 			}
 
-			pt.addObjectFragment(child, file, d, doc, config.Comments)
+			if len(pragmas) > 0 {
+				child.Pragmas = append(child.Pragmas, pragmas...)
+			}
+
+			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas)
 		}
 	}
 
@@ -238,7 +244,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 	}
 }
 
-func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment) {
+func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment, pragmas []parser.Pragma) {
 	frag := &Fragment{
 		File:      file,
 		IsObject:  true,
@@ -248,6 +254,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 
 	for _, def := range obj.Subnode.Definitions {
 		subDoc := pt.findDoc(comments, def.Pos())
+		subPragmas := pt.findPragmas(pragmas, def.Pos())
 
 		switch d := def.(type) {
 		case *parser.Field:
@@ -277,7 +284,11 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				child.Doc += subDoc
 			}
 
-			pt.addObjectFragment(child, file, d, subDoc, comments)
+			if len(subPragmas) > 0 {
+				child.Pragmas = append(child.Pragmas, subPragmas...)
+			}
+
+			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas)
 		}
 	}
 
@@ -320,6 +331,30 @@ func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) s
 	}
 
 	return docBuilder.String()
+}
+
+func (pt *ProjectTree) findPragmas(pragmas []parser.Pragma, pos parser.Position) []string {
+	var found []string
+	targetLine := pos.Line - 1
+
+	for i := len(pragmas) - 1; i >= 0; i-- {
+		p := pragmas[i]
+		if p.Position.Line > pos.Line {
+			continue
+		}
+		if p.Position.Line == pos.Line {
+			continue
+		}
+
+		if p.Position.Line == targetLine {
+			txt := strings.TrimSpace(strings.TrimPrefix(p.Text, "//!"))
+			found = append(found, txt)
+			targetLine--
+		} else if p.Position.Line < targetLine {
+			break
+		}
+	}
+	return found
 }
 
 func (pt *ProjectTree) indexValue(file string, val parser.Value) {

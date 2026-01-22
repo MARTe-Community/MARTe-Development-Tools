@@ -2,6 +2,7 @@ package validator
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -353,12 +354,22 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 
 	if targetNode == nil {
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelWarning,
-			Message:  fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
-			Position: v.getNodePosition(signalNode),
-			File:     v.getNodeFile(signalNode),
-		})
+		suppress := false
+		for _, p := range signalNode.Pragmas {
+			if strings.HasPrefix(p, "implicit:") {
+				suppress = true
+				break
+			}
+		}
+
+		if !suppress {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelWarning,
+				Message:  fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
+				Position: v.getNodePosition(signalNode),
+				File:     v.getNodeFile(signalNode),
+			})
+		}
 
 		if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
@@ -367,6 +378,17 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				Position: v.getNodePosition(signalNode),
 				File:     v.getNodeFile(signalNode),
 			})
+		} else {
+			// Check Type validity even for implicit
+			typeVal := v.getFieldValue(typeFields[0])
+			if !isValidType(typeVal) {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelError,
+					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
+					Position: typeFields[0].Position,
+					File:     v.getNodeFile(signalNode),
+				})
+			}
 		}
 	} else {
 		signalNode.Target = targetNode
@@ -376,7 +398,69 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
 			}
 		}
+		
+		// Property checks
+		v.checkSignalProperty(signalNode, targetNode, "Type")
+		v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
+		v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+		
+		// Check Type validity if present
+		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
+			typeVal := v.getFieldValue(typeFields[0])
+			if !isValidType(typeVal) {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelError,
+					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
+					Position: typeFields[0].Position,
+					File:     v.getNodeFile(signalNode),
+				})
+			}
+		}
 	}
+}
+
+func (v *Validator) checkSignalProperty(gamSig, dsSig *index.ProjectNode, prop string) {
+	gamVal := gamSig.Metadata[prop]
+	dsVal := dsSig.Metadata[prop]
+
+	if gamVal == "" {
+		return
+	}
+
+	if dsVal != "" && gamVal != dsVal {
+		if prop == "Type" {
+			if v.checkCastPragma(gamSig, dsVal, gamVal) {
+				return
+			}
+		}
+
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Signal '%s' property '%s' mismatch: defined '%s', referenced '%s'", gamSig.RealName, prop, dsVal, gamVal),
+			Position: v.getNodePosition(gamSig),
+			File:     v.getNodeFile(gamSig),
+		})
+	}
+}
+
+func (v *Validator) checkCastPragma(node *index.ProjectNode, defType, curType string) bool {
+	for _, p := range node.Pragmas {
+		if strings.HasPrefix(p, "cast(") {
+			content := strings.TrimPrefix(p, "cast(")
+			if idx := strings.Index(content, ")"); idx != -1 {
+				content = content[:idx]
+				parts := strings.Split(content, ",")
+				if len(parts) == 2 {
+					d := strings.TrimSpace(parts[0])
+					c := strings.TrimSpace(parts[1])
+					if d == defType && c == curType {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (v *Validator) updateReferenceTarget(file string, pos parser.Position, target *index.ProjectNode) {
@@ -409,6 +493,10 @@ func (v *Validator) getFieldValue(f *parser.Field) string {
 		return val.Value
 	case *parser.ReferenceValue:
 		return val.Value
+	case *parser.IntValue:
+		return val.Raw
+	case *parser.FloatValue:
+		return val.Raw
 	}
 	return ""
 }
@@ -533,14 +621,24 @@ func (v *Validator) collectTargetUsage(node *index.ProjectNode, referenced map[*
 }
 
 func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
+	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelWarning,
-				Message:  fmt.Sprintf("Unused GAM: %s is defined but not referenced in any thread or scheduler", node.RealName),
-				Position: v.getNodePosition(node),
-				File:     v.getNodeFile(node),
-			})
+			suppress := false
+			for _, p := range node.Pragmas {
+				if strings.HasPrefix(p, "unused:") {
+					suppress = true
+					break
+				}
+			}
+			if !suppress {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelWarning,
+					Message:  fmt.Sprintf("Unused GAM: %s is defined but not referenced in any thread or scheduler", node.RealName),
+					Position: v.getNodePosition(node),
+					File:     v.getNodeFile(node),
+				})
+			}
 		}
 	}
 
@@ -549,12 +647,21 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 		if signalsNode, ok := node.Children["Signals"]; ok {
 			for _, signal := range signalsNode.Children {
 				if !referenced[signal] {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelWarning,
-						Message:  fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
-						Position: v.getNodePosition(signal),
-						File:     v.getNodeFile(signal),
-					})
+					suppress := false
+					for _, p := range signal.Pragmas {
+						if strings.HasPrefix(p, "unused:") {
+							suppress = true
+							break
+						}
+					}
+					if !suppress {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:    LevelWarning,
+							Message:  fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
+							Position: v.getNodePosition(signal),
+							File:     v.getNodeFile(signal),
+						})
+					}
 				}
 			}
 		}
