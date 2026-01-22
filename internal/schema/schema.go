@@ -16,8 +16,9 @@ type Schema struct {
 }
 
 type ClassDefinition struct {
-	Fields  []FieldDefinition `json:"fields"`
-	Ordered bool              `json:"ordered"`
+	Fields    []FieldDefinition `json:"fields"`
+	Ordered   bool              `json:"ordered"`
+	Direction string            `json:"direction"`
 }
 
 type FieldDefinition struct {
@@ -95,6 +96,9 @@ func (s *Schema) Merge(other *Schema) {
 			existingClass.Fields = mergedFields
 			if classDef.Ordered {
 				existingClass.Ordered = true
+			}
+			if classDef.Direction != "" {
+				existingClass.Direction = classDef.Direction
 			}
 			s.Classes[className] = existingClass
 		} else {

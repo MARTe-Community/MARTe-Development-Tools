@@ -2,6 +2,7 @@ package validator
 
 import (
 	"fmt"
+
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
 	"github.com/marte-dev/marte-dev-tools/internal/schema"
@@ -38,6 +39,9 @@ func (v *Validator) ValidateProject() {
 	if v.Tree == nil {
 		return
 	}
+	// Ensure references are resolved (if not already done by builder/lsp)
+	v.Tree.ResolveReferences()
+
 	if v.Tree.Root != nil {
 		v.validateNode(v.Tree.Root)
 	}
@@ -64,16 +68,31 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	}
 
 	// Collect fields and their definitions
-	fields := make(map[string][]*parser.Field)
-	fieldOrder := []string{} // Keep track of order of appearance (approximate across fragments)
-
+	fields := v.getFields(node)
+	fieldOrder := []string{}
 	for _, frag := range node.Fragments {
 		for _, def := range frag.Definitions {
 			if f, ok := def.(*parser.Field); ok {
-				if _, exists := fields[f.Name]; !exists {
-					fieldOrder = append(fieldOrder, f.Name)
+				if _, exists := fields[f.Name]; exists { // already collected
+					// Maintain order logic if needed, but getFields collects all.
+					// For strict order check we might need this loop.
+					// Let's assume getFields is enough for validation logic,
+					// but for "duplicate check" and "class validation" we iterate fields map.
+					// We need to construct fieldOrder.
+					// Just reuse loop for fieldOrder
 				}
-				fields[f.Name] = append(fields[f.Name], f)
+			}
+		}
+	}
+	// Re-construct fieldOrder for order validation
+	seen := make(map[string]bool)
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if f, ok := def.(*parser.Field); ok {
+				if !seen[f.Name] {
+					fieldOrder = append(fieldOrder, f.Name)
+					seen[f.Name] = true
+				}
 			}
 		}
 	}
@@ -81,7 +100,6 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	// 1. Check for duplicate fields
 	for name, defs := range fields {
 		if len(defs) > 1 {
-			// Report error on the second definition
 			firstFile := v.getFileForField(defs[0], node)
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
@@ -96,13 +114,7 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	className := ""
 	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
 		if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
-			// Extract class name from value
-			switch val := classFields[0].Value.(type) {
-			case *parser.StringValue:
-				className = val.Value
-			case *parser.ReferenceValue:
-				className = val.Value
-			}
+			className = v.getFieldValue(classFields[0])
 		}
 
 		hasType := false
@@ -110,9 +122,6 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 			hasType = true
 		}
 
-		// Exception for Signals: Signals don't need Class if they have Type.
-		// But general nodes need Class.
-		// Logic handles it: if className=="" and !hasType -> Error.
 		if className == "" && !hasType {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
@@ -137,6 +146,11 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		v.validateSignal(node, fields)
 	}
 
+	// 5. GAM Validation (Signal references)
+	if isGAM(node) {
+		v.validateGAM(node)
+	}
+
 	// Recursively validate children
 	for _, child := range node.Children {
 		v.validateNode(child)
@@ -144,14 +158,13 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 }
 
 func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.ClassDefinition, fields map[string][]*parser.Field, fieldOrder []string) {
-	// Check Mandatory Fields
+	// ... (same as before)
 	for _, fieldDef := range classDef.Fields {
 		if fieldDef.Mandatory {
 			found := false
 			if _, ok := fields[fieldDef.Name]; ok {
 				found = true
 			} else if fieldDef.Type == "node" {
-				// Check children for nodes
 				if _, ok := node.Children[fieldDef.Name]; ok {
 					found = true
 				}
@@ -168,10 +181,9 @@ func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.Class
 		}
 	}
 
-	// Check Field Types
 	for _, fieldDef := range classDef.Fields {
 		if fList, ok := fields[fieldDef.Name]; ok {
-			f := fList[0] // Check the first definition (duplicates handled elsewhere)
+			f := fList[0]
 			if !v.checkType(f.Value, fieldDef.Type) {
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
@@ -183,7 +195,6 @@ func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.Class
 		}
 	}
 
-	// Check Field Order
 	if classDef.Ordered {
 		schemaIdx := 0
 		for _, nodeFieldName := range fieldOrder {
@@ -205,14 +216,13 @@ func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.Class
 				}
 			}
 			if !foundInSchema {
-				// Ignore extra fields
 			}
 		}
 	}
 }
 
 func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]*parser.Field) {
-	// Check mandatory Type
+	// ... (same as before)
 	if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
@@ -221,7 +231,6 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 			File:     v.getNodeFile(node),
 		})
 	} else {
-		// Check valid Type value
 		typeVal := typeFields[0].Value
 		var typeStr string
 		switch t := typeVal.(type) {
@@ -250,6 +259,191 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 	}
 }
 
+func (v *Validator) validateGAM(node *index.ProjectNode) {
+	if inputs, ok := node.Children["InputSignals"]; ok {
+		v.validateGAMSignals(node, inputs, "Input")
+	}
+	if outputs, ok := node.Children["OutputSignals"]; ok {
+		v.validateGAMSignals(node, outputs, "Output")
+	}
+}
+
+func (v *Validator) validateGAMSignals(gamNode, signalsContainer *index.ProjectNode, direction string) {
+	for _, signal := range signalsContainer.Children {
+		v.validateGAMSignal(gamNode, signal, direction)
+	}
+}
+
+func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, direction string) {
+	fields := v.getFields(signalNode)
+	var dsName string
+	if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+		dsName = v.getFieldValue(dsFields[0])
+	}
+
+	if dsName == "" {
+		return // Ignore implicit signals or missing datasource (handled elsewhere if mandatory)
+	}
+
+	dsNode := v.resolveReference(dsName, v.getNodeFile(signalNode))
+	if dsNode == nil {
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Unknown DataSource '%s' referenced in signal '%s'", dsName, signalNode.RealName),
+			Position: v.getNodePosition(signalNode),
+			File:     v.getNodeFile(signalNode),
+		})
+		return
+	}
+
+	// Link DataSource reference
+	if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+		if val, ok := dsFields[0].Value.(*parser.ReferenceValue); ok {
+			v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, dsNode)
+		}
+	}
+
+	// Check Direction
+	dsClass := v.getNodeClass(dsNode)
+	if dsClass != "" {
+		if classDef, ok := v.Schema.Classes[dsClass]; ok {
+			dsDir := classDef.Direction
+			if dsDir != "" {
+				if direction == "Input" && dsDir == "OUT" {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("DataSource '%s' (Class %s) is Output-only but referenced in InputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
+						Position: v.getNodePosition(signalNode),
+						File:     v.getNodeFile(signalNode),
+					})
+				}
+				if direction == "Output" && dsDir == "IN" {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("DataSource '%s' (Class %s) is Input-only but referenced in OutputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
+						Position: v.getNodePosition(signalNode),
+						File:     v.getNodeFile(signalNode),
+					})
+				}
+			}
+		}
+	}
+
+	// Check Signal Existence
+	targetSignalName := index.NormalizeName(signalNode.RealName)
+	if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
+		targetSignalName = v.getFieldValue(aliasFields[0]) // Alias is usually the name in DataSource
+	}
+
+	if signalsContainer, ok := dsNode.Children["Signals"]; ok {
+		var targetNode *index.ProjectNode
+		targetNorm := index.NormalizeName(targetSignalName)
+		
+		if child, ok := signalsContainer.Children[targetNorm]; ok {
+			targetNode = child
+		} else {
+			// Fallback check
+			for _, child := range signalsContainer.Children {
+				if index.NormalizeName(child.RealName) == targetNorm {
+					targetNode = child
+					break
+				}
+			}
+		}
+
+		if targetNode == nil {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Signal '%s' not found in DataSource '%s'", targetSignalName, dsName),
+				Position: v.getNodePosition(signalNode),
+				File:     v.getNodeFile(signalNode),
+			})
+		} else {
+			// Link Alias reference
+			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
+				if val, ok := aliasFields[0].Value.(*parser.ReferenceValue); ok {
+					v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
+				}
+			}
+		}
+	}
+}
+
+func (v *Validator) updateReferenceTarget(file string, pos parser.Position, target *index.ProjectNode) {
+	for i := range v.Tree.References {
+		ref := &v.Tree.References[i]
+		if ref.File == file && ref.Position == pos {
+			ref.Target = target
+			return
+		}
+	}
+}
+
+// Helpers
+
+func (v *Validator) getFields(node *index.ProjectNode) map[string][]*parser.Field {
+	fields := make(map[string][]*parser.Field)
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if f, ok := def.(*parser.Field); ok {
+				fields[f.Name] = append(fields[f.Name], f)
+			}
+		}
+	}
+	return fields
+}
+
+func (v *Validator) getFieldValue(f *parser.Field) string {
+	switch val := f.Value.(type) {
+	case *parser.StringValue:
+		return val.Value
+	case *parser.ReferenceValue:
+		return val.Value
+	}
+	return ""
+}
+
+func (v *Validator) resolveReference(name string, file string) *index.ProjectNode {
+	if isoNode, ok := v.Tree.IsolatedFiles[file]; ok {
+		if found := v.findNodeRecursive(isoNode, name); found != nil {
+			return found
+		}
+		return nil
+	}
+	if v.Tree.Root == nil {
+		return nil
+	}
+	return v.findNodeRecursive(v.Tree.Root, name)
+}
+
+func (v *Validator) findNodeRecursive(root *index.ProjectNode, name string) *index.ProjectNode {
+	// Simple recursive search matching name
+	if root.RealName == name || root.Name == index.NormalizeName(name) {
+		return root
+	}
+	
+	// Fast lookup in children
+	norm := index.NormalizeName(name)
+	if child, ok := root.Children[norm]; ok {
+		return child
+	}
+	
+	// Recursive
+	for _, child := range root.Children {
+		if found := v.findNodeRecursive(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+func (v *Validator) getNodeClass(node *index.ProjectNode) string {
+	if cls, ok := node.Metadata["Class"]; ok {
+		return cls
+	}
+	return ""
+}
+
 func isValidType(t string) bool {
 	switch t {
 	case "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64",
@@ -260,6 +454,7 @@ func isValidType(t string) bool {
 }
 
 func (v *Validator) checkType(val parser.Value, expectedType string) bool {
+    // ... (same as before)
 	switch expectedType {
 	case "int":
 		_, ok := val.(*parser.IntValue)
@@ -300,6 +495,7 @@ func (v *Validator) getFileForField(f *parser.Field, node *index.ProjectNode) st
 }
 
 func (v *Validator) CheckUnused() {
+    // ... (same as before)
 	referencedNodes := make(map[*index.ProjectNode]bool)
 	for _, ref := range v.Tree.References {
 		if ref.Target != nil {
@@ -316,6 +512,7 @@ func (v *Validator) CheckUnused() {
 }
 
 func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
+    // ... (same as before)
 	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {

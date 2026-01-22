@@ -108,26 +108,29 @@ MARTe configurations typically involve several main categories of objects:
     - **Extensibility**: Signal definitions can include additional fields as required by the specific application context.
 - **Signal Reference Syntax**:
   - Signals are referenced or defined in `InputSignals` or `OutputSignals` sub-nodes using one of the following formats:
-    1.  **Direct Reference**:
+    1.  **Direct Reference (Option 1)**:
         ```
         SIGNAL_NAME = {
-            DataSource = SIGNAL_DATASOURCE
+            DataSource = DATASOURCE_NAME
             // Other fields if necessary
         }
         ```
-    2.  **Aliased Reference**:
+        In this case, the GAM signal name is the same as the DataSource signal name.
+    2.  **Aliased Reference (Option 2)**:
         ```
-        NAME = {
+        GAM_SIGNAL_NAME = {
             Alias = SIGNAL_NAME
-            DataSource = SIGNAL_DATASOURCE
+            DataSource = DATASOURCE_NAME
             // ...
         }
         ```
+        In this case, `Alias` points to the DataSource signal name.
   - **Implicit Definition Constraint**: If a signal is implicitly defined within a GAM, the `Type` field **must** be present in the reference block to define the signal's properties.
 - **Directionality**: DataSources and their signals are directional:
-  - `Input`: Only providing data.
-  - `Output`: Only receiving data.
-  - `Inout`: Bidirectional data flow.
+  - `Input` (IN): Only providing data. Signals can only be used in `InputSignals`.
+  - `Output` (OUT): Only receiving data. Signals can only be used in `OutputSignals`.
+  - `Inout` (INOUT): Bidirectional data flow. Signals can be used in both `InputSignals` and `OutputSignals`.
+  - **Validation**: The tool must validate that signal usage in GAMs respects the direction of the referenced DataSource.
 
 ### Object Indexing & References
 
