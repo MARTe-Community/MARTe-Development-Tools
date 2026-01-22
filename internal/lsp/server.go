@@ -268,11 +268,13 @@ func handleDidOpen(params DidOpenTextDocumentParams) {
 	documents[params.TextDocument.URI] = params.TextDocument.Text
 	p := parser.NewParser(params.TextDocument.Text)
 	config, err := p.Parse()
-	if err == nil {
-		tree.AddFile(path, config)
-		tree.ResolveReferences()
-		runValidation(params.TextDocument.URI)
+	if err != nil {
+		publishParserError(params.TextDocument.URI, err)
+		return
 	}
+	tree.AddFile(path, config)
+	tree.ResolveReferences()
+	runValidation(params.TextDocument.URI)
 }
 
 func handleDidChange(params DidChangeTextDocumentParams) {
@@ -284,11 +286,13 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 	path := uriToPath(params.TextDocument.URI)
 	p := parser.NewParser(text)
 	config, err := p.Parse()
-	if err == nil {
-		tree.AddFile(path, config)
-		tree.ResolveReferences()
-		runValidation(params.TextDocument.URI)
+	if err != nil {
+		publishParserError(params.TextDocument.URI, err)
+		return
 	}
+	tree.AddFile(path, config)
+	tree.ResolveReferences()
+	runValidation(params.TextDocument.URI)
 }
 
 func handleFormatting(params DocumentFormattingParams) []TextEdit {
@@ -376,6 +380,44 @@ func runValidation(uri string) {
 		}
 		send(notification)
 	}
+}
+
+func publishParserError(uri string, err error) {
+	var line, col int
+	var msg string
+	// Try parsing "line:col: message"
+	n, _ := fmt.Sscanf(err.Error(), "%d:%d: ", &line, &col)
+	if n == 2 {
+		parts := strings.SplitN(err.Error(), ": ", 2)
+		if len(parts) == 2 {
+			msg = parts[1]
+		}
+	} else {
+		// Fallback
+		line = 1
+		col = 1
+		msg = err.Error()
+	}
+
+	diag := LSPDiagnostic{
+		Range: Range{
+			Start: Position{Line: line - 1, Character: col - 1},
+			End:   Position{Line: line - 1, Character: col},
+		},
+		Severity: 1, // Error
+		Message:  msg,
+		Source:   "mdt-parser",
+	}
+
+	notification := JsonRpcMessage{
+		Jsonrpc: "2.0",
+		Method:  "textDocument/publishDiagnostics",
+		Params:  mustMarshal(PublishDiagnosticsParams{
+			URI:         uri,
+			Diagnostics: []LSPDiagnostic{diag},
+		}),
+	}
+	send(notification)
 }
 
 func collectFiles(node *index.ProjectNode, files map[string]bool) {

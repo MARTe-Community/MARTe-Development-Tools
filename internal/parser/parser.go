@@ -235,6 +235,10 @@ func (p *Parser) parseValue() (Value, error) {
 				arr.EndPosition = endTok.Position
 				break
 			}
+			if t.Type == TokenComma {
+				p.next()
+				continue
+			}
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err

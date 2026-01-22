@@ -22,6 +22,7 @@ const (
 	TokenPragma
 	TokenComment
 	TokenDocstring
+	TokenComma
 )
 
 type Token struct {
@@ -109,7 +110,7 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenEOF)
 		}
 
-		if unicode.IsSpace(r) || r == ',' {
+		if unicode.IsSpace(r) {
 			l.ignore()
 			continue
 		}
@@ -121,6 +122,8 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenLBrace)
 		case '}':
 			return l.emit(TokenRBrace)
+		case ',':
+			return l.emit(TokenComma)
 		case '"':
 			return l.lexString()
 		case '/':

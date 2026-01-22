@@ -90,6 +90,7 @@ The LSP server should provide the following capabilities:
   - `//!allow(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`).
   - `//!cast(DEF_TYPE, CUR_TYPE): REASON` - Suppress "Type Inconsistency" errors if types match.
 - **Structure**: A configuration is composed by one or more definitions.
+- **Strictness**: Any content that is not a valid comment (or pragma/docstring) or a valid definition (Field, Node, or Object) is **not allowed** and must generate a parsing error.
 
 ### Core MARTe Classes
 
