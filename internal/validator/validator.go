@@ -133,6 +133,10 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 				File:     file,
 			})
 		}
+
+		if className == "RealTimeThread" {
+			v.checkFunctionsArray(node, fields)
+		}
 	}
 
 	// 3. Schema Validation
@@ -354,10 +358,10 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 
 	if targetNode == nil {
-		suppressed := v.isGloballyAllowed("implicit")
+		suppressed := v.isGloballyAllowed("implicit", v.getNodeFile(signalNode))
 		if !suppressed {
 			for _, p := range signalNode.Pragmas {
-				if strings.HasPrefix(p, "implicit:") {
+				if strings.HasPrefix(p, "implicit:") || strings.HasPrefix(p, "ignore(implicit)") {
 					suppressed = true
 					break
 				}
@@ -626,14 +630,13 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
-			if v.isGloballyAllowed("unused") {
-				return
-			}
-			suppress := false
-			for _, p := range node.Pragmas {
-				if strings.HasPrefix(p, "unused:") {
-					suppress = true
-					break
+			suppress := v.isGloballyAllowed("unused", v.getNodeFile(node))
+			if !suppress {
+				for _, p := range node.Pragmas {
+					if strings.HasPrefix(p, "unused:") || strings.HasPrefix(p, "ignore(unused)") {
+						suppress = true
+						break
+					}
 				}
 			}
 			if !suppress {
@@ -652,12 +655,12 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 		if signalsNode, ok := node.Children["Signals"]; ok {
 			for _, signal := range signalsNode.Children {
 				if !referenced[signal] {
-					if v.isGloballyAllowed("unused") {
+					if v.isGloballyAllowed("unused", v.getNodeFile(signal)) {
 						continue
 					}
 					suppress := false
 					for _, p := range signal.Pragmas {
-						if strings.HasPrefix(p, "unused:") {
+						if strings.HasPrefix(p, "unused:") || strings.HasPrefix(p, "ignore(unused)") {
 							suppress = true
 							break
 						}
@@ -719,11 +722,59 @@ func (v *Validator) getNodeFile(node *index.ProjectNode) string {
 	return ""
 }
 
-func (v *Validator) isGloballyAllowed(warningType string) bool {
-	prefix := fmt.Sprintf("//!allow(%s)", warningType)
-	for _, pragmas := range v.Tree.GlobalPragmas {
+func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[string][]*parser.Field) {
+	if funcs, ok := fields["Functions"]; ok && len(funcs) > 0 {
+		f := funcs[0]
+		if arr, ok := f.Value.(*parser.ArrayValue); ok {
+			for _, elem := range arr.Elements {
+				if ref, ok := elem.(*parser.ReferenceValue); ok {
+					target := v.resolveReference(ref.Value, v.getNodeFile(node), isGAM)
+					if target == nil {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:    LevelError,
+							Message:  fmt.Sprintf("Function '%s' not found or is not a valid GAM", ref.Value),
+							Position: ref.Position,
+							File:     v.getNodeFile(node),
+						})
+					}
+				} else {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  "Functions array must contain references",
+						Position: f.Position,
+						File:     v.getNodeFile(node),
+					})
+				}
+			}
+		}
+	}
+}
+
+func (v *Validator) isGloballyAllowed(warningType string, contextFile string) bool {
+	prefix1 := fmt.Sprintf("allow(%s)", warningType)
+	prefix2 := fmt.Sprintf("ignore(%s)", warningType)
+
+	// If context file is isolated, only check its own pragmas
+	if _, isIsolated := v.Tree.IsolatedFiles[contextFile]; isIsolated {
+		if pragmas, ok := v.Tree.GlobalPragmas[contextFile]; ok {
+			for _, p := range pragmas {
+				normalized := strings.ReplaceAll(p, " ", "")
+				if strings.HasPrefix(normalized, prefix1) || strings.HasPrefix(normalized, prefix2) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// If project file, check all non-isolated files
+	for file, pragmas := range v.Tree.GlobalPragmas {
+		if _, isIsolated := v.Tree.IsolatedFiles[file]; isIsolated {
+			continue
+		}
 		for _, p := range pragmas {
-			if strings.HasPrefix(p, prefix) {
+			normalized := strings.ReplaceAll(p, " ", "")
+			if strings.HasPrefix(normalized, prefix1) || strings.HasPrefix(normalized, prefix2) {
 				return true
 			}
 		}

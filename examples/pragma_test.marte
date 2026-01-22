@@ -1,0 +1,27 @@
+//!allow(unused): Ignore unused GAMs in this file
+//!allow(implicit): Ignore implicit signals in this file
+
++Data = {
+    Class = ReferenceContainer
+    +MyDS = {
+        Class = FileReader
+        Filename = "test"
+        Signals = {}
+    }
+}
+
++MyGAM = {
+    Class = IOGAM
+    InputSignals = {
+        // Implicit signal (not in MyDS)
+        ImplicitSig = {
+            DataSource = MyDS
+            Type = uint32
+        }
+    }
+}
+
+// Unused GAM
++UnusedGAM = {
+    Class = IOGAM
+}

@@ -85,9 +85,9 @@ The LSP server should provide the following capabilities:
   - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition (across all files where the node is defined).
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored. Supported pragmas:
-  - `//!unused: REASON` - Suppress "Unused GAM" or "Unused Signal" warnings for a specific node.
-  - `//!implicit: REASON` - Suppress "Implicitly Defined Signal" warnings for a specific signal reference.
-  - `//!allow(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`).
+  - `//!unused: REASON` or `//!ignore(unused): REASON` - Suppress "Unused GAM" or "Unused Signal" warnings.
+  - `//!implicit: REASON` or `//!ignore(implicit): REASON` - Suppress "Implicitly Defined Signal" warnings.
+  - `//!allow(WARNING_TYPE): REASON` or `//!ignore(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`).
   - `//!cast(DEF_TYPE, CUR_TYPE): REASON` - Suppress "Type Inconsistency" errors if types match.
 - **Structure**: A configuration is composed by one or more definitions.
 - **Strictness**: Any content that is not a valid comment (or pragma/docstring) or a valid definition (Field, Node, or Object) is **not allowed** and must generate a parsing error.
@@ -205,6 +205,7 @@ The LSP and `check` command should report the following:
     - Missing mandatory fields.
     - Field type mismatches.
     - Grammar errors (e.g., missing closing brackets).
+    - **Invalid Function Reference**: Elements in the `Functions` array of a `State.Thread` must be valid references to defined GAM nodes.
 
 ## Logging
 

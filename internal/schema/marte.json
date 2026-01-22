@@ -12,6 +12,16 @@
         {"name": "States", "type": "node", "mandatory": false}
       ]
     },
+    "RealTimeState": {
+      "fields": [
+        {"name": "Threads", "type": "node", "mandatory": true}
+      ]
+    },
+    "RealTimeThread": {
+      "fields": [
+        {"name": "Functions", "type": "array", "mandatory": true}
+      ]
+    },
     "GAMScheduler": {
       "fields": [
         {"name": "TimingDataSource", "type": "reference", "mandatory": true}
@@ -143,7 +153,7 @@
         {"name": "StateChangeResetName", "type": "string", "mandatory": false},
         {"name": "InputSignals", "type": "node", "mandatory": false},
         {"name": "OutputSignals", "type": "node", "mandatory": false}
-      ]
+      ] 
     },
     "Interleaved2FlatGAM": { "fields": [] },
     "FlattenedStructIOGAM": { "fields": [] },
@@ -152,7 +162,7 @@
         {"name": "Expression", "type": "string", "mandatory": true},
         {"name": "InputSignals", "type": "node", "mandatory": false},
         {"name": "OutputSignals", "type": "node", "mandatory": false}
-      ]
+      ] 
     },
     "MessageGAM": { "fields": [] },
     "MuxGAM": { "fields": [] },

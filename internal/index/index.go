@@ -162,8 +162,9 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 
 	// Collect global pragmas
 	for _, p := range config.Pragmas {
-		txt := strings.TrimSpace(p.Text)
-		if strings.HasPrefix(txt, "//!allow(") {
+		txt := strings.TrimSpace(strings.TrimPrefix(p.Text, "//!"))
+		normalized := strings.ReplaceAll(txt, " ", "")
+		if strings.HasPrefix(normalized, "allow(") || strings.HasPrefix(normalized, "ignore(") {
 			pt.GlobalPragmas[file] = append(pt.GlobalPragmas[file], txt)
 		}
 	}

@@ -140,3 +140,16 @@ func TestLSPHover(t *testing.T) {
 		t.Errorf("Expected +MyObject, got %s", res.Node.RealName)
 	}
 }
+
+func TestParserError(t *testing.T) {
+	invalidContent := `
+A = {
+  Field = 
+}
+`
+	p := parser.NewParser(invalidContent)
+	_, err := p.Parse()
+	if err == nil {
+		t.Fatal("Expected parser error, got nil")
+	}
+}
