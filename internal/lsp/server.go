@@ -192,11 +192,13 @@ func handleMessage(msg *JsonRpcMessage) {
 			} else if params.RootPath != "" {
 				root = params.RootPath
 			}
-			
+
 			if root != "" {
 				projectRoot = root
 				logger.Printf("Scanning workspace: %s\n", root)
-				tree.ScanDirectory(root)
+				if err := tree.ScanDirectory(root); err != nil {
+					logger.Printf("ScanDirectory failed: %v\n", err)
+				}
 				tree.ResolveReferences()
 			}
 		}
@@ -335,11 +337,11 @@ func runValidation(uri string) {
 
 	// Group diagnostics by file
 	fileDiags := make(map[string][]LSPDiagnostic)
-	
+
 	// Collect all known files to ensure we clear diagnostics for fixed files
 	knownFiles := make(map[string]bool)
 	collectFiles(tree.Root, knownFiles)
-	
+
 	// Initialize all known files with empty diagnostics
 	for f := range knownFiles {
 		fileDiags[f] = []LSPDiagnostic{}
@@ -360,7 +362,7 @@ func runValidation(uri string) {
 			Message:  d.Message,
 			Source:   "mdt",
 		}
-		
+
 		path := d.File
 		if path != "" {
 			fileDiags[path] = append(fileDiags[path], diag)
@@ -373,7 +375,7 @@ func runValidation(uri string) {
 		notification := JsonRpcMessage{
 			Jsonrpc: "2.0",
 			Method:  "textDocument/publishDiagnostics",
-			Params:  mustMarshal(PublishDiagnosticsParams{
+			Params: mustMarshal(PublishDiagnosticsParams{
 				URI:         fileURI,
 				Diagnostics: diags,
 			}),
@@ -412,7 +414,7 @@ func publishParserError(uri string, err error) {
 	notification := JsonRpcMessage{
 		Jsonrpc: "2.0",
 		Method:  "textDocument/publishDiagnostics",
-		Params:  mustMarshal(PublishDiagnosticsParams{
+		Params: mustMarshal(PublishDiagnosticsParams{
 			URI:         uri,
 			Diagnostics: []LSPDiagnostic{diag},
 		}),
@@ -602,13 +604,12 @@ func handleReferences(params ReferenceParams) []Location {
 }
 
 func formatNodeInfo(node *index.ProjectNode) string {
-	class := node.Metadata["Class"]
-	if class == "" {
-		class = "Unknown"
+	info := ""
+	if class := node.Metadata["Class"]; class != "" {
+		info = fmt.Sprintf("`%s:%s`\n\n", class, node.RealName[1:])
+	} else {
+		info = fmt.Sprintf("`%s`\n\n", node.RealName)
 	}
-
-	info := fmt.Sprintf("**Object**: `%s`\n\n**Class**: `%s`", node.RealName, class)
-
 	// Check if it's a Signal (has Type or DataSource)
 	typ := node.Metadata["Type"]
 	ds := node.Metadata["DataSource"]
