@@ -84,7 +84,11 @@ The LSP server should provide the following capabilities:
 - **Nodes (`+` / `$`)**: The prefixes `+` and `$` indicate that the node represents an object.
   - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition (across all files where the node is defined).
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
-- **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored.
+- **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored. Supported pragmas:
+  - `//!unused: REASON` - Suppress "Unused GAM" or "Unused Signal" warnings for a specific node.
+  - `//!implicit: REASON` - Suppress "Implicitly Defined Signal" warnings for a specific signal reference.
+  - `//!allow(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`).
+  - `//!cast(DEF_TYPE, CUR_TYPE): REASON` - Suppress "Type Inconsistency" errors if types match.
 - **Structure**: A configuration is composed by one or more definitions.
 
 ### Core MARTe Classes
@@ -105,6 +109,7 @@ MARTe configurations typically involve several main categories of objects:
   - **Requirements**:
     - All signal definitions **must** include a `Type` field with a valid value.
     - **Size Information**: Signals can optionally include `NumberOfDimensions` and `NumberOfElements` fields. If not explicitly defined, these default to `1`.
+    - **Property Matching**: Signal references in GAMs must match the properties (`Type`, `NumberOfElements`, `NumberOfDimensions`) of the defined signal in the `DataSource`.
     - **Extensibility**: Signal definitions can include additional fields as required by the specific application context.
 - **Signal Reference Syntax**:
   - Signals are referenced or defined in `InputSignals` or `OutputSignals` sub-nodes using one of the following formats:
@@ -186,13 +191,14 @@ The `fmt` command must format the code according to the following rules:
 The LSP and `check` command should report the following:
 
 - **Warnings**:
-  - **Unused GAM**: A GAM is defined but not referenced in any thread or scheduler.
-  - **Unused Signal**: A signal is explicitly defined in a `DataSource` but never referenced in any `GAM`.
-  - **Implicitly Defined Signal**: A signal is defined only within a `GAM` and not in its parent `DataSource`.
+  - **Unused GAM**: A GAM is defined but not referenced in any thread or scheduler. (Suppress with `//!unused`)
+  - **Unused Signal**: A signal is explicitly defined in a `DataSource` but never referenced in any `GAM`. (Suppress with `//!unused`)
+  - **Implicitly Defined Signal**: A signal is defined only within a `GAM` and not in its parent `DataSource`. (Suppress with `//!implicit`)
 
 - **Errors**:
-  - **Type Inconsistency**: A signal is referenced with a type different from its definition.
+  - **Type Inconsistency**: A signal is referenced with a type different from its definition. (Suppress with `//!cast`)
   - **Size Inconsistency**: A signal is referenced with a size (dimensions/elements) different from its definition.
+  - **Invalid Signal Content**: The `Signals` container of a `DataSource` contains invalid elements (e.g., fields instead of nodes).
   - **Duplicate Field Definition**: A field is defined multiple times within the same node scope (including across multiple files).
   - **Validation Errors**:
     - Missing mandatory fields.

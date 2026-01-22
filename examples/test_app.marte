@@ -748,10 +748,11 @@ $TbTestApp = {
                     DataSource = Timer
                     Type = uint32
                 }
+                //!cast(uint32, uint64): because...
                 Time = {
                     Frequency = 100
                     DataSource = Timer
-                    Type = uint32
+                    Type = uint64
                 }
                 AbsoluteTime = {
                     DataSource = Timer
@@ -759,6 +760,7 @@ $TbTestApp = {
                 }
             }
             OutputSignals = {
+                //!implicit: defined because....
                 Counter_DDB1 = {
                     DataSource = DDB1
                     Type = uint32

@@ -13,6 +13,7 @@ type ProjectTree struct {
 	Root          *ProjectNode
 	References    []Reference
 	IsolatedFiles map[string]*ProjectNode
+	GlobalPragmas map[string][]string
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -59,6 +60,7 @@ type Fragment struct {
 	Definitions []parser.Definition
 	IsObject    bool
 	ObjectPos   parser.Position
+	EndPos      parser.Position
 	Doc         string // Documentation for this fragment (if object)
 }
 
@@ -69,6 +71,7 @@ func NewProjectTree() *ProjectTree {
 			Metadata: make(map[string]string),
 		},
 		IsolatedFiles: make(map[string]*ProjectNode),
+		GlobalPragmas: make(map[string][]string),
 	}
 }
 
@@ -89,6 +92,7 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	pt.References = newRefs
 
 	delete(pt.IsolatedFiles, file)
+	delete(pt.GlobalPragmas, file)
 	pt.removeFileFromNode(pt.Root, file)
 }
 
@@ -155,6 +159,14 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.RemoveFile(file)
+
+	// Collect global pragmas
+	for _, p := range config.Pragmas {
+		txt := strings.TrimSpace(p.Text)
+		if strings.HasPrefix(txt, "//!allow(") {
+			pt.GlobalPragmas[file] = append(pt.GlobalPragmas[file], txt)
+		}
+	}
 
 	if config.Package == nil {
 		node := &ProjectNode{
@@ -249,6 +261,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		File:      file,
 		IsObject:  true,
 		ObjectPos: obj.Position,
+		EndPos:    obj.Subnode.EndPosition,
 		Doc:       doc,
 	}
 
@@ -458,6 +471,47 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 	for _, child := range node.Children {
 		if res := pt.queryNode(child, file, line, col); res != nil {
 			return res
+		}
+	}
+	return nil
+}
+
+func (pt *ProjectTree) GetNodeContaining(file string, pos parser.Position) *ProjectNode {
+	if isoNode, ok := pt.IsolatedFiles[file]; ok {
+		if found := pt.findNodeContaining(isoNode, file, pos); found != nil {
+			return found
+		}
+		return isoNode
+	}
+	if pt.Root != nil {
+		if found := pt.findNodeContaining(pt.Root, file, pos); found != nil {
+			return found
+		}
+		for _, frag := range pt.Root.Fragments {
+			if frag.File == file && !frag.IsObject {
+				return pt.Root
+			}
+		}
+	}
+	return nil
+}
+
+func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos parser.Position) *ProjectNode {
+	for _, child := range node.Children {
+		if res := pt.findNodeContaining(child, file, pos); res != nil {
+			return res
+		}
+	}
+
+	for _, frag := range node.Fragments {
+		if frag.File == file && frag.IsObject {
+			start := frag.ObjectPos
+			end := frag.EndPos
+
+			if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
+				(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
+				return node
+			}
 		}
 	}
 	return nil

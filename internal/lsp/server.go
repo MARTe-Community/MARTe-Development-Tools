@@ -581,8 +581,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 
 		// Size
-	dims := node.Metadata["NumberOfDimensions"]
-elems := node.Metadata["NumberOfElements"]
+		dims := node.Metadata["NumberOfDimensions"]
+		elems := node.Metadata["NumberOfElements"]
 		if dims != "" || elems != "" {
 			sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
 		}
@@ -592,6 +592,57 @@ elems := node.Metadata["NumberOfElements"]
 	if node.Doc != "" {
 		info += fmt.Sprintf("\n\n%s", node.Doc)
 	}
+
+	// Find references
+	var refs []string
+	for _, ref := range tree.References {
+		if ref.Target == node {
+			container := tree.GetNodeContaining(ref.File, ref.Position)
+			if container != nil {
+				threadName := ""
+				stateName := ""
+
+				curr := container
+				for curr != nil {
+					if cls, ok := curr.Metadata["Class"]; ok {
+						if cls == "RealTimeThread" {
+							threadName = curr.RealName
+						}
+						if cls == "RealTimeState" {
+							stateName = curr.RealName
+						}
+					}
+					curr = curr.Parent
+				}
+
+				if threadName != "" || stateName != "" {
+					refStr := ""
+					if stateName != "" {
+						refStr += fmt.Sprintf("State: `%s`", stateName)
+					}
+					if threadName != "" {
+						if refStr != "" {
+							refStr += ", "
+						}
+						refStr += fmt.Sprintf("Thread: `%s`", threadName)
+					}
+					refs = append(refs, refStr)
+				}
+			}
+		}
+	}
+
+	if len(refs) > 0 {
+		uniqueRefs := make(map[string]bool)
+		info += "\n\n**Referenced in**:\n"
+		for _, r := range refs {
+			if !uniqueRefs[r] {
+				uniqueRefs[r] = true
+				info += fmt.Sprintf("- %s\n", r)
+			}
+		}
+	}
+
 	return info
 }
 

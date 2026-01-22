@@ -354,15 +354,17 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 
 	if targetNode == nil {
-		suppress := false
-		for _, p := range signalNode.Pragmas {
-			if strings.HasPrefix(p, "implicit:") {
-				suppress = true
-				break
+		suppressed := v.isGloballyAllowed("implicit")
+		if !suppressed {
+			for _, p := range signalNode.Pragmas {
+				if strings.HasPrefix(p, "implicit:") {
+					suppressed = true
+					break
+				}
 			}
 		}
 
-		if !suppress {
+		if !suppressed {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelWarning,
 				Message:  fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
@@ -624,6 +626,9 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
+			if v.isGloballyAllowed("unused") {
+				return
+			}
 			suppress := false
 			for _, p := range node.Pragmas {
 				if strings.HasPrefix(p, "unused:") {
@@ -647,6 +652,9 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 		if signalsNode, ok := node.Children["Signals"]; ok {
 			for _, signal := range signalsNode.Children {
 				if !referenced[signal] {
+					if v.isGloballyAllowed("unused") {
+						continue
+					}
 					suppress := false
 					for _, p := range signal.Pragmas {
 						if strings.HasPrefix(p, "unused:") {
@@ -709,4 +717,16 @@ func (v *Validator) getNodeFile(node *index.ProjectNode) string {
 		return node.Fragments[0].File
 	}
 	return ""
+}
+
+func (v *Validator) isGloballyAllowed(warningType string) bool {
+	prefix := fmt.Sprintf("//!allow(%s)", warningType)
+	for _, pragmas := range v.Tree.GlobalPragmas {
+		for _, p := range pragmas {
+			if strings.HasPrefix(p, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
