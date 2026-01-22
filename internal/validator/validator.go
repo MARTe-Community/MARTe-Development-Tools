@@ -47,6 +47,22 @@ func (v *Validator) ValidateProject() {
 }
 
 func (v *Validator) validateNode(node *index.ProjectNode) {
+	// Check for invalid content in Signals container of DataSource
+	if node.RealName == "Signals" && node.Parent != nil && isDataSource(node.Parent) {
+		for _, frag := range node.Fragments {
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("Invalid content in Signals container: Field '%s' is not allowed. Only Signal objects are allowed.", f.Name),
+						Position: f.Position,
+						File:     frag.File,
+					})
+				}
+			}
+		}
+	}
+
 	// Collect fields and their definitions
 	fields := make(map[string][]*parser.Field)
 	fieldOrder := []string{} // Keep track of order of appearance (approximate across fragments)
@@ -94,6 +110,9 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 			hasType = true
 		}
 
+		// Exception for Signals: Signals don't need Class if they have Type.
+		// But general nodes need Class.
+		// Logic handles it: if className=="" and !hasType -> Error.
 		if className == "" && !hasType {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
@@ -111,6 +130,11 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		if classDef, ok := v.Schema.Classes[className]; ok {
 			v.validateClass(node, classDef, fields, fieldOrder)
 		}
+	}
+
+	// 4. Signal Validation (for DataSource signals)
+	if isSignal(node) {
+		v.validateSignal(node, fields)
 	}
 
 	// Recursively validate children
@@ -161,19 +185,13 @@ func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.Class
 
 	// Check Field Order
 	if classDef.Ordered {
-		// Verify that fields present in the node appear in the order defined in the schema
-		// Only consider fields that are actually in the schema's field list
 		schemaIdx := 0
 		for _, nodeFieldName := range fieldOrder {
-			// Find this field in schema
 			foundInSchema := false
 			for i, fd := range classDef.Fields {
 				if fd.Name == nodeFieldName {
 					foundInSchema = true
-					// Check if this field appears AFTER the current expected position
 					if i < schemaIdx {
-						// This field appears out of order (it should have appeared earlier, or previous fields were missing but this one came too late? No, simple relative order)
-						// Actually, simple check: `i` must be >= `lastSeenSchemaIdx`.
 						v.Diagnostics = append(v.Diagnostics, Diagnostic{
 							Level:    LevelError,
 							Message:  fmt.Sprintf("Field '%s' is out of order", nodeFieldName),
@@ -187,10 +205,58 @@ func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.Class
 				}
 			}
 			if !foundInSchema {
-				// Ignore extra fields for order check? Spec doesn't say strict closed schema.
+				// Ignore extra fields
 			}
 		}
 	}
+}
+
+func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]*parser.Field) {
+	// Check mandatory Type
+	if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Signal '%s' is missing mandatory field 'Type'", node.RealName),
+			Position: v.getNodePosition(node),
+			File:     v.getNodeFile(node),
+		})
+	} else {
+		// Check valid Type value
+		typeVal := typeFields[0].Value
+		var typeStr string
+		switch t := typeVal.(type) {
+		case *parser.StringValue:
+			typeStr = t.Value
+		case *parser.ReferenceValue:
+			typeStr = t.Value
+		default:
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Field 'Type' in Signal '%s' must be a type name", node.RealName),
+				Position: typeFields[0].Position,
+				File:     v.getFileForField(typeFields[0], node),
+			})
+			return
+		}
+
+		if !isValidType(typeStr) {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeStr, node.RealName),
+				Position: typeFields[0].Position,
+				File:     v.getFileForField(typeFields[0], node),
+			})
+		}
+	}
+}
+
+func isValidType(t string) bool {
+	switch t {
+	case "uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64",
+		"float32", "float64", "string", "bool", "char8":
+		return true
+	}
+	return false
 }
 
 func (v *Validator) checkType(val parser.Value, expectedType string) bool {
@@ -202,8 +268,9 @@ func (v *Validator) checkType(val parser.Value, expectedType string) bool {
 		_, ok := val.(*parser.FloatValue)
 		return ok
 	case "string":
-		_, ok := val.(*parser.StringValue)
-		return ok
+		_, okStr := val.(*parser.StringValue)
+		_, okRef := val.(*parser.ReferenceValue)
+		return okStr || okRef
 	case "bool":
 		_, ok := val.(*parser.BoolValue)
 		return ok
@@ -214,15 +281,7 @@ func (v *Validator) checkType(val parser.Value, expectedType string) bool {
 		_, ok := val.(*parser.ReferenceValue)
 		return ok
 	case "node":
-		// This is tricky. A field cannot really be a "node" type in the parser sense (Node = { ... } is an ObjectNode, not a Field).
-		// But if the schema says "FieldX" is type "node", maybe it means it expects a reference to a node?
-		// Or maybe it means it expects a Subnode?
-		// In MARTe, `Field = { ... }` is parsed as ArrayValue usually.
-		// If `Field = SubNode`, it's `ObjectNode`.
-		// Schema likely refers to `+SubNode = { ... }`.
-		// But `validateClass` iterates `fields`.
-		// If schema defines a "field" of type "node", it might mean it expects a child node with that name.
-		return true // skip for now
+		return true
 	case "any":
 		return true
 	}
@@ -271,14 +330,16 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 
 	// Heuristic for DataSource and its signals
 	if isDataSource(node) {
-		for _, signal := range node.Children {
-			if !referenced[signal] {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelWarning,
-					Message:  fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
-					Position: v.getNodePosition(signal),
-					File:     v.getNodeFile(signal),
-				})
+		if signalsNode, ok := node.Children["Signals"]; ok {
+			for _, signal := range signalsNode.Children {
+				if !referenced[signal] {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelWarning,
+						Message:  fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
+						Position: v.getNodePosition(signal),
+						File:     v.getNodeFile(signal),
+					})
+				}
 			}
 		}
 	}
@@ -300,6 +361,15 @@ func isGAM(node *index.ProjectNode) bool {
 func isDataSource(node *index.ProjectNode) bool {
 	if node.Parent != nil && node.Parent.Name == "Data" {
 		return true
+	}
+	return false
+}
+
+func isSignal(node *index.ProjectNode) bool {
+	if node.Parent != nil && node.Parent.Name == "Signals" {
+		if isDataSource(node.Parent.Parent) {
+			return true
+		}
 	}
 	return false
 }

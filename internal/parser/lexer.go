@@ -109,7 +109,7 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenEOF)
 		}
 
-		if unicode.IsSpace(r) {
+		if unicode.IsSpace(r) || r == ',' {
 			l.ignore()
 			continue
 		}
@@ -148,7 +148,7 @@ func (l *Lexer) NextToken() Token {
 func (l *Lexer) lexIdentifier() Token {
 	for {
 		r := l.next()
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' || r == ':' {
 			continue
 		}
 		l.backup()
@@ -186,7 +186,7 @@ func (l *Lexer) lexString() Token {
 func (l *Lexer) lexNumber() Token {
 	for {
 		r := l.next()
-		if unicode.IsDigit(r) || r == '.' || r == 'x' || r == 'b' || r == 'e' || r == '-' {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '.' || r == '-' || r == '+' {
 			continue
 		}
 		l.backup()
@@ -205,6 +205,20 @@ func (l *Lexer) lexComment() Token {
 			return l.lexUntilNewline(TokenPragma)
 		}
 		return l.lexUntilNewline(TokenComment)
+	}
+	if r == '*' {
+		for {
+			r := l.next()
+			if r == -1 {
+				return l.emit(TokenError)
+			}
+			if r == '*' {
+				if l.peek() == '/' {
+					l.next() // consume /
+					return l.emit(TokenComment)
+				}
+			}
+		}
 	}
 	l.backup()
 	return l.emit(TokenError)

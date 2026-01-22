@@ -9,7 +9,7 @@
     },
     "StateMachine": {
       "fields": [
-        {"name": "States", "type": "node", "mandatory": true}
+        {"name": "States", "type": "node", "mandatory": false}
       ]
     },
     "GAMScheduler": {
