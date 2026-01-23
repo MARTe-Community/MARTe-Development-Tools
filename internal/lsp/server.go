@@ -726,7 +726,7 @@ func suggestObjects(filter string) *CompletionList {
 
 		if match {
 			items = append(items, CompletionItem{
-				Label:  node.RealName,
+				Label:  node.Name,
 				Kind:   6, // Variable
 				Detail: node.Metadata["Class"],
 			})
