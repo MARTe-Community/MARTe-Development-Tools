@@ -35,11 +35,17 @@ func TestRealTimeApplicationValidation(t *testing.T) {
 	missingStates := false
 
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Data'") {
+		if strings.Contains(d.Message, "Data: field is required") {
 			missingData = true
 		}
-		if strings.Contains(d.Message, "Missing mandatory field 'States'") {
+		if strings.Contains(d.Message, "States: field is required") {
 			missingStates = true
+		}
+	}
+
+	if !missingData || !missingStates {
+		for _, d := range v.Diagnostics {
+			t.Logf("Diagnostic: %s", d.Message)
 		}
 	}
 
@@ -73,7 +79,7 @@ func TestGAMSchedulerValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'TimingDataSource'") {
+		if strings.Contains(d.Message, "TimingDataSource: incomplete value") {
 			found = true
 			break
 		}

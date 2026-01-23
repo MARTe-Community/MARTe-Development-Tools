@@ -38,7 +38,7 @@ func TestMDSWriterValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'TreeName'") {
+		if strings.Contains(d.Message, "TreeName: incomplete value") {
 			found = true
 			break
 		}
@@ -71,7 +71,7 @@ func TestMathExpressionGAMValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Expression'") {
+		if strings.Contains(d.Message, "Expression: incomplete value") {
 			found = true
 			break
 		}

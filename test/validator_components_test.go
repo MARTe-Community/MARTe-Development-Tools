@@ -35,10 +35,10 @@ func TestPIDGAMValidation(t *testing.T) {
 	foundKd := false
 
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Ki'") {
+		if strings.Contains(d.Message, "Ki: incomplete value") {
 			foundKi = true
 		}
-		if strings.Contains(d.Message, "Missing mandatory field 'Kd'") {
+		if strings.Contains(d.Message, "Kd: incomplete value") {
 			foundKd = true
 		}
 	}
@@ -73,7 +73,7 @@ func TestFileDataSourceValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Filename'") {
+		if strings.Contains(d.Message, "Filename: incomplete value") {
 			found = true
 			break
 		}

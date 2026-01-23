@@ -82,7 +82,7 @@ func TestGAMSignalValidation(t *testing.T) {
 		if strings.Contains(d.Message, "DataSource 'OutDS' (Class FileWriter) is Output-only but referenced in InputSignals") {
 			foundBadInput = true
 		}
-		if strings.Contains(d.Message, "Signal 'MissingSig' not found in DataSource 'InDS'") {
+		if strings.Contains(d.Message, "Implicitly Defined Signal: 'MissingSig'") {
 			foundMissing = true
 		}
 		if strings.Contains(d.Message, "DataSource 'InDS' (Class FileReader) is Input-only but referenced in OutputSignals") {

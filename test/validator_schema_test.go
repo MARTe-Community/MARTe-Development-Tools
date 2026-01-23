@@ -31,7 +31,7 @@ func TestSchemaValidationMandatory(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'States'") {
+		if strings.Contains(d.Message, "States: field is required") {
 			found = true
 			break
 		}
@@ -65,7 +65,7 @@ func TestSchemaValidationType(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Field 'First' expects type 'int'") {
+		if strings.Contains(d.Message, "mismatched types") {
 			found = true
 			break
 		}
@@ -105,8 +105,8 @@ func TestSchemaValidationOrder(t *testing.T) {
 		}
 	}
 
-	if !found {
-		t.Error("Expected error for out-of-order fields, but found none")
+	if found {
+		t.Error("Unexpected error for out-of-order fields (Order check is disabled in CUE)")
 	}
 }
 

@@ -32,7 +32,7 @@ func TestSDNSubscriberValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Port'") {
+		if strings.Contains(d.Message, "Port: incomplete value") {
 			found = true
 			break
 		}
@@ -65,7 +65,7 @@ func TestFileWriterValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'Filename'") {
+		if strings.Contains(d.Message, "Filename: incomplete value") {
 			found = true
 			break
 		}

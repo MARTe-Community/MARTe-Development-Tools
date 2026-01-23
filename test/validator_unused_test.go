@@ -63,8 +63,10 @@ $App = {
     $Data = {
         +MyDS = {
             Class = DataSourceClass
-            Sig1 = { Type = uint32 }
-            Sig2 = { Type = uint32 }
+            +Signals = {
+                Sig1 = { Type = uint32 }
+                Sig2 = { Type = uint32 }
+            }
         }
     }
 }

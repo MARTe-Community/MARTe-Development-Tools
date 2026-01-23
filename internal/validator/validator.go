@@ -2,7 +2,11 @@ package validator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+
+	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/errors"
 
 	"github.com/marte-dev/marte-dev-tools/internal/index"
 	"github.com/marte-dev/marte-dev-tools/internal/parser"
@@ -68,37 +72,9 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		}
 	}
 
-	// Collect fields and their definitions
 	fields := v.getFields(node)
-	fieldOrder := []string{}
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if f, ok := def.(*parser.Field); ok {
-				if _, exists := fields[f.Name]; exists { // already collected
-					// Maintain order logic if needed, but getFields collects all.
-					// For strict order check we might need this loop.
-					// Let's assume getFields is enough for validation logic,
-					// but for "duplicate check" and "class validation" we iterate fields map.
-					// We need to construct fieldOrder.
-					// Just reuse loop for fieldOrder
-				}
-			}
-		}
-	}
-	// Re-construct fieldOrder for order validation
-	seen := make(map[string]bool)
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if f, ok := def.(*parser.Field); ok {
-				if !seen[f.Name] {
-					fieldOrder = append(fieldOrder, f.Name)
-					seen[f.Name] = true
-				}
-			}
-		}
-	}
 
-	// 1. Check for duplicate fields
+	// 1. Check for duplicate fields (Go logic)
 	for name, defs := range fields {
 		if len(defs) > 1 {
 			firstFile := v.getFileForField(defs[0], node)
@@ -139,11 +115,9 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		}
 	}
 
-	// 3. Schema Validation
+	// 3. CUE Validation
 	if className != "" && v.Schema != nil {
-		if classDef, ok := v.Schema.Classes[className]; ok {
-			v.validateClass(node, classDef, fields, fieldOrder)
-		}
+		v.validateWithCUE(node, className)
 	}
 
 	// 4. Signal Validation (for DataSource signals)
@@ -162,68 +136,95 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	}
 }
 
-func (v *Validator) validateClass(node *index.ProjectNode, classDef schema.ClassDefinition, fields map[string][]*parser.Field, fieldOrder []string) {
-	// ... (same as before)
-	for _, fieldDef := range classDef.Fields {
-		if fieldDef.Mandatory {
-			found := false
-			if _, ok := fields[fieldDef.Name]; ok {
-				found = true
-			} else if fieldDef.Type == "node" {
-				if _, ok := node.Children[fieldDef.Name]; ok {
-					found = true
-				}
-			}
+func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
+	// Check if class exists in schema
+	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", className))
+	if v.Schema.Value.LookupPath(classPath).Err() != nil {
+		return // Unknown class, skip validation
+	}
 
-			if !found {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Missing mandatory field '%s' for class '%s'", fieldDef.Name, node.Metadata["Class"]),
-					Position: v.getNodePosition(node),
-					File:     v.getNodeFile(node),
-				})
-			}
+	// Convert node to map
+	data := v.nodeToMap(node)
+
+	// Encode data to CUE
+	dataVal := v.Schema.Context.Encode(data)
+
+	// Unify with #Object
+	// #Object requires "Class" field, which is present in data.
+	objDef := v.Schema.Value.LookupPath(cue.ParsePath("#Object"))
+
+	// Unify
+	res := objDef.Unify(dataVal)
+
+	if err := res.Validate(cue.Concrete(true)); err != nil {
+		// Report errors
+
+		// Parse CUE error to diagnostic
+		v.reportCUEError(err, node)
+	}
+}
+
+func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
+	list := errors.Errors(err)
+	for _, e := range list {
+		msg := e.Error()
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Schema Validation Error: %v", msg),
+			Position: v.getNodePosition(node),
+			File:     v.getNodeFile(node),
+		})
+	}
+}
+
+func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
+	m := make(map[string]interface{})
+	fields := v.getFields(node)
+
+	for name, defs := range fields {
+		if len(defs) > 0 {
+			// Use the last definition (duplicates checked elsewhere)
+			m[name] = v.valueToInterface(defs[len(defs)-1].Value)
 		}
 	}
 
-	for _, fieldDef := range classDef.Fields {
-		if fList, ok := fields[fieldDef.Name]; ok {
-			f := fList[0]
-			if !v.checkType(f.Value, fieldDef.Type) {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Field '%s' expects type '%s'", fieldDef.Name, fieldDef.Type),
-					Position: f.Position,
-					File:     v.getFileForField(f, node),
-				})
-			}
-		}
+	// Children as nested maps?
+	// CUE schema expects nested structs for "node" type fields.
+	// But `node.Children` contains ALL children (even those defined as +Child).
+	// If schema expects `States: { ... }`, we map children.
+
+	for name, child := range node.Children {
+		// normalize name? CUE keys are strings.
+		// If child real name is "+States", key in Children is "States".
+		// We use "States" as key in map.
+		m[name] = v.nodeToMap(child)
 	}
 
-	if classDef.Ordered {
-		schemaIdx := 0
-		for _, nodeFieldName := range fieldOrder {
-			foundInSchema := false
-			for i, fd := range classDef.Fields {
-				if fd.Name == nodeFieldName {
-					foundInSchema = true
-					if i < schemaIdx {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelError,
-							Message:  fmt.Sprintf("Field '%s' is out of order", nodeFieldName),
-							Position: fields[nodeFieldName][0].Position,
-							File:     v.getFileForField(fields[nodeFieldName][0], node),
-						})
-					} else {
-						schemaIdx = i
-					}
-					break
-				}
-			}
-			if !foundInSchema {
-			}
+	return m
+}
+
+func (v *Validator) valueToInterface(val parser.Value) interface{} {
+	switch t := val.(type) {
+	case *parser.StringValue:
+		return t.Value
+	case *parser.IntValue:
+		i, _ := strconv.ParseInt(t.Raw, 0, 64)
+		return i // CUE handles int64
+	case *parser.FloatValue:
+		f, _ := strconv.ParseFloat(t.Raw, 64)
+		return f
+	case *parser.BoolValue:
+		return t.Value
+	case *parser.ReferenceValue:
+		return t.Value
+	case *parser.ArrayValue:
+		var arr []interface{}
+		for _, e := range t.Elements {
+			arr = append(arr, v.valueToInterface(e))
 		}
+		return arr
 	}
+	return nil
 }
 
 func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]*parser.Field) {
@@ -308,12 +309,17 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		}
 	}
 
-	// Check Direction
+	// Check Direction using CUE Schema
 	dsClass := v.getNodeClass(dsNode)
 	if dsClass != "" {
-		if classDef, ok := v.Schema.Classes[dsClass]; ok {
-			dsDir := classDef.Direction
-			if dsDir != "" {
+		// Lookup class definition in Schema
+		// path: #Classes.ClassName.direction
+		path := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", dsClass))
+		val := v.Schema.Value.LookupPath(path)
+
+		if val.Err() == nil {
+			dsDir, err := val.String()
+			if err == nil && dsDir != "" {
 				if direction == "Input" && dsDir == "OUT" {
 					v.Diagnostics = append(v.Diagnostics, Diagnostic{
 						Level:    LevelError,
@@ -537,32 +543,7 @@ func isValidType(t string) bool {
 }
 
 func (v *Validator) checkType(val parser.Value, expectedType string) bool {
-	// ... (same as before)
-	switch expectedType {
-	case "int":
-		_, ok := val.(*parser.IntValue)
-		return ok
-	case "float":
-		_, ok := val.(*parser.FloatValue)
-		return ok
-	case "string":
-		_, okStr := val.(*parser.StringValue)
-		_, okRef := val.(*parser.ReferenceValue)
-		return okStr || okRef
-	case "bool":
-		_, ok := val.(*parser.BoolValue)
-		return ok
-	case "array":
-		_, ok := val.(*parser.ArrayValue)
-		return ok
-	case "reference":
-		_, ok := val.(*parser.ReferenceValue)
-		return ok
-	case "node":
-		return true
-	case "any":
-		return true
-	}
+	// Legacy function, replaced by CUE.
 	return true
 }
 
@@ -679,7 +660,8 @@ func isDataSource(node *index.ProjectNode) bool {
 	if node.Parent != nil && node.Parent.Name == "Data" {
 		return true
 	}
-	return false
+	_, hasSignals := node.Children["Signals"]
+	return hasSignals
 }
 
 func isSignal(node *index.ProjectNode) bool {

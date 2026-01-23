@@ -21,17 +21,16 @@ func TestProjectSpecificSchema(t *testing.T) {
 
 	// Define project schema
 	schemaContent := `
-{
-  "classes": {
-    "ProjectClass": {
-      "fields": [
-        {"name": "CustomField", "type": "int", "mandatory": true}
-      ]
-    }
-  }
+package schema
+
+#Classes: {
+	ProjectClass: {
+		CustomField: int
+		...
+	}
 }
 `
-	err = os.WriteFile(filepath.Join(tmpDir, ".marte_schema.json"), []byte(schemaContent), 0644)
+	err = os.WriteFile(filepath.Join(tmpDir, ".marte_schema.cue"), []byte(schemaContent), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +58,7 @@ func TestProjectSpecificSchema(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Missing mandatory field 'CustomField'") {
+		if strings.Contains(d.Message, "CustomField: incomplete value") {
 			found = true
 			break
 		}
