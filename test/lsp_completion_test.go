@@ -228,4 +228,93 @@ $App = {
 			t.Error("Expected ProjectDS in project file suggestions")
 		}
 	})
+
+	t.Run("Suggest Signal Types", func(t *testing.T) {
+		setup()
+		content := `
++DS = {
+    Class = FileReader
+    Signals = {
+        S1 = { Type =  }
+    }
+}
+`
+		lsp.Documents[uri] = content
+		p := parser.NewParser(content)
+		cfg, _ := p.Parse()
+		lsp.Tree.AddFile(path, cfg)
+
+		params := lsp.CompletionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position:     lsp.Position{Line: 4, Character: strings.Index(content, "Type = ") + len("Type = ") + 1},
+		}
+
+		list := lsp.HandleCompletion(params)
+		if list == nil {
+			t.Fatal("Expected signal type suggestions")
+		}
+
+		foundUint32 := false
+		for _, item := range list.Items {
+			if item.Label == "uint32" {
+				foundUint32 = true
+				break
+			}
+		}
+		if !foundUint32 {
+			t.Error("Expected uint32 in suggestions")
+		}
+	})
+
+	t.Run("Suggest CUE Enums", func(t *testing.T) {
+		setup()
+		// Inject custom schema with enum
+		custom := []byte(`
+package schema
+#Classes: {
+    TestEnumClass: {
+        Mode: "Auto" | "Manual"
+    }
+}
+`)
+		val := lsp.GlobalSchema.Context.CompileBytes(custom)
+		lsp.GlobalSchema.Value = lsp.GlobalSchema.Value.Unify(val)
+
+		content := `
++Obj = {
+    Class = TestEnumClass
+    Mode =  
+}
+`
+		lsp.Documents[uri] = content
+		p := parser.NewParser(content)
+		cfg, _ := p.Parse()
+		lsp.Tree.AddFile(path, cfg)
+
+		params := lsp.CompletionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position:     lsp.Position{Line: 3, Character: strings.Index(content, "Mode = ") + len("Mode = ") + 1},
+		}
+
+		list := lsp.HandleCompletion(params)
+		if list == nil {
+			t.Fatal("Expected enum suggestions")
+		}
+
+		foundAuto := false
+		for _, item := range list.Items {
+			if item.Label == "\"Auto\"" { // CUE string value includes quotes
+				foundAuto = true
+				break
+			}
+		}
+		if !foundAuto {
+			// Check if it returned without quotes?
+			// v.String() returns quoted for string.
+			t.Error("Expected \"Auto\" in suggestions")
+			for _, item := range list.Items {
+				t.Logf("Suggestion: %s", item.Label)
+			}
+		}
+	})
 }

@@ -723,6 +723,82 @@ func suggestFieldValues(container *index.ProjectNode, field string, path string)
 	if field == "Functions" {
 		return suggestObjects(root, "GAM")
 	}
+	if field == "Type" {
+		return suggestSignalTypes()
+	}
+
+	if list := suggestCUEEnums(container, field); list != nil {
+		return list
+	}
+
+	return nil
+}
+
+func suggestSignalTypes() *CompletionList {
+	types := []string{
+		"uint8", "int8", "uint16", "int16", "uint32", "int32", "uint64", "int64",
+		"float32", "float64", "string", "bool", "char8",
+	}
+	var items []CompletionItem
+	for _, t := range types {
+		items = append(items, CompletionItem{
+			Label:  t,
+			Kind:   13, // EnumMember
+			Detail: "Signal Type",
+		})
+	}
+	return &CompletionList{Items: items}
+}
+
+func suggestCUEEnums(container *index.ProjectNode, field string) *CompletionList {
+	if GlobalSchema == nil {
+		return nil
+	}
+	cls := container.Metadata["Class"]
+	if cls == "" {
+		return nil
+	}
+
+	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.%s", cls, field))
+	val := GlobalSchema.Value.LookupPath(classPath)
+	if val.Err() != nil {
+		return nil
+	}
+
+	op, args := val.Expr()
+	var values []cue.Value
+	if op == cue.OrOp {
+		values = args
+	} else {
+		values = []cue.Value{val}
+	}
+
+	var items []CompletionItem
+	for _, v := range values {
+		if !v.IsConcrete() {
+			continue
+		}
+
+		str, err := v.String() // Returns quoted string for string values?
+		if err != nil {
+			continue
+		}
+        
+        // Ensure strings are quoted
+        if v.Kind() == cue.StringKind && !strings.HasPrefix(str, "\"") {
+            str = fmt.Sprintf("\"%s\"", str)
+        }
+
+		items = append(items, CompletionItem{
+			Label:  str,
+			Kind:   13, // EnumMember
+			Detail: "Enum Value",
+		})
+	}
+
+	if len(items) > 0 {
+		return &CompletionList{Items: items}
+	}
 	return nil
 }
 

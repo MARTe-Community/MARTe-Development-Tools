@@ -208,7 +208,7 @@ func (p *Parser) parseSubnode() (Subnode, bool) {
 		if t.Type == TokenEOF {
 			p.addError(t.Position, "unexpected EOF, expected }")
 			sub.EndPosition = t.Position
-			return sub, false
+			return sub, true
 		}
 		def, ok := p.parseDefinition()
 		if ok {
