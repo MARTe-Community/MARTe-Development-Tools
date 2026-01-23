@@ -7,7 +7,27 @@ package schema
 		States!: {...} // type: node
 		...
 	}
+	Message: {
+		...
+	}
+	StateMachineEvent: {
+		NextState!:                                                  string
+		NextStateError!:                                             string
+		Timeout:                                                     uint32
+		[_= !~"^(Class|NextState|Timeout|NextStateError|[#_$].+)$"]: Message
+		...
+	}
+	_State: {
+		Class: "ReferenceContainer"
+		ENTER?: {
+			Class: "ReferenceContainer"
+			...
+		}
+		[_ = !~"^(Class|ENTER)$"]: StateMachineEvent
+		...
+	}
 	StateMachine: {
+		[_ = !~"^(Class|[$].*)$"]: _State
 		...
 	}
 	RealTimeState: {
