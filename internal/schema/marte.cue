@@ -277,12 +277,12 @@ package schema
 	}
 }
 
-// Definition for any Object. 
+// Definition for any Object.
 // It must have a Class field.
 // Based on Class, it validates against #Classes.
 #Object: {
 	Class: string
-	// Allow any other field by default (extensibility), 
+	// Allow any other field by default (extensibility),
 	// unless #Classes definition is closed.
 	// We allow open structs now.
 	...

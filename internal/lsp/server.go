@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
@@ -575,8 +576,16 @@ func handleCompletion(params CompletionParams) *CompletionList {
 
 	// Case 1: Assigning a value (Ends with "=" or "= ")
 	if strings.Contains(prefix, "=") {
-		parts := strings.Split(prefix, "=")
-		key := strings.TrimSpace(parts[len(parts)-2])
+		lastIdx := strings.LastIndex(prefix, "=")
+		beforeEqual := prefix[:lastIdx]
+
+		// Find the last identifier before '='
+		key := ""
+		re := regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9_\-]*`)
+		matches := re.FindAllString(beforeEqual, -1)
+		if len(matches) > 0 {
+			key = matches[len(matches)-1]
+		}
 
 		if key == "Class" {
 			return suggestClasses()
@@ -584,7 +593,7 @@ func handleCompletion(params CompletionParams) *CompletionList {
 
 		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 		if container != nil {
-			return suggestFieldValues(container, key)
+			return suggestFieldValues(container, key, path)
 		}
 		return nil
 	}
@@ -700,19 +709,31 @@ func suggestFields(container *index.ProjectNode) *CompletionList {
 	return &CompletionList{Items: items}
 }
 
-func suggestFieldValues(container *index.ProjectNode, field string) *CompletionList {
+func suggestFieldValues(container *index.ProjectNode, field string, path string) *CompletionList {
+	var root *index.ProjectNode
+	if iso, ok := tree.IsolatedFiles[path]; ok {
+		root = iso
+	} else {
+		root = tree.Root
+	}
+
 	if field == "DataSource" {
-		return suggestObjects("DataSource")
+		return suggestObjects(root, "DataSource")
 	}
 	if field == "Functions" {
-		return suggestObjects("GAM")
+		return suggestObjects(root, "GAM")
 	}
 	return nil
 }
 
-func suggestObjects(filter string) *CompletionList {
+func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
+	if root == nil {
+		return nil
+	}
 	var items []CompletionItem
-	tree.Walk(func(node *index.ProjectNode) {
+
+	var walk func(*index.ProjectNode)
+	walk = func(node *index.ProjectNode) {
 		match := false
 		if filter == "GAM" {
 			if isGAM(node) {
@@ -731,7 +752,13 @@ func suggestObjects(filter string) *CompletionList {
 				Detail: node.Metadata["Class"],
 			})
 		}
-	})
+
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+
+	walk(root)
 	return &CompletionList{Items: items}
 }
 
