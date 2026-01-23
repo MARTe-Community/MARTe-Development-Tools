@@ -29,7 +29,12 @@ The LSP server should provide the following capabilities:
 - **Go to Definition**: Jump to the definition of a reference, supporting navigation across any file in the current project.
 - **Go to References**: Find usages of a node or field, supporting navigation across any file in the current project.
 - **Code Completion**: Autocomplete fields, values, and references.
-- **Code Snippets**: Provide snippets for common patterns.
+  - **Context-Aware**: Suggestions depend on the cursor position (e.g., inside an object, assigning a value).
+  - **Schema-Driven**: Field suggestions are derived from the CUE schema for the current object's Class, indicating mandatory vs. optional fields.
+  - **Reference Suggestions**:
+    - `DataSource` fields suggest available DataSource objects.
+    - `Functions` (in Threads) suggest available GAM objects.
+- **Code Snippets**: Provide snippets for common patterns (e.g., `+Object = { ... }`).
 - **Formatting**: Format the document using the same rules and engine as the `fmt` command.
 
 ## Build System & File Structure
@@ -47,9 +52,9 @@ The LSP server should provide the following capabilities:
   - **Namespace Consistency**: The build tool must verify that all input files belong to the same project namespace (the first segment of the `#package` URI). If multiple project namespaces are detected, the build must fail with an error.
   - **Target**: The build output is written to a single target file (e.g., provided via CLI or API).
   - **Multi-File Definitions**: Nodes and objects can be defined across multiple files. The build tool, validator, and LSP must merge these definitions (including all fields and sub-nodes) from the entire project to create a unified view before processing or validating.
-  - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project.
-  - **Merging Order**: For objects defined across multiple files, the **first file** to be considered is the one containing the `Class` field definition.
-  - **Field Order**: Within a single file, the relative order of defined fields must be maintained.
+  - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project. Support for dot-separated paths (e.g., `Node.SubNode`) is required.
+  - **Merging Order**: For objects defined across multiple files, definitions are merged. The build tool must preserve the relative order of fields and sub-nodes as they appear in the source files, interleaving them correctly in the final output.
+  - **Field Order**: Within a single file (and across merged files), the relative order of defined fields must be maintained in the output.
   - The LSP indexes only files belonging to the same project/namespace scope.
 - **Output**: The output format is the same as the input configuration but without the `#package` macro.
 
@@ -160,13 +165,13 @@ The tool must build an index of the configuration to support LSP features and va
     - **Field Order**: Verification that specific fields appear in a prescribed order when required by the class definition.
     - **Conditional Fields**: Validation of fields whose presence or value depends on the values of other fields within the same node or context.
   - **Schema Definition**:
-    - Class validation rules must be defined in a separate schema file.
+    - Class validation rules must be defined in a separate schema file using the **CUE** language.
     - **Project-Specific Classes**: Developers can define their own project-specific classes and corresponding validation rules, expanding the validation capabilities for their specific needs.
   - **Schema Loading**:
-    - **Default Schema**: The tool should look for a default schema file `marte_schema.json` in standard system locations:
-      - `/usr/share/mdt/marte_schema.json`
-      - `$HOME/.local/share/mdt/marte_schema.json`
-    - **Project Schema**: If a file named `.marte_schema.json` exists in the project root, it must be loaded.
+    - **Default Schema**: The tool should look for a default schema file `marte_schema.cue` in standard system locations:
+      - `/usr/share/mdt/marte_schema.cue`
+      - `$HOME/.local/share/mdt/marte_schema.cue`
+    - **Project Schema**: If a file named `.marte_schema.cue` exists in the project root, it must be loaded.
     - **Merging**: The final schema is a merge of the built-in schema, the system default schema (if found), and the project-specific schema. Rules in later sources (Project > System > Built-in) append to or override earlier ones.
 - **Duplicate Fields**:
   - **Constraint**: A field must not be defined more than once within the same object/node scope, even if those definitions are spread across different files.
