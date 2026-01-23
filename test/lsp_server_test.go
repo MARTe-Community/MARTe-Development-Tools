@@ -1,4 +1,4 @@
-package lsp
+package integration
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
@@ -24,50 +25,38 @@ func TestInitProjectScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	// File 2: Reference
-	// +Source = { Class = C Link = Target }
-	// Link = Target starts at index ...
-	// #package Test.Common (21 chars including newline)
-	// +Source = { Class = C Link = Target }
-	// 012345678901234567890123456789012345
-	// Previous offset was 29.
-	// Now add 21?
-	// #package Test.Common\n
-	// +Source = ...
-	// So add 21 to Character? Or Line 1?
-	// It's on Line 1 (0-based 1).
 	if err := os.WriteFile(filepath.Join(tmpDir, "ref.marte"), []byte("#package Test.Common\n+Source = { Class = C Link = Target }"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Initialize
-	tree = index.NewProjectTree() // Reset global tree
+	lsp.Tree = index.NewProjectTree() // Reset global tree
 
-	initParams := InitializeParams{RootPath: tmpDir}
+	initParams := lsp.InitializeParams{RootPath: tmpDir}
 	paramsBytes, _ := json.Marshal(initParams)
 
-	msg := &JsonRpcMessage{
+	msg := &lsp.JsonRpcMessage{
 		Method: "initialize",
 		Params: paramsBytes,
 		ID:     1,
 	}
 
-	handleMessage(msg)
+	lsp.HandleMessage(msg)
 
 	// Query the reference in ref.marte at "Target"
-	// Target starts at index 29 (0-based) on Line 1
-	defParams := DefinitionParams{
-		TextDocument: TextDocumentIdentifier{URI: "file://" + filepath.Join(tmpDir, "ref.marte")},
-		Position:     Position{Line: 1, Character: 29},
+	defParams := lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file://" + filepath.Join(tmpDir, "ref.marte")},
+		Position:     lsp.Position{Line: 1, Character: 29},
 	}
 
-	res := handleDefinition(defParams)
+	res := lsp.HandleDefinition(defParams)
 	if res == nil {
 		t.Fatal("Definition not found via LSP after initialization")
 	}
 
-	locs, ok := res.([]Location)
+	locs, ok := res.([]lsp.Location)
 	if !ok {
-		t.Fatalf("Expected []Location, got %T", res)
+		t.Fatalf("Expected []lsp.Location, got %T", res)
 	}
 
 	if len(locs) == 0 {
@@ -83,7 +72,7 @@ func TestInitProjectScan(t *testing.T) {
 
 func TestHandleDefinition(t *testing.T) {
 	// Reset tree for test
-	tree = index.NewProjectTree()
+	lsp.Tree = index.NewProjectTree()
 
 	content := `
 +MyObject = {
@@ -100,28 +89,28 @@ func TestHandleDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	tree.AddFile(path, config)
-	tree.ResolveReferences()
+	lsp.Tree.AddFile(path, config)
+	lsp.Tree.ResolveReferences()
 
-	t.Logf("Refs: %d", len(tree.References))
-	for _, r := range tree.References {
+	t.Logf("Refs: %d", len(lsp.Tree.References))
+	for _, r := range lsp.Tree.References {
 		t.Logf("  %s at %d:%d", r.Name, r.Position.Line, r.Position.Column)
 	}
 
 	// Test Go to Definition on MyObject reference
-	params := DefinitionParams{
-		TextDocument: TextDocumentIdentifier{URI: "file://" + path},
-		Position:     Position{Line: 6, Character: 15}, // "MyObject" in RefField = MyObject
+	params := lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file://" + path},
+		Position:     lsp.Position{Line: 6, Character: 15}, // "MyObject" in RefField = MyObject
 	}
 
-	result := handleDefinition(params)
+	result := lsp.HandleDefinition(params)
 	if result == nil {
-		t.Fatal("handleDefinition returned nil")
+		t.Fatal("HandleDefinition returned nil")
 	}
 
-	locations, ok := result.([]Location)
+	locations, ok := result.([]lsp.Location)
 	if !ok {
-		t.Fatalf("Expected []Location, got %T", result)
+		t.Fatalf("Expected []lsp.Location, got %T", result)
 	}
 
 	if len(locations) != 1 {
@@ -135,7 +124,7 @@ func TestHandleDefinition(t *testing.T) {
 
 func TestHandleReferences(t *testing.T) {
 	// Reset tree for test
-	tree = index.NewProjectTree()
+	lsp.Tree = index.NewProjectTree()
 
 	content := `
 +MyObject = {
@@ -155,17 +144,17 @@ func TestHandleReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	tree.AddFile(path, config)
-	tree.ResolveReferences()
+	lsp.Tree.AddFile(path, config)
+	lsp.Tree.ResolveReferences()
 
 	// Test Find References for MyObject (triggered from its definition)
-	params := ReferenceParams{
-		TextDocument: TextDocumentIdentifier{URI: "file://" + path},
-		Position:     Position{Line: 1, Character: 1}, // "+MyObject"
-		Context:      ReferenceContext{IncludeDeclaration: true},
+	params := lsp.ReferenceParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file://" + path},
+		Position:     lsp.Position{Line: 1, Character: 1}, // "+MyObject"
+		Context:      lsp.ReferenceContext{IncludeDeclaration: true},
 	}
 
-	locations := handleReferences(params)
+	locations := lsp.HandleReferences(params)
 	if len(locations) != 3 { // 1 declaration + 2 references
 		t.Fatalf("Expected 3 locations, got %d", len(locations))
 	}
@@ -181,15 +170,15 @@ Field=1
 `
 	uri := "file:///test.marte"
 
-	// Open (populate documents map)
-	documents[uri] = content
+	// Open (populate Documents map)
+	lsp.Documents[uri] = content
 
 	// Format
-	params := DocumentFormattingParams{
-		TextDocument: TextDocumentIdentifier{URI: uri},
+	params := lsp.DocumentFormattingParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 	}
 
-	edits := handleFormatting(params)
+	edits := lsp.HandleFormatting(params)
 
 	if len(edits) != 1 {
 		t.Fatalf("Expected 1 edit, got %d", len(edits))

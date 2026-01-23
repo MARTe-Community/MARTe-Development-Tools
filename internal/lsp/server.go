@@ -47,10 +47,10 @@ type CompletionList struct {
 	Items        []CompletionItem `json:"items"`
 }
 
-var tree = index.NewProjectTree()
-var documents = make(map[string]string)
-var projectRoot string
-var globalSchema *schema.Schema
+var Tree = index.NewProjectTree()
+var Documents = make(map[string]string)
+var ProjectRoot string
+var GlobalSchema *schema.Schema
 
 type JsonRpcMessage struct {
 	Jsonrpc string          `json:"jsonrpc"`
@@ -184,7 +184,7 @@ func RunServer() {
 			continue
 		}
 
-		handleMessage(msg)
+		HandleMessage(msg)
 	}
 }
 
@@ -214,7 +214,7 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 	return &msg, err
 }
 
-func handleMessage(msg *JsonRpcMessage) {
+func HandleMessage(msg *JsonRpcMessage) {
 	switch msg.Method {
 	case "initialize":
 		var params InitializeParams
@@ -227,13 +227,13 @@ func handleMessage(msg *JsonRpcMessage) {
 			}
 
 			if root != "" {
-				projectRoot = root
+				ProjectRoot = root
 				logger.Printf("Scanning workspace: %s\n", root)
-				if err := tree.ScanDirectory(root); err != nil {
+				if err := Tree.ScanDirectory(root); err != nil {
 					logger.Printf("ScanDirectory failed: %v\n", err)
 				}
-				tree.ResolveReferences()
-				globalSchema = schema.LoadFullSchema(projectRoot)
+				Tree.ResolveReferences()
+				GlobalSchema = schema.LoadFullSchema(ProjectRoot)
 			}
 		}
 
@@ -258,18 +258,18 @@ func handleMessage(msg *JsonRpcMessage) {
 	case "textDocument/didOpen":
 		var params DidOpenTextDocumentParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			handleDidOpen(params)
+			HandleDidOpen(params)
 		}
 	case "textDocument/didChange":
 		var params DidChangeTextDocumentParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			handleDidChange(params)
+			HandleDidChange(params)
 		}
 	case "textDocument/hover":
 		var params HoverParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			logger.Printf("Hover: %s:%d", params.TextDocument.URI, params.Position.Line)
-			res := handleHover(params)
+			res := HandleHover(params)
 			if res != nil {
 				logger.Printf("Res: %v", res.Contents)
 			} else {
@@ -283,22 +283,22 @@ func handleMessage(msg *JsonRpcMessage) {
 	case "textDocument/definition":
 		var params DefinitionParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			respond(msg.ID, handleDefinition(params))
+			respond(msg.ID, HandleDefinition(params))
 		}
 	case "textDocument/references":
 		var params ReferenceParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			respond(msg.ID, handleReferences(params))
+			respond(msg.ID, HandleReferences(params))
 		}
 	case "textDocument/completion":
 		var params CompletionParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			respond(msg.ID, handleCompletion(params))
+			respond(msg.ID, HandleCompletion(params))
 		}
 	case "textDocument/formatting":
 		var params DocumentFormattingParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			respond(msg.ID, handleFormatting(params))
+			respond(msg.ID, HandleFormatting(params))
 		}
 	}
 }
@@ -307,9 +307,9 @@ func uriToPath(uri string) string {
 	return strings.TrimPrefix(uri, "file://")
 }
 
-func handleDidOpen(params DidOpenTextDocumentParams) {
+func HandleDidOpen(params DidOpenTextDocumentParams) {
 	path := uriToPath(params.TextDocument.URI)
-	documents[params.TextDocument.URI] = params.TextDocument.Text
+	Documents[params.TextDocument.URI] = params.TextDocument.Text
 	p := parser.NewParser(params.TextDocument.Text)
 	config, err := p.Parse()
 
@@ -320,18 +320,18 @@ func handleDidOpen(params DidOpenTextDocumentParams) {
 	}
 
 	if config != nil {
-		tree.AddFile(path, config)
-		tree.ResolveReferences()
+		Tree.AddFile(path, config)
+		Tree.ResolveReferences()
 		runValidation(params.TextDocument.URI)
 	}
 }
 
-func handleDidChange(params DidChangeTextDocumentParams) {
+func HandleDidChange(params DidChangeTextDocumentParams) {
 	if len(params.ContentChanges) == 0 {
 		return
 	}
 	text := params.ContentChanges[0].Text
-	documents[params.TextDocument.URI] = text
+	Documents[params.TextDocument.URI] = text
 	path := uriToPath(params.TextDocument.URI)
 	p := parser.NewParser(text)
 	config, err := p.Parse()
@@ -343,15 +343,15 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 	}
 
 	if config != nil {
-		tree.AddFile(path, config)
-		tree.ResolveReferences()
+		Tree.AddFile(path, config)
+		Tree.ResolveReferences()
 		runValidation(params.TextDocument.URI)
 	}
 }
 
-func handleFormatting(params DocumentFormattingParams) []TextEdit {
+func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	uri := params.TextDocument.URI
-	text, ok := documents[uri]
+	text, ok := Documents[uri]
 	if !ok {
 		return nil
 	}
@@ -383,7 +383,7 @@ func handleFormatting(params DocumentFormattingParams) []TextEdit {
 }
 
 func runValidation(uri string) {
-	v := validator.NewValidator(tree, projectRoot)
+	v := validator.NewValidator(Tree, ProjectRoot)
 	v.ValidateProject()
 	v.CheckUnused()
 
@@ -392,7 +392,7 @@ func runValidation(uri string) {
 
 	// Collect all known files to ensure we clear diagnostics for fixed files
 	knownFiles := make(map[string]bool)
-	collectFiles(tree.Root, knownFiles)
+	collectFiles(Tree.Root, knownFiles)
 
 	// Initialize all known files with empty diagnostics
 	for f := range knownFiles {
@@ -501,12 +501,12 @@ func mustMarshal(v any) json.RawMessage {
 	return b
 }
 
-func handleHover(params HoverParams) *Hover {
+func HandleHover(params HoverParams) *Hover {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := tree.Query(path, line, col)
+	res := Tree.Query(path, line, col)
 	if res == nil {
 		logger.Printf("No object/node/reference found")
 		return nil
@@ -553,10 +553,10 @@ func handleHover(params HoverParams) *Hover {
 	}
 }
 
-func handleCompletion(params CompletionParams) *CompletionList {
+func HandleCompletion(params CompletionParams) *CompletionList {
 	uri := params.TextDocument.URI
 	path := uriToPath(uri)
-	text, ok := documents[uri]
+	text, ok := Documents[uri]
 	if !ok {
 		return nil
 	}
@@ -591,7 +591,7 @@ func handleCompletion(params CompletionParams) *CompletionList {
 			return suggestClasses()
 		}
 
-		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 		if container != nil {
 			return suggestFieldValues(container, key, path)
 		}
@@ -599,7 +599,7 @@ func handleCompletion(params CompletionParams) *CompletionList {
 	}
 
 	// Case 2: Typing a key inside an object
-	container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+	container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 	if container != nil {
 		return suggestFields(container)
 	}
@@ -608,11 +608,11 @@ func handleCompletion(params CompletionParams) *CompletionList {
 }
 
 func suggestClasses() *CompletionList {
-	if globalSchema == nil {
+	if GlobalSchema == nil {
 		return nil
 	}
 
-	classesVal := globalSchema.Value.LookupPath(cue.ParsePath("#Classes"))
+	classesVal := GlobalSchema.Value.LookupPath(cue.ParsePath("#Classes"))
 	if classesVal.Err() != nil {
 		return nil
 	}
@@ -647,11 +647,11 @@ func suggestFields(container *index.ProjectNode) *CompletionList {
 		}}}
 	}
 
-	if globalSchema == nil {
+	if GlobalSchema == nil {
 		return nil
 	}
 	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", cls))
-	classVal := globalSchema.Value.LookupPath(classPath)
+	classVal := GlobalSchema.Value.LookupPath(classPath)
 	if classVal.Err() != nil {
 		return nil
 	}
@@ -711,10 +711,10 @@ func suggestFields(container *index.ProjectNode) *CompletionList {
 
 func suggestFieldValues(container *index.ProjectNode, field string, path string) *CompletionList {
 	var root *index.ProjectNode
-	if iso, ok := tree.IsolatedFiles[path]; ok {
+	if iso, ok := Tree.IsolatedFiles[path]; ok {
 		root = iso
 	} else {
-		root = tree.Root
+		root = Tree.Root
 	}
 
 	if field == "DataSource" {
@@ -779,12 +779,12 @@ func isDataSource(node *index.ProjectNode) bool {
 	return hasSignals
 }
 
-func handleDefinition(params DefinitionParams) any {
+func HandleDefinition(params DefinitionParams) any {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := tree.Query(path, line, col)
+	res := Tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -819,12 +819,12 @@ func handleDefinition(params DefinitionParams) any {
 	return nil
 }
 
-func handleReferences(params ReferenceParams) []Location {
+func HandleReferences(params ReferenceParams) []Location {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := tree.Query(path, line, col)
+	res := Tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -862,7 +862,7 @@ func handleReferences(params ReferenceParams) []Location {
 	}
 
 	// 1. References from index (Aliases)
-	for _, ref := range tree.References {
+	for _, ref := range Tree.References {
 		if ref.Target == canonical {
 			locations = append(locations, Location{
 				URI: "file://" + ref.File,
@@ -875,7 +875,7 @@ func handleReferences(params ReferenceParams) []Location {
 	}
 
 	// 2. References from Node Targets (Direct References)
-	tree.Walk(func(node *index.ProjectNode) {
+	Tree.Walk(func(node *index.ProjectNode) {
 		if node.Target == canonical {
 			for _, frag := range node.Fragments {
 				if frag.IsObject {
@@ -929,9 +929,9 @@ func formatNodeInfo(node *index.ProjectNode) string {
 
 	// Find references
 	var refs []string
-	for _, ref := range tree.References {
+	for _, ref := range Tree.References {
 		if ref.Target == node {
-			container := tree.GetNodeContaining(ref.File, ref.Position)
+			container := Tree.GetNodeContaining(ref.File, ref.Position)
 			if container != nil {
 				threadName := ""
 				stateName := ""
