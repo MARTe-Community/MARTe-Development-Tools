@@ -13,8 +13,43 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/schema"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
+
+	"cuelang.org/go/cue"
 )
+
+
+
+type CompletionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      CompletionContext      `json:"context,omitempty"`
+}
+
+type CompletionContext struct {
+	TriggerKind int `json:"triggerKind"`
+}
+
+type CompletionItem struct {
+	Label            string `json:"label"`
+	Kind             int    `json:"kind"`
+	Detail           string `json:"detail,omitempty"`
+	Documentation    string `json:"documentation,omitempty"`
+	InsertText       string `json:"insertText,omitempty"`
+	InsertTextFormat int    `json:"insertTextFormat,omitempty"` // 1: PlainText, 2: Snippet
+	SortText         string `json:"sortText,omitempty"`
+}
+
+type CompletionList struct {
+	IsIncomplete bool             `json:"isIncomplete"`
+	Items        []CompletionItem `json:"items"`
+}
+
+var tree = index.NewProjectTree()
+var documents = make(map[string]string)
+var projectRoot string
+var globalSchema *schema.Schema
 
 type JsonRpcMessage struct {
 	Jsonrpc string          `json:"jsonrpc"`
@@ -135,9 +170,6 @@ type TextEdit struct {
 	NewText string `json:"newText"`
 }
 
-var tree = index.NewProjectTree()
-var documents = make(map[string]string)
-var projectRoot string
 
 func RunServer() {
 	reader := bufio.NewReader(os.Stdin)
@@ -200,6 +232,7 @@ func handleMessage(msg *JsonRpcMessage) {
 					logger.Printf("ScanDirectory failed: %v\n", err)
 				}
 				tree.ResolveReferences()
+				globalSchema = schema.LoadFullSchema(projectRoot)
 			}
 		}
 
@@ -210,6 +243,9 @@ func handleMessage(msg *JsonRpcMessage) {
 				"definitionProvider":         true,
 				"referencesProvider":         true,
 				"documentFormattingProvider": true,
+				"completionProvider": map[string]any{
+					"triggerCharacters": []string{"=", " "},
+				},
 			},
 		})
 	case "initialized":
@@ -252,6 +288,11 @@ func handleMessage(msg *JsonRpcMessage) {
 		var params ReferenceParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, handleReferences(params))
+		}
+	case "textDocument/completion":
+		var params CompletionParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, handleCompletion(params))
 		}
 	case "textDocument/formatting":
 		var params DocumentFormattingParams
@@ -486,6 +527,206 @@ func handleHover(params HoverParams) *Hover {
 			Value: content,
 		},
 	}
+}
+
+func handleCompletion(params CompletionParams) *CompletionList {
+	uri := params.TextDocument.URI
+	path := uriToPath(uri)
+	text, ok := documents[uri]
+	if !ok {
+		return nil
+	}
+
+	lines := strings.Split(text, "\n")
+	if params.Position.Line >= len(lines) {
+		return nil
+	}
+	lineStr := lines[params.Position.Line]
+
+	col := params.Position.Character
+	if col > len(lineStr) {
+		col = len(lineStr)
+	}
+
+	prefix := lineStr[:col]
+
+	// Case 1: Assigning a value (Ends with "=" or "= ")
+	if strings.Contains(prefix, "=") {
+		parts := strings.Split(prefix, "=")
+		key := strings.TrimSpace(parts[len(parts)-2])
+
+		if key == "Class" {
+			return suggestClasses()
+		}
+
+		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		if container != nil {
+			return suggestFieldValues(container, key)
+		}
+		return nil
+	}
+
+	// Case 2: Typing a key inside an object
+	container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+	if container != nil {
+		return suggestFields(container)
+	}
+
+	return nil
+}
+
+func suggestClasses() *CompletionList {
+	if globalSchema == nil {
+		return nil
+	}
+
+	classesVal := globalSchema.Value.LookupPath(cue.ParsePath("#Classes"))
+	if classesVal.Err() != nil {
+		return nil
+	}
+
+	iter, err := classesVal.Fields()
+	if err != nil {
+		return nil
+	}
+
+	var items []CompletionItem
+	for iter.Next() {
+		label := iter.Selector().String()
+		label = strings.Trim(label, "?!#")
+
+		items = append(items, CompletionItem{
+			Label:  label,
+			Kind:   7, // Class
+			Detail: "MARTe Class",
+		})
+	}
+	return &CompletionList{Items: items}
+}
+
+func suggestFields(container *index.ProjectNode) *CompletionList {
+	cls := container.Metadata["Class"]
+	if cls == "" {
+		return &CompletionList{Items: []CompletionItem{{
+			Label:      "Class",
+			Kind:       10, // Property
+			InsertText: "Class = ",
+			Detail:     "Define object class",
+		}}}
+	}
+
+	if globalSchema == nil {
+		return nil
+	}
+	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", cls))
+	classVal := globalSchema.Value.LookupPath(classPath)
+	if classVal.Err() != nil {
+		return nil
+	}
+
+	iter, err := classVal.Fields()
+	if err != nil {
+		return nil
+	}
+
+	existing := make(map[string]bool)
+	for _, frag := range container.Fragments {
+		for _, def := range frag.Definitions {
+			if f, ok := def.(*parser.Field); ok {
+				existing[f.Name] = true
+			}
+		}
+	}
+	for name := range container.Children {
+		existing[name] = true
+	}
+
+	var items []CompletionItem
+	for iter.Next() {
+		label := iter.Selector().String()
+		label = strings.Trim(label, "?!#")
+
+		// Skip if already present
+		if existing[label] {
+			continue
+		}
+
+		isOptional := iter.IsOptional()
+		kind := 10 // Property
+		detail := "Mandatory"
+		if isOptional {
+			detail = "Optional"
+		}
+
+		insertText := label + " = "
+		val := iter.Value()
+		if val.Kind() == cue.StructKind {
+			// Suggest as node
+			insertText = "+" + label + " = {\n\t$0\n}"
+			kind = 9 // Module
+		}
+
+		items = append(items, CompletionItem{
+			Label:            label,
+			Kind:             kind,
+			Detail:           detail,
+			InsertText:       insertText,
+			InsertTextFormat: 2, // Snippet
+		})
+	}
+	return &CompletionList{Items: items}
+}
+
+func suggestFieldValues(container *index.ProjectNode, field string) *CompletionList {
+	if field == "DataSource" {
+		return suggestObjects("DataSource")
+	}
+	if field == "Functions" {
+		return suggestObjects("GAM")
+	}
+	return nil
+}
+
+func suggestObjects(filter string) *CompletionList {
+	var items []CompletionItem
+	tree.Walk(func(node *index.ProjectNode) {
+		match := false
+		if filter == "GAM" {
+			if isGAM(node) {
+				match = true
+			}
+		} else if filter == "DataSource" {
+			if isDataSource(node) {
+				match = true
+			}
+		}
+
+		if match {
+			items = append(items, CompletionItem{
+				Label:  node.RealName,
+				Kind:   6, // Variable
+				Detail: node.Metadata["Class"],
+			})
+		}
+	})
+	return &CompletionList{Items: items}
+}
+
+func isGAM(node *index.ProjectNode) bool {
+	if node.RealName == "" || (node.RealName[0] != '+' && node.RealName[0] != '$') {
+		return false
+	}
+	_, hasInput := node.Children["InputSignals"]
+	_, hasOutput := node.Children["OutputSignals"]
+	return hasInput || hasOutput
+}
+
+func isDataSource(node *index.ProjectNode) bool {
+	if node.Parent != nil && node.Parent.Name == "Data" {
+		return true
+	}
+	_, hasSignals := node.Children["Signals"]
+	return hasSignals
 }
 
 func handleDefinition(params DefinitionParams) any {
