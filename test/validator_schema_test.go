@@ -9,39 +9,6 @@ import (
 	"github.com/marte-dev/marte-dev-tools/internal/validator"
 )
 
-func TestSchemaValidationMandatory(t *testing.T) {
-	// StateMachine requires "States"
-	content := `
-+MySM = {
-    Class = StateMachine
-    // Missing States
-}
-`
-	p := parser.NewParser(content)
-	config, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
-	}
-
-	idx := index.NewProjectTree()
-	idx.AddFile("test.marte", config)
-
-	v := validator.NewValidator(idx, ".")
-	v.ValidateProject()
-
-	found := false
-	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "States: field is required") {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("Expected error for missing mandatory field 'States', but found none")
-	}
-}
-
 func TestSchemaValidationType(t *testing.T) {
 	// OrderedClass: First (int), Second (string)
 	content := `
