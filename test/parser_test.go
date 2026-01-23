@@ -1,7 +1,9 @@
-package parser
+package integration
 
 import (
 	"testing"
+
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestParseBasic(t *testing.T) {
@@ -22,7 +24,7 @@ $Node2 = {
     Array = {1 2 3}
 }
 `
-	p := NewParser(input)
+	p := parser.NewParser(input)
 	config, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
