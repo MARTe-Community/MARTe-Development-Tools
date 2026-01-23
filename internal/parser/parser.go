@@ -11,12 +11,17 @@ type Parser struct {
 	buf      []Token
 	comments []Comment
 	pragmas  []Pragma
+	errors   []error
 }
 
 func NewParser(input string) *Parser {
 	return &Parser{
 		lexer: NewLexer(input),
 	}
+}
+
+func (p *Parser) addError(pos Position, msg string) {
+	p.errors = append(p.errors, fmt.Errorf("%d:%d: %s", pos.Line, pos.Column, msg))
 }
 
 func (p *Parser) next() Token {
@@ -71,72 +76,82 @@ func (p *Parser) Parse() (*Configuration, error) {
 			continue
 		}
 
-		def, err := p.parseDefinition()
-		if err != nil {
-			return nil, err
+		def, ok := p.parseDefinition()
+		if ok {
+			config.Definitions = append(config.Definitions, def)
+		} else {
+			// Synchronization: skip token if not consumed to make progress
+			if p.peek() == tok {
+				p.next()
+			}
 		}
-		config.Definitions = append(config.Definitions, def)
 	}
 	config.Comments = p.comments
 	config.Pragmas = p.pragmas
-	return config, nil
+
+	var err error
+	if len(p.errors) > 0 {
+		err = p.errors[0]
+	}
+	return config, err
 }
 
-func (p *Parser) parseDefinition() (Definition, error) {
+func (p *Parser) parseDefinition() (Definition, bool) {
 	tok := p.next()
 	switch tok.Type {
 	case TokenIdentifier:
-		// Could be Field = Value OR Node = { ... }
 		name := tok.Value
-		if p.next().Type != TokenEqual {
-			return nil, fmt.Errorf("%d:%d: expected =", tok.Position.Line, tok.Position.Column)
+		if p.peek().Type != TokenEqual {
+			p.addError(tok.Position, "expected =")
+			return nil, false
 		}
+		p.next() // Consume =
 
-		// Disambiguate based on RHS
 		nextTok := p.peek()
 		if nextTok.Type == TokenLBrace {
-			// Check if it looks like a Subnode (contains definitions) or Array (contains values)
 			if p.isSubnodeLookahead() {
-				sub, err := p.parseSubnode()
-				if err != nil {
-					return nil, err
+				sub, ok := p.parseSubnode()
+				if !ok {
+					return nil, false
 				}
 				return &ObjectNode{
 					Position: tok.Position,
 					Name:     name,
 					Subnode:  sub,
-				}, nil
+				}, true
 			}
 		}
 
-		// Default to Field
-		val, err := p.parseValue()
-		if err != nil {
-			return nil, err
+		val, ok := p.parseValue()
+		if !ok {
+			return nil, false
 		}
 		return &Field{
 			Position: tok.Position,
 			Name:     name,
 			Value:    val,
-		}, nil
+		}, true
 
 	case TokenObjectIdentifier:
-		// node = subnode
 		name := tok.Value
-		if p.next().Type != TokenEqual {
-			return nil, fmt.Errorf("%d:%d: expected =", tok.Position.Line, tok.Position.Column)
+		if p.peek().Type != TokenEqual {
+			p.addError(tok.Position, "expected =")
+			return nil, false
 		}
-		sub, err := p.parseSubnode()
-		if err != nil {
-			return nil, err
+		p.next() // Consume =
+
+		sub, ok := p.parseSubnode()
+		if !ok {
+			return nil, false
 		}
 		return &ObjectNode{
 			Position: tok.Position,
 			Name:     name,
 			Subnode:  sub,
-		}, nil
+		}, true
 	default:
-		return nil, fmt.Errorf("%d:%d: unexpected token %v", tok.Position.Line, tok.Position.Column, tok.Value)
+		p.addError(tok.Position, fmt.Sprintf("unexpected token %v", tok.Value))
+		return nil, false
 	}
 }
 
@@ -176,10 +191,11 @@ func (p *Parser) isSubnodeLookahead() bool {
 	return false
 }
 
-func (p *Parser) parseSubnode() (Subnode, error) {
+func (p *Parser) parseSubnode() (Subnode, bool) {
 	tok := p.next()
 	if tok.Type != TokenLBrace {
-		return Subnode{}, fmt.Errorf("%d:%d: expected {", tok.Position.Line, tok.Position.Column)
+		p.addError(tok.Position, "expected {")
+		return Subnode{}, false
 	}
 	sub := Subnode{Position: tok.Position}
 	for {
@@ -190,18 +206,22 @@ func (p *Parser) parseSubnode() (Subnode, error) {
 			break
 		}
 		if t.Type == TokenEOF {
-			return sub, fmt.Errorf("%d:%d: unexpected EOF, expected }", t.Position.Line, t.Position.Column)
+			p.addError(t.Position, "unexpected EOF, expected }")
+			return sub, false
 		}
-		def, err := p.parseDefinition()
-		if err != nil {
-			return sub, err
+		def, ok := p.parseDefinition()
+		if ok {
+			sub.Definitions = append(sub.Definitions, def)
+		} else {
+			if p.peek() == t {
+				p.next()
+			}
 		}
-		sub.Definitions = append(sub.Definitions, def)
 	}
-	return sub, nil
+	return sub, true
 }
 
-func (p *Parser) parseValue() (Value, error) {
+func (p *Parser) parseValue() (Value, bool) {
 	tok := p.next()
 	switch tok.Type {
 	case TokenString:
@@ -209,24 +229,21 @@ func (p *Parser) parseValue() (Value, error) {
 			Position: tok.Position,
 			Value:    strings.Trim(tok.Value, "\""),
 			Quoted:   true,
-		}, nil
+		}, true
 
 	case TokenNumber:
-		// Simplistic handling
 		if strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") {
 			f, _ := strconv.ParseFloat(tok.Value, 64)
-			return &FloatValue{Position: tok.Position, Value: f, Raw: tok.Value}, nil
+			return &FloatValue{Position: tok.Position, Value: f, Raw: tok.Value}, true
 		}
 		i, _ := strconv.ParseInt(tok.Value, 0, 64)
-		return &IntValue{Position: tok.Position, Value: i, Raw: tok.Value}, nil
+		return &IntValue{Position: tok.Position, Value: i, Raw: tok.Value}, true
 	case TokenBool:
 		return &BoolValue{Position: tok.Position, Value: tok.Value == "true"},
-			nil
+			true
 	case TokenIdentifier:
-		// reference?
-		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, nil
+		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
 	case TokenLBrace:
-		// array
 		arr := &ArrayValue{Position: tok.Position}
 		for {
 			t := p.peek()
@@ -239,14 +256,15 @@ func (p *Parser) parseValue() (Value, error) {
 				p.next()
 				continue
 			}
-			val, err := p.parseValue()
-			if err != nil {
-				return nil, err
+			val, ok := p.parseValue()
+			if !ok {
+				return nil, false
 			}
 			arr.Elements = append(arr.Elements, val)
 		}
-		return arr, nil
+		return arr, true
 	default:
-		return nil, fmt.Errorf("%d:%d: unexpected value token %v", tok.Position.Line, tok.Position.Column, tok.Value)
+		p.addError(tok.Position, fmt.Sprintf("unexpected value token %v", tok.Value))
+		return nil, false
 	}
 }

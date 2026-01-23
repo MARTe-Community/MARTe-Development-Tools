@@ -311,13 +311,18 @@ func handleDidOpen(params DidOpenTextDocumentParams) {
 	documents[params.TextDocument.URI] = params.TextDocument.Text
 	p := parser.NewParser(params.TextDocument.Text)
 	config, err := p.Parse()
+
 	if err != nil {
 		publishParserError(params.TextDocument.URI, err)
-		return
+	} else {
+		publishParserError(params.TextDocument.URI, nil)
 	}
-	tree.AddFile(path, config)
-	tree.ResolveReferences()
-	runValidation(params.TextDocument.URI)
+
+	if config != nil {
+		tree.AddFile(path, config)
+		tree.ResolveReferences()
+		runValidation(params.TextDocument.URI)
+	}
 }
 
 func handleDidChange(params DidChangeTextDocumentParams) {
@@ -329,13 +334,18 @@ func handleDidChange(params DidChangeTextDocumentParams) {
 	path := uriToPath(params.TextDocument.URI)
 	p := parser.NewParser(text)
 	config, err := p.Parse()
+
 	if err != nil {
 		publishParserError(params.TextDocument.URI, err)
-		return
+	} else {
+		publishParserError(params.TextDocument.URI, nil)
 	}
-	tree.AddFile(path, config)
-	tree.ResolveReferences()
-	runValidation(params.TextDocument.URI)
+
+	if config != nil {
+		tree.AddFile(path, config)
+		tree.ResolveReferences()
+		runValidation(params.TextDocument.URI)
+	}
 }
 
 func handleFormatting(params DocumentFormattingParams) []TextEdit {
@@ -426,6 +436,19 @@ func runValidation(uri string) {
 }
 
 func publishParserError(uri string, err error) {
+	if err == nil {
+		notification := JsonRpcMessage{
+			Jsonrpc: "2.0",
+			Method:  "textDocument/publishDiagnostics",
+			Params: mustMarshal(PublishDiagnosticsParams{
+				URI:         uri,
+				Diagnostics: []LSPDiagnostic{},
+			}),
+		}
+		send(notification)
+		return
+	}
+
 	var line, col int
 	var msg string
 	// Try parsing "line:col: message"
