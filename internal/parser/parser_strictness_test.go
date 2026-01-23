@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestParserStrictness(t *testing.T) {

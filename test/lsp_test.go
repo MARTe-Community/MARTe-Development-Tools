@@ -4,9 +4,9 @@ import (
 	"io/ioutil"
 	"testing"
 
-	"github.com/marte-dev/marte-dev-tools/internal/index"
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
-	"github.com/marte-dev/marte-dev-tools/internal/validator"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
 
 // Helper to load and parse a file

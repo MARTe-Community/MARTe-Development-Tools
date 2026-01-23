@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-dev/marte-dev-tools/internal/builder"
+	"github.com/marte-community/marte-dev-tools/internal/builder"
 )
 
 func TestMultiFileBuildMergeAndOrder(t *testing.T) {

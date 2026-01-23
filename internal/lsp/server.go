@@ -9,11 +9,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/marte-dev/marte-dev-tools/internal/formatter"
-	"github.com/marte-dev/marte-dev-tools/internal/index"
-	"github.com/marte-dev/marte-dev-tools/internal/logger"
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
-	"github.com/marte-dev/marte-dev-tools/internal/validator"
+	"github.com/marte-community/marte-dev-tools/internal/formatter"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/logger"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
 
 type JsonRpcMessage struct {

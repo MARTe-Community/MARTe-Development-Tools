@@ -1,4 +1,4 @@
-module github.com/marte-dev/marte-dev-tools
+module github.com/marte-community/marte-dev-tools
 
 go 1.25.6
 

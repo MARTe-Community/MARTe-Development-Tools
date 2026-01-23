@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/marte-dev/marte-dev-tools/internal/logger"
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/logger"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 type ProjectTree struct {

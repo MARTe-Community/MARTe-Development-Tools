@@ -8,9 +8,9 @@ import (
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/errors"
 
-	"github.com/marte-dev/marte-dev-tools/internal/index"
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
-	"github.com/marte-dev/marte-dev-tools/internal/schema"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
 
 type DiagnosticLevel int

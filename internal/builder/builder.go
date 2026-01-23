@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/marte-dev/marte-dev-tools/internal/index"
-	"github.com/marte-dev/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 type Builder struct {
