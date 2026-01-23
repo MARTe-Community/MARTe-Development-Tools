@@ -21,23 +21,23 @@ func TestGlobalPragmaDebug(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-    
-    // Check if pragma parsed
-    if len(config.Pragmas) == 0 {
-        t.Fatal("Pragma not parsed")
-    }
-    t.Logf("Parsed Pragma 0: %s", config.Pragmas[0].Text)
+
+	// Check if pragma parsed
+	if len(config.Pragmas) == 0 {
+		t.Fatal("Pragma not parsed")
+	}
+	t.Logf("Parsed Pragma 0: %s", config.Pragmas[0].Text)
 
 	idx := index.NewProjectTree()
 	idx.AddFile("debug.marte", config)
-    idx.ResolveReferences()
-    
-    // Check if added to GlobalPragmas
-    pragmas, ok := idx.GlobalPragmas["debug.marte"]
-    if !ok || len(pragmas) == 0 {
-        t.Fatal("GlobalPragmas not populated")
-    }
-    t.Logf("Global Pragma stored: %s", pragmas[0])
+	idx.ResolveReferences()
+
+	// Check if added to GlobalPragmas
+	pragmas, ok := idx.GlobalPragmas["debug.marte"]
+	if !ok || len(pragmas) == 0 {
+		t.Fatal("GlobalPragmas not populated")
+	}
+	t.Logf("Global Pragma stored: %s", pragmas[0])
 
 	v := validator.NewValidator(idx, ".")
 	v.ValidateProject()
@@ -48,11 +48,11 @@ func TestGlobalPragmaDebug(t *testing.T) {
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "Implicitly Defined Signal") {
 			foundImplicitWarning = true
-            t.Logf("Found warning: %s", d.Message)
+			t.Logf("Found warning: %s", d.Message)
 		}
 		if strings.Contains(d.Message, "Unused GAM") {
 			foundUnusedWarning = true
-            t.Logf("Found warning: %s", d.Message)
+			t.Logf("Found warning: %s", d.Message)
 		}
 	}
 

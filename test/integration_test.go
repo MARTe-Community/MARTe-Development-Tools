@@ -120,7 +120,7 @@ func TestFmtCommand(t *testing.T) {
 	formatter.Format(config, &buf)
 
 	output := buf.String()
-	
+
 	// Check for indentation
 	if !strings.Contains(output, "  Class = \"MyClass\"") {
 		t.Error("Expected 2-space indentation for Class field")
@@ -169,7 +169,7 @@ func TestBuildCommand(t *testing.T) {
 	// Test Merge
 	files := []string{"integration/build_merge_1.marte", "integration/build_merge_2.marte"}
 	b := builder.NewBuilder(files)
-	
+
 	outputFile, err := os.Create("build_test/TEST.marte")
 	if err != nil {
 		t.Fatalf("Failed to create output file: %v", err)
@@ -180,23 +180,23 @@ func TestBuildCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
-	
+
 	// Check output existence
 	if _, err := os.Stat("build_test/TEST.marte"); os.IsNotExist(err) {
 		t.Fatalf("Expected output file build_test/TEST.marte not found")
 	}
-	
+
 	content, _ := ioutil.ReadFile("build_test/TEST.marte")
 	output := string(content)
-	
+
 	if !strings.Contains(output, "FieldA = 1") || !strings.Contains(output, "FieldB = 2") {
 		t.Error("Merged output missing fields")
 	}
-	
+
 	// Test Order (Class First)
 	filesOrder := []string{"integration/build_order_1.marte", "integration/build_order_2.marte"}
 	bOrder := builder.NewBuilder(filesOrder)
-	
+
 	outputFileOrder, err := os.Create("build_test/ORDER.marte")
 	if err != nil {
 		t.Fatalf("Failed to create output file: %v", err)
@@ -207,14 +207,14 @@ func TestBuildCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build order test failed: %v", err)
 	}
-	
+
 	contentOrder, _ := ioutil.ReadFile("build_test/ORDER.marte")
 	outputOrder := string(contentOrder)
-	
+
 	// Check for Class before Field
 	classIdx := strings.Index(outputOrder, "Class = \"Ordered\"")
 	fieldIdx := strings.Index(outputOrder, "Field = 1")
-	
+
 	if classIdx == -1 || fieldIdx == -1 {
 		t.Fatal("Missing Class or Field in ordered output")
 	}

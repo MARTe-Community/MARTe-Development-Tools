@@ -30,7 +30,7 @@ func TestInitProjectScan(t *testing.T) {
 	// +Source = { Class = C Link = Target }
 	// 012345678901234567890123456789012345
 	// Previous offset was 29.
-	// Now add 21? 
+	// Now add 21?
 	// #package Test.Common\n
 	// +Source = ...
 	// So add 21 to Character? Or Line 1?
@@ -84,7 +84,7 @@ func TestInitProjectScan(t *testing.T) {
 func TestHandleDefinition(t *testing.T) {
 	// Reset tree for test
 	tree = index.NewProjectTree()
-	
+
 	content := `
 +MyObject = {
     Class = Type
@@ -136,7 +136,7 @@ func TestHandleDefinition(t *testing.T) {
 func TestHandleReferences(t *testing.T) {
 	// Reset tree for test
 	tree = index.NewProjectTree()
-	
+
 	content := `
 +MyObject = {
     Class = Type
@@ -173,38 +173,38 @@ func TestHandleReferences(t *testing.T) {
 
 func TestLSPFormatting(t *testing.T) {
 	// Setup
-    content := `
+	content := `
 #package Proj.Main
    +Object={
 Field=1
   }
 `
-    uri := "file:///test.marte"
-    
-    // Open (populate documents map)
-    documents[uri] = content
-    
-    // Format
-    params := DocumentFormattingParams{
-        TextDocument: TextDocumentIdentifier{URI: uri},
-    }
-    
-    edits := handleFormatting(params)
-    
-    if len(edits) != 1 {
-        t.Fatalf("Expected 1 edit, got %d", len(edits))
-    }
-    
-    newText := edits[0].NewText
-    
-    expected := `#package Proj.Main
+	uri := "file:///test.marte"
+
+	// Open (populate documents map)
+	documents[uri] = content
+
+	// Format
+	params := DocumentFormattingParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+	}
+
+	edits := handleFormatting(params)
+
+	if len(edits) != 1 {
+		t.Fatalf("Expected 1 edit, got %d", len(edits))
+	}
+
+	newText := edits[0].NewText
+
+	expected := `#package Proj.Main
 
 +Object = {
   Field = 1
 }
 `
-    // Normalize newlines for comparison just in case
-    if strings.TrimSpace(strings.ReplaceAll(newText, "\r\n", "\n")) != strings.TrimSpace(strings.ReplaceAll(expected, "\r\n", "\n")) {
-        t.Errorf("Formatting mismatch.\nExpected:\n%s\nGot:\n%s", expected, newText)
-    }
+	// Normalize newlines for comparison just in case
+	if strings.TrimSpace(strings.ReplaceAll(newText, "\r\n", "\n")) != strings.TrimSpace(strings.ReplaceAll(expected, "\r\n", "\n")) {
+		t.Errorf("Formatting mismatch.\nExpected:\n%s\nGot:\n%s", expected, newText)
+	}
 }

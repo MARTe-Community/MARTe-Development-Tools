@@ -343,7 +343,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	var targetNode *index.ProjectNode
 	if signalsContainer, ok := dsNode.Children["Signals"]; ok {
 		targetNorm := index.NormalizeName(targetSignalName)
-		
+
 		if child, ok := signalsContainer.Children[targetNorm]; ok {
 			targetNode = child
 		} else {
@@ -404,12 +404,12 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
 			}
 		}
-		
+
 		// Property checks
 		v.checkSignalProperty(signalNode, targetNode, "Type")
 		v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
 		v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
-		
+
 		// Check Type validity if present
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
 			typeVal := v.getFieldValue(typeFields[0])
@@ -509,7 +509,7 @@ func (v *Validator) getFieldValue(f *parser.Field) string {
 
 func (v *Validator) resolveReference(name string, file string, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
 	if isoNode, ok := v.Tree.IsolatedFiles[file]; ok {
-		if found := v.findNodeRecursive(isoNode, name, predicate); found != nil {
+		if found := v.Tree.FindNode(isoNode, name, predicate); found != nil {
 			return found
 		}
 		return nil
@@ -517,24 +517,7 @@ func (v *Validator) resolveReference(name string, file string, predicate func(*i
 	if v.Tree.Root == nil {
 		return nil
 	}
-	return v.findNodeRecursive(v.Tree.Root, name, predicate)
-}
-
-func (v *Validator) findNodeRecursive(root *index.ProjectNode, name string, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
-	// Simple recursive search matching name
-	if root.RealName == name || root.Name == index.NormalizeName(name) {
-		if predicate == nil || predicate(root) {
-			return root
-		}
-	}
-	
-	// Recursive
-	for _, child := range root.Children {
-		if found := v.findNodeRecursive(child, name, predicate); found != nil {
-			return found
-		}
-	}
-	return nil
+	return v.Tree.FindNode(v.Tree.Root, name, predicate)
 }
 
 func (v *Validator) getNodeClass(node *index.ProjectNode) string {
@@ -554,7 +537,7 @@ func isValidType(t string) bool {
 }
 
 func (v *Validator) checkType(val parser.Value, expectedType string) bool {
-    // ... (same as before)
+	// ... (same as before)
 	switch expectedType {
 	case "int":
 		_, ok := val.(*parser.IntValue)

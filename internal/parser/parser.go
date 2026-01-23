@@ -145,17 +145,17 @@ func (p *Parser) isSubnodeLookahead() bool {
 	// Look inside:
 	// peek(0) is '{'
 	// peek(1) is first token inside
-	
+
 	t1 := p.peekN(1)
 	if t1.Type == TokenRBrace {
-		// {} -> Empty. Assume Array (Value) by default, unless forced? 
+		// {} -> Empty. Assume Array (Value) by default, unless forced?
 		// If we return false, it parses as ArrayValue.
 		// If user writes "Sig = {}", is it an empty signal?
-		// Empty array is more common for value. 
+		// Empty array is more common for value.
 		// If "Sig" is a node, it should probably have content or use +Sig.
-		return false 
+		return false
 	}
-	
+
 	if t1.Type == TokenIdentifier {
 		// Identifier inside.
 		// If followed by '=', it's a definition -> Subnode.
@@ -166,12 +166,12 @@ func (p *Parser) isSubnodeLookahead() bool {
 		// Identifier alone or followed by something else -> Reference/Value -> Array
 		return false
 	}
-	
+
 	if t1.Type == TokenObjectIdentifier {
 		// +Node = ... -> Definition -> Subnode
 		return true
 	}
-	
+
 	// Literals -> Array
 	return false
 }
@@ -204,13 +204,13 @@ func (p *Parser) parseSubnode() (Subnode, error) {
 func (p *Parser) parseValue() (Value, error) {
 	tok := p.next()
 	switch tok.Type {
-		case TokenString:
-			return &StringValue{
-				Position: tok.Position,
-				Value:    strings.Trim(tok.Value, "\""),
-				Quoted:   true,
-			}, nil
-	
+	case TokenString:
+		return &StringValue{
+			Position: tok.Position,
+			Value:    strings.Trim(tok.Value, "\""),
+			Quoted:   true,
+		}, nil
+
 	case TokenNumber:
 		// Simplistic handling
 		if strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") {

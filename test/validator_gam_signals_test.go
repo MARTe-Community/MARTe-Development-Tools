@@ -91,10 +91,10 @@ func TestGAMSignalValidation(t *testing.T) {
 	}
 
 	if !foundBadInput || !foundMissing || !foundBadOutput {
-        for _, d := range v.Diagnostics {
-            t.Logf("Diagnostic: %s", d.Message)
-        }
-    }
+		for _, d := range v.Diagnostics {
+			t.Logf("Diagnostic: %s", d.Message)
+		}
+	}
 
 	if !foundBadInput {
 		t.Error("Expected error for OutDS in InputSignals")

@@ -54,7 +54,7 @@ func fixComment(text string) string {
 			return "//# " + text[3:]
 		}
 	} else if strings.HasPrefix(text, "//") {
-		if len(text) > 2 && text[2] != ' ' && text[2] != '#' && text[2] != '!' { 
+		if len(text) > 2 && text[2] != ' ' && text[2] != '#' && text[2] != '!' {
 			return "// " + text[2:]
 		}
 	}
@@ -101,7 +101,7 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		fmt.Fprintln(f.writer)
 
 		f.formatSubnode(d.Subnode, indent+1)
-		
+
 		fmt.Fprintf(f.writer, "%s}", indentStr)
 		return d.Subnode.EndPosition.Line
 	}
@@ -175,7 +175,7 @@ func (f *Formatter) flushCommentsBefore(pos parser.Position, indent int, stick b
 			break
 		}
 	}
-	// If stick is true, we don't print extra newline. 
+	// If stick is true, we don't print extra newline.
 	// The caller will print the definition immediately after this function returns.
 	// If stick is false (e.g. end of block comments), we act normally.
 	// But actually, the previous implementation didn't print extra newlines between comments and code

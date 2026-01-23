@@ -114,7 +114,7 @@ func LoadFullSchema(projectRoot string) *Schema {
 	sysPaths := []string{
 		"/usr/share/mdt/marte_schema.json",
 	}
-	
+
 	home, err := os.UserHomeDir()
 	if err == nil {
 		sysPaths = append(sysPaths, filepath.Join(home, ".local/share/mdt/marte_schema.json"))

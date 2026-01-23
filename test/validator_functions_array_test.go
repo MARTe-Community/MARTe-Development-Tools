@@ -49,13 +49,13 @@ func TestFunctionsArrayValidation(t *testing.T) {
 
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "not found or is not a valid GAM") {
-            // This covers both InvalidGAM and MissingGAM cases
-            if strings.Contains(d.Message, "InvalidGAM") {
-			    foundInvalid = true
-            }
-            if strings.Contains(d.Message, "MissingGAM") {
-                foundMissing = true
-            }
+			// This covers both InvalidGAM and MissingGAM cases
+			if strings.Contains(d.Message, "InvalidGAM") {
+				foundInvalid = true
+			}
+			if strings.Contains(d.Message, "MissingGAM") {
+				foundMissing = true
+			}
 		}
 		if strings.Contains(d.Message, "must contain references") {
 			foundNotRef = true

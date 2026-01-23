@@ -222,6 +222,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.indexValue(file, d.Value)
 		case *parser.ObjectNode:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -276,6 +277,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.indexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
 		case *parser.ObjectNode:
+			frag.Definitions = append(frag.Definitions, d)
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -390,23 +392,63 @@ func (pt *ProjectTree) ResolveReferences() {
 	for i := range pt.References {
 		ref := &pt.References[i]
 		if isoNode, ok := pt.IsolatedFiles[ref.File]; ok {
-			ref.Target = pt.findNode(isoNode, ref.Name)
+			ref.Target = pt.FindNode(isoNode, ref.Name, nil)
 		} else {
-			ref.Target = pt.findNode(pt.Root, ref.Name)
+			ref.Target = pt.FindNode(pt.Root, ref.Name, nil)
 		}
 	}
 }
 
-func (pt *ProjectTree) findNode(root *ProjectNode, name string) *ProjectNode {
+func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
+	if strings.Contains(name, ".") {
+		parts := strings.Split(name, ".")
+		rootName := parts[0]
+
+		var candidates []*ProjectNode
+		pt.findAllNodes(root, rootName, &candidates)
+
+		for _, cand := range candidates {
+			curr := cand
+			valid := true
+			for i := 1; i < len(parts); i++ {
+				nextName := parts[i]
+				normNext := NormalizeName(nextName)
+				if child, ok := curr.Children[normNext]; ok {
+					curr = child
+				} else {
+					valid = false
+					break
+				}
+			}
+			if valid {
+				if predicate == nil || predicate(curr) {
+					return curr
+				}
+			}
+		}
+		return nil
+	}
+
 	if root.RealName == name || root.Name == name {
-		return root
+		if predicate == nil || predicate(root) {
+			return root
+		}
 	}
 	for _, child := range root.Children {
-		if res := pt.findNode(child, name); res != nil {
+		if res := pt.FindNode(child, name, predicate); res != nil {
 			return res
 		}
 	}
 	return nil
+}
+
+func (pt *ProjectTree) findAllNodes(root *ProjectNode, name string, results *[]*ProjectNode) {
+	if root.RealName == name || root.Name == name {
+		*results = append(*results, root)
+	}
+	for _, child := range root.Children {
+		pt.findAllNodes(child, name, results)
+	}
 }
 
 type QueryResult struct {

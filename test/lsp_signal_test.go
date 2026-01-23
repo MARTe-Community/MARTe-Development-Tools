@@ -49,17 +49,23 @@ func TestLSPSignalReferences(t *testing.T) {
 	if root == nil {
 		t.Fatal("Root node not found")
 	}
-	
+
 	// Traverse to MySig
 	dataNode := root.Children["Data"]
-	if dataNode == nil { t.Fatal("Data node not found") }
-	
+	if dataNode == nil {
+		t.Fatal("Data node not found")
+	}
+
 	myDS := dataNode.Children["MyDS"]
-	if myDS == nil { t.Fatal("MyDS node not found") }
-	
+	if myDS == nil {
+		t.Fatal("MyDS node not found")
+	}
+
 	signals := myDS.Children["Signals"]
-	if signals == nil { t.Fatal("Signals node not found") }
-	
+	if signals == nil {
+		t.Fatal("Signals node not found")
+	}
+
 	mySigDef := signals.Children["MySig"]
 	if mySigDef == nil {
 		t.Fatal("Definition of MySig not found in tree")

@@ -64,10 +64,10 @@ func TestImplicitSignal(t *testing.T) {
 	}
 
 	if !foundWarning || foundError {
-        for _, d := range v.Diagnostics {
-            t.Logf("Diagnostic: %s", d.Message)
-        }
-    }
+		for _, d := range v.Diagnostics {
+			t.Logf("Diagnostic: %s", d.Message)
+		}
+	}
 
 	if !foundWarning {
 		t.Error("Expected warning for ImplicitSig")
@@ -83,9 +83,9 @@ func TestImplicitSignal(t *testing.T) {
 `
 	p2 := parser.NewParser(contentMissingType)
 	config2, err2 := p2.Parse()
-    if err2 != nil {
-        t.Fatalf("Parse2 failed: %v", err2)
-    }
+	if err2 != nil {
+		t.Fatalf("Parse2 failed: %v", err2)
+	}
 	idx2 := index.NewProjectTree()
 	idx2.AddFile("missing_type.marte", config2)
 	idx2.ResolveReferences()
@@ -99,9 +99,9 @@ func TestImplicitSignal(t *testing.T) {
 		}
 	}
 	if !foundTypeErr {
-        for _, d := range v2.Diagnostics {
-            t.Logf("Diagnostic2: %s", d.Message)
-        }
+		for _, d := range v2.Diagnostics {
+			t.Logf("Diagnostic2: %s", d.Message)
+		}
 		t.Error("Expected error for missing Type in implicit signal")
 	}
 }
