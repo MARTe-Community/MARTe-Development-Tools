@@ -978,12 +978,22 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	typ := node.Metadata["Type"]
 	ds := node.Metadata["DataSource"]
 
+	if ds == "" {
+		if node.Parent != nil && node.Parent.Name == "Signals" {
+			if node.Parent.Parent != nil {
+				ds = node.Parent.Parent.Name
+			}
+		}
+	}
+
 	if typ != "" || ds != "" {
 		sigInfo := "\n"
 		if typ != "" {
 			sigInfo += fmt.Sprintf("**Type**: `%s` ", typ)
 		}
-		sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
+		if ds != "" {
+			sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
+		}
 
 		// Size
 		dims := node.Metadata["NumberOfDimensions"]
