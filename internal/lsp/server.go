@@ -20,8 +20,6 @@ import (
 	"cuelang.org/go/cue"
 )
 
-
-
 type CompletionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
@@ -170,7 +168,6 @@ type TextEdit struct {
 	Range   Range  `json:"range"`
 	NewText string `json:"newText"`
 }
-
 
 func RunServer() {
 	reader := bufio.NewReader(os.Stdin)
@@ -783,11 +780,11 @@ func suggestCUEEnums(container *index.ProjectNode, field string) *CompletionList
 		if err != nil {
 			continue
 		}
-        
-        // Ensure strings are quoted
-        if v.Kind() == cue.StringKind && !strings.HasPrefix(str, "\"") {
-            str = fmt.Sprintf("\"%s\"", str)
-        }
+
+		// Ensure strings are quoted
+		if v.Kind() == cue.StringKind && !strings.HasPrefix(str, "\"") {
+			str = fmt.Sprintf("\"%s\"", str)
+		}
 
 		items = append(items, CompletionItem{
 			Label:  str,
@@ -986,9 +983,7 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		if typ != "" {
 			sigInfo += fmt.Sprintf("**Type**: `%s` ", typ)
 		}
-		if ds != "" {
-			sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
-		}
+		sigInfo += fmt.Sprintf("**DataSource**: `%s` ", ds)
 
 		// Size
 		dims := node.Metadata["NumberOfDimensions"]

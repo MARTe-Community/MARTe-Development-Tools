@@ -13,7 +13,7 @@ package schema
 	StateMachineEvent: {
 		NextState!:                                                  string
 		NextStateError!:                                             string
-		Timeout:                                                     uint32
+		Timeout?:                                                    uint32
 		[_= !~"^(Class|NextState|Timeout|NextStateError|[#_$].+)$"]: Message
 		...
 	}
