@@ -614,9 +614,87 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	// Case 2: Typing a key inside an object
 	container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 	if container != nil {
+		if container.Parent != nil && isGAM(container.Parent) {
+			if container.Name == "InputSignals" {
+				return suggestGAMSignals(container, "Input")
+			}
+			if container.Name == "OutputSignals" {
+				return suggestGAMSignals(container, "Output")
+			}
+		}
 		return suggestFields(container)
 	}
 
+	return nil
+}
+
+func suggestGAMSignals(container *index.ProjectNode, direction string) *CompletionList {
+	var items []CompletionItem
+
+	processNode := func(node *index.ProjectNode) {
+		if !isDataSource(node) {
+			return
+		}
+
+		cls := node.Metadata["Class"]
+		if cls == "" {
+			return
+		}
+
+		dir := "INOUT"
+		if GlobalSchema != nil {
+			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", cls))
+			val := GlobalSchema.Value.LookupPath(classPath)
+			if val.Err() == nil {
+				s, err := val.String()
+				if err == nil {
+					dir = s
+				}
+			}
+		}
+
+		compatible := false
+		if direction == "Input" {
+			if dir == "IN" || dir == "INOUT" {
+				compatible = true
+			}
+		} else if direction == "Output" {
+			if dir == "OUT" || dir == "INOUT" {
+				compatible = true
+			}
+		}
+
+		if !compatible {
+			return
+		}
+
+		signalsContainer := node.Children["Signals"]
+		if signalsContainer == nil {
+			return
+		}
+
+		for _, sig := range signalsContainer.Children {
+			dsName := node.Name
+			sigName := sig.Name
+
+			label := fmt.Sprintf("%s:%s", sigName, dsName)
+			insertText := fmt.Sprintf("%s = { DataSource = %s }", sigName, dsName)
+
+			items = append(items, CompletionItem{
+				Label:            label,
+				Kind:             6, // Variable
+				Detail:           "Signal from " + dsName,
+				InsertText:       insertText,
+				InsertTextFormat: 2, // Snippet
+			})
+		}
+	}
+
+	Tree.Walk(processNode)
+
+	if len(items) > 0 {
+		return &CompletionList{Items: items}
+	}
 	return nil
 }
 
