@@ -159,6 +159,16 @@ type DocumentFormattingParams struct {
 	Options      FormattingOptions      `json:"options"`
 }
 
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
 type FormattingOptions struct {
 	TabSize      int  `json:"tabSize"`
 	InsertSpaces bool `json:"insertSpaces"`
@@ -241,6 +251,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				"definitionProvider":         true,
 				"referencesProvider":         true,
 				"documentFormattingProvider": true,
+				"renameProvider":             true,
 				"completionProvider": map[string]any{
 					"triggerCharacters": []string{"=", " "},
 				},
@@ -296,6 +307,11 @@ func HandleMessage(msg *JsonRpcMessage) {
 		var params DocumentFormattingParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, HandleFormatting(params))
+		}
+	case "textDocument/rename":
+		var params RenameParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleRename(params))
 		}
 	}
 }
@@ -1101,6 +1117,139 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	}
 
 	return info
+}
+
+func HandleRename(params RenameParams) *WorkspaceEdit {
+	path := uriToPath(params.TextDocument.URI)
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+
+	res := Tree.Query(path, line, col)
+	if res == nil {
+		return nil
+	}
+
+	var targetNode *index.ProjectNode
+	var targetField *parser.Field
+
+	if res.Node != nil {
+		targetNode = res.Node
+	} else if res.Field != nil {
+		targetField = res.Field
+	} else if res.Reference != nil {
+		if res.Reference.Target != nil {
+			targetNode = res.Reference.Target
+		} else {
+			return nil
+		}
+	}
+
+	changes := make(map[string][]TextEdit)
+
+	addEdit := func(file string, rng Range, newText string) {
+		uri := "file://" + file
+		changes[uri] = append(changes[uri], TextEdit{Range: rng, NewText: newText})
+	}
+
+	if targetNode != nil {
+		// 1. Rename Definitions
+		prefix := ""
+		if len(targetNode.RealName) > 0 {
+			first := targetNode.RealName[0]
+			if first == '+' || first == '$' {
+				prefix = string(first)
+			}
+		}
+		normNewName := strings.TrimLeft(params.NewName, "+$")
+		finalDefName := prefix + normNewName
+
+		for _, frag := range targetNode.Fragments {
+			if frag.IsObject {
+				rng := Range{
+					Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+					End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(targetNode.RealName)},
+				}
+				addEdit(frag.File, rng, finalDefName)
+			}
+		}
+
+		// 2. Rename References
+		for _, ref := range Tree.References {
+			if ref.Target == targetNode {
+				// Handle qualified names (e.g. Pkg.Node)
+				if strings.Contains(ref.Name, ".") {
+					if strings.HasSuffix(ref.Name, "."+targetNode.Name) {
+						prefixLen := len(ref.Name) - len(targetNode.Name)
+						rng := Range{
+							Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + prefixLen},
+							End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+						}
+						addEdit(ref.File, rng, normNewName)
+					} else if ref.Name == targetNode.Name {
+						rng := Range{
+							Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+							End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+						}
+						addEdit(ref.File, rng, normNewName)
+					}
+				} else {
+					rng := Range{
+						Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+						End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+					}
+					addEdit(ref.File, rng, normNewName)
+				}
+			}
+		}
+
+		// 3. Rename Implicit Node References (Signals in GAMs relying on name match)
+		Tree.Walk(func(n *index.ProjectNode) {
+			if n.Target == targetNode {
+				hasAlias := false
+				for _, frag := range n.Fragments {
+					for _, def := range frag.Definitions {
+						if f, ok := def.(*parser.Field); ok && f.Name == "Alias" {
+							hasAlias = true
+						}
+					}
+				}
+
+				if !hasAlias {
+					for _, frag := range n.Fragments {
+						if frag.IsObject {
+							rng := Range{
+								Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+								End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(n.RealName)},
+							}
+							addEdit(frag.File, rng, normNewName)
+						}
+					}
+				}
+			}
+		})
+
+		return &WorkspaceEdit{Changes: changes}
+	} else if targetField != nil {
+		container := Tree.GetNodeContaining(path, targetField.Position)
+		if container != nil {
+			for _, frag := range container.Fragments {
+				for _, def := range frag.Definitions {
+					if f, ok := def.(*parser.Field); ok {
+						if f.Name == targetField.Name {
+							rng := Range{
+								Start: Position{Line: f.Position.Line - 1, Character: f.Position.Column - 1},
+								End:   Position{Line: f.Position.Line - 1, Character: f.Position.Column - 1 + len(f.Name)},
+							}
+							addEdit(frag.File, rng, params.NewName)
+						}
+					}
+				}
+			}
+		}
+		return &WorkspaceEdit{Changes: changes}
+	}
+
+	return nil
 }
 
 func respond(id any, result any) {

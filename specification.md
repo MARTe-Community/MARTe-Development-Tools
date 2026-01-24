@@ -34,6 +34,9 @@ The LSP server should provide the following capabilities:
   - **Reference Suggestions**:
     - `DataSource` fields suggest available DataSource objects.
     - `Functions` (in Threads) suggest available GAM objects.
+- **Rename Symbol**: Rename an object, field, or reference across the entire project scope.
+  - Supports renaming of Definitions (`+Name` or `Name`), preserving any modifiers (`+`/`$`).
+  - Updates all references to the renamed symbol, including qualified references (e.g., `Pkg.Name`).
 - **Code Snippets**: Provide snippets for common patterns (e.g., `+Object = { ... }`).
 - **Formatting**: Format the document using the same rules and engine as the `fmt` command.
 

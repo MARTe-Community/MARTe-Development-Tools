@@ -107,7 +107,11 @@ func TestHierarchicalPackageMerge(t *testing.T) {
 	}
 
 	// We can also inspect the tree to verify FieldX is there (optional, but good for confidence)
-	baseNode := idx.Root.Children["Base"]
+	projNode := idx.Root.Children["Proj"]
+	if projNode == nil {
+		t.Fatal("Proj node not found")
+	}
+	baseNode := projNode.Children["Base"]
 	if baseNode == nil {
 		t.Fatal("Base node not found")
 	}

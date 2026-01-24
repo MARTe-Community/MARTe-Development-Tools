@@ -120,8 +120,11 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 	node.Metadata = make(map[string]string)
 	pt.rebuildMetadata(node)
 
-	for _, child := range node.Children {
+	for name, child := range node.Children {
 		pt.removeFileFromNode(child, file)
+		if len(child.Fragments) == 0 && len(child.Children) == 0 {
+			delete(node.Children, name)
+		}
 	}
 }
 
@@ -181,13 +184,8 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 
 	node := pt.Root
 	parts := strings.Split(config.Package.URI, ".")
-	// Skip first part as per spec (Project Name is namespace only)
-	startIdx := 0
-	if len(parts) > 0 {
-		startIdx = 1
-	}
-
-	for i := startIdx; i < len(parts); i++ {
+	
+	for i := 0; i < len(parts); i++ {
 		part := strings.TrimSpace(parts[i])
 		if part == "" {
 			continue
