@@ -1131,9 +1131,12 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	var targetNode *index.ProjectNode
 	var targetField *parser.Field
-
 	if res.Node != nil {
-		targetNode = res.Node
+		if res.Node.Target != nil {
+			targetNode = res.Node.Target
+		} else {
+			targetNode = res.Node
+		}
 	} else if res.Field != nil {
 		targetField = res.Field
 	} else if res.Reference != nil {
