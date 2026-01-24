@@ -1058,6 +1058,48 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 	}
 
+	// Find GAM usages
+	var gams []string
+
+	// 1. Check References (explicit text references)
+	for _, ref := range Tree.References {
+		if ref.Target == node {
+			container := Tree.GetNodeContaining(ref.File, ref.Position)
+			if container != nil {
+				curr := container
+				for curr != nil {
+					if isGAM(curr) {
+						gams = append(gams, curr.RealName)
+						break
+					}
+					curr = curr.Parent
+				}
+			}
+		}
+	}
+
+	// 2. Check Direct Usages (Nodes targeting this node)
+	Tree.Walk(func(n *index.ProjectNode) {
+		if n.Target == node {
+			if n.Parent != nil && (n.Parent.Name == "InputSignals" || n.Parent.Name == "OutputSignals") {
+				if n.Parent.Parent != nil && isGAM(n.Parent.Parent) {
+					gams = append(gams, n.Parent.Parent.RealName)
+				}
+			}
+		}
+	})
+
+	if len(gams) > 0 {
+		uniqueGams := make(map[string]bool)
+		info += "\n\n**Used in GAMs**:\n"
+		for _, g := range gams {
+			if !uniqueGams[g] {
+				uniqueGams[g] = true
+				info += fmt.Sprintf("- %s\n", g)
+			}
+		}
+	}
+
 	return info
 }
 
