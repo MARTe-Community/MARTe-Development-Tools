@@ -34,6 +34,10 @@ The LSP server should provide the following capabilities:
   - **Reference Suggestions**:
     - `DataSource` fields suggest available DataSource objects.
     - `Functions` (in Threads) suggest available GAM objects.
+  - **Signal Completion**: Inside `InputSignals` or `OutputSignals` of a GAM:
+    - Suggests available signals from valid DataSources (filtering by direction: `IN`/`INOUT` for Inputs, `OUT`/`INOUT` for Outputs).
+    - Format: `SIGNAL_NAME:DATASOURCE_NAME`.
+    - Auto-inserts: `SIGNAL_NAME = { DataSource = DATASOURCE_NAME }`.
 - **Rename Symbol**: Rename an object, field, or reference across the entire project scope.
   - Supports renaming of Definitions (`+Name` or `Name`), preserving any modifiers (`+`/`$`).
   - Updates all references to the renamed symbol, including qualified references (e.g., `Pkg.Name`).

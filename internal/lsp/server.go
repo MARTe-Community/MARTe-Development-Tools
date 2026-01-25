@@ -646,8 +646,8 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", cls))
 			val := GlobalSchema.Value.LookupPath(classPath)
 			if val.Err() == nil {
-				s, err := val.String()
-				if err == nil {
+				var s string
+				if err := val.Decode(&s); err == nil {
 					dir = s
 				}
 			}
