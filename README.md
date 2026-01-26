@@ -4,6 +4,7 @@
 
 ## Features
 
+- **Portability**: A single statically compiled executable compatible with any Linux 3.2+ machine (as well as possible to compile and run on Windows and Mac OS X)
 - **LSP Server**: Real-time syntax checking, validation, autocomplete, hover documentation, and navigation (Go to Definition/References).
 - **Builder**: Merges multiple configuration files into a single, ordered output file.
 - **Formatter**: Standardizes configuration file formatting.
@@ -47,6 +48,7 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
 ## MARTe Configuration
 
 The tools support the MARTe configuration format with extended features:
+
 - **Objects**: `+Node = { Class = ... }`
 - **Signals**: `Signal = { Type = ... }`
 - **Namespaces**: `#package PROJECT.NODE` for organizing multi-file projects.
@@ -59,6 +61,7 @@ Validation is fully schema-driven using CUE.
 - **Custom Schema**: Add a `.marte_schema.cue` file to your project root to extend or override definitions.
 
 **Example `.marte_schema.cue`:**
+
 ```cue
 package schema
 
@@ -83,14 +86,17 @@ Use comments starting with `//!` to control validation behavior:
 ## Development
 
 ### Building
+
 ```bash
 go build ./cmd/mdt
 ```
 
 ### Running Tests
+
 ```bash
 go test ./...
 ```
 
 ## License
+
 MIT
