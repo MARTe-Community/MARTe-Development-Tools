@@ -10,6 +10,16 @@
 - **Formatter**: Standardizes configuration file formatting.
 - **Validator**: Advanced semantic validation using [CUE](https://cuelang.org/) schemas, ensuring type safety and structural correctness.
 
+### MARTe extended configuration language
+
+Few additional features have been added to the standard MARTe configuration language:
+
+- Multi file configuration support
+  - Multi file definition merging
+  - File level namespace / node
+- Doc-strings support
+- Pragmas for warning suppression / documentation
+
 ## Installation
 
 ### From Source
