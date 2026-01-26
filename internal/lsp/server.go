@@ -23,7 +23,7 @@ import (
 type CompletionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
-	Context      CompletionContext      `json:"context,omitempty"`
+	Context      CompletionContext      `json:"context"`
 }
 
 type CompletionContext struct {
@@ -395,7 +395,7 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	}
 }
 
-func runValidation(uri string) {
+func runValidation(_ string) {
 	v := validator.NewValidator(Tree, ProjectRoot)
 	v.ValidateProject()
 	v.CheckUnused()
@@ -580,10 +580,7 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	}
 	lineStr := lines[params.Position.Line]
 
-	col := params.Position.Character
-	if col > len(lineStr) {
-		col = len(lineStr)
-	}
+	col := min(params.Position.Character, len(lineStr))
 
 	prefix := lineStr[:col]
 
@@ -628,7 +625,7 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	return nil
 }
 
-func suggestGAMSignals(container *index.ProjectNode, direction string) *CompletionList {
+func suggestGAMSignals(_ *index.ProjectNode, direction string) *CompletionList {
 	var items []CompletionItem
 
 	processNode := func(node *index.ProjectNode) {
@@ -641,7 +638,7 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 			return
 		}
 
-		dir := "INOUT"
+		dir := "NIL"
 		if GlobalSchema != nil {
 			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", cls))
 			val := GlobalSchema.Value.LookupPath(classPath)
@@ -652,16 +649,14 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 				}
 			}
 		}
-
 		compatible := false
-		if direction == "Input" {
-			if dir == "IN" || dir == "INOUT" {
-				compatible = true
-			}
-		} else if direction == "Output" {
-			if dir == "OUT" || dir == "INOUT" {
-				compatible = true
-			}
+		switch direction {
+		case "Input":
+			compatible = dir == "IN" || dir == "INOUT"
+		case "Output":
+			compatible = dir == "OUT" || dir == "INOUT"
+		default:
+			compatible = false
 		}
 
 		if !compatible {
@@ -677,8 +672,8 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 			dsName := node.Name
 			sigName := sig.Name
 
-			label := fmt.Sprintf("%s:%s", sigName, dsName)
-			insertText := fmt.Sprintf("%s = { DataSource = %s }", sigName, dsName)
+			label := fmt.Sprintf("%s:%s", dsName, sigName)
+			insertText := fmt.Sprintf("%s = {\n DataSource = %s \n}", sigName, dsName)
 
 			items = append(items, CompletionItem{
 				Label:            label,
@@ -902,14 +897,11 @@ func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
 	var walk func(*index.ProjectNode)
 	walk = func(node *index.ProjectNode) {
 		match := false
-		if filter == "GAM" {
-			if isGAM(node) {
-				match = true
-			}
-		} else if filter == "DataSource" {
-			if isDataSource(node) {
-				match = true
-			}
+		switch filter {
+		case "GAM":
+			match = isGAM(node)
+		case "DataSource":
+			match = isDataSource(node)
 		}
 
 		if match {

@@ -542,11 +542,6 @@ func isValidType(t string) bool {
 	return false
 }
 
-func (v *Validator) checkType(val parser.Value, expectedType string) bool {
-	// Legacy function, replaced by CUE.
-	return true
-}
-
 func (v *Validator) getFileForField(f *parser.Field, node *index.ProjectNode) string {
 	for _, frag := range node.Fragments {
 		for _, def := range frag.Definitions {
