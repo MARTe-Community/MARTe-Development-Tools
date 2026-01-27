@@ -84,11 +84,29 @@ func TestASTCoverage(t *testing.T) {
 
 	// Package
 	pkg := &parser.Package{Position: pos}
-	// Package implements Node?
-	// ast.go: func (p *Package) Pos() Position { return p.Position }
-	// Yes.
 	n = pkg
 	if n.Pos() != pos {
 		t.Error("Package.Pos failed")
+	}
+
+	// Subnode
+	sn := &parser.Subnode{Position: pos}
+	n = sn
+	if n.Pos() != pos {
+		t.Error("Subnode.Pos failed")
+	}
+
+	// Comment
+	cmt := &parser.Comment{Position: pos}
+	n = cmt
+	if n.Pos() != pos {
+		t.Error("Comment.Pos failed")
+	}
+
+	// Pragma
+	prg := &parser.Pragma{Position: pos}
+	n = prg
+	if n.Pos() != pos {
+		t.Error("Pragma.Pos failed")
 	}
 }

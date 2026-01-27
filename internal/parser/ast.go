@@ -45,6 +45,8 @@ type Subnode struct {
 	Definitions []Definition
 }
 
+func (s *Subnode) Pos() Position { return s.Position }
+
 type Value interface {
 	Node
 	isValue()
@@ -115,7 +117,11 @@ type Comment struct {
 	Doc      bool // true if starts with //#
 }
 
+func (c *Comment) Pos() Position { return c.Position }
+
 type Pragma struct {
 	Position Position
 	Text     string
 }
+
+func (p *Pragma) Pos() Position { return p.Position }
