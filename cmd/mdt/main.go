@@ -86,7 +86,6 @@ func runCheck(args []string) {
 
 	// Legacy loop removed as ValidateProject covers it via recursion
 
-	v.CheckUnused()
 
 	for _, diag := range v.Diagnostics {
 		level := "ERROR"

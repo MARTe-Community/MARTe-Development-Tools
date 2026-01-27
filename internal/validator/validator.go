@@ -53,6 +53,8 @@ func (v *Validator) ValidateProject() {
 	for _, node := range v.Tree.IsolatedFiles {
 		v.validateNode(node)
 	}
+	v.CheckUnused()
+	v.CheckDataSourceThreading()
 }
 
 func (v *Validator) validateNode(node *index.ProjectNode) {
@@ -314,7 +316,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	if dsClass != "" {
 		// Lookup class definition in Schema
 		// path: #Classes.ClassName.direction
-		path := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", dsClass))
+		path := cue.ParsePath(fmt.Sprintf("#Classes.%s.#direction", dsClass))
 		val := v.Schema.Value.LookupPath(path)
 
 		if val.Err() == nil {
@@ -509,6 +511,8 @@ func (v *Validator) getFieldValue(f *parser.Field) string {
 		return val.Raw
 	case *parser.FloatValue:
 		return val.Raw
+	case *parser.BoolValue:
+		return strconv.FormatBool(val.Value)
 	}
 	return ""
 }
@@ -738,6 +742,143 @@ func (v *Validator) isGloballyAllowed(warningType string, contextFile string) bo
 				return true
 			}
 		}
+	}
+	return false
+}
+
+func (v *Validator) CheckDataSourceThreading() {
+	if v.Tree.Root == nil {
+		return
+	}
+
+	// 1. Find RealTimeApplication
+	var appNode *index.ProjectNode
+	findApp := func(n *index.ProjectNode) {
+		if cls, ok := n.Metadata["Class"]; ok && cls == "RealTimeApplication" {
+			appNode = n
+		}
+	}
+	v.Tree.Walk(findApp)
+
+	if appNode == nil {
+		return
+	}
+
+	// 2. Find States
+	var statesNode *index.ProjectNode
+	if s, ok := appNode.Children["States"]; ok {
+		statesNode = s
+	} else {
+		for _, child := range appNode.Children {
+			if cls, ok := child.Metadata["Class"]; ok && cls == "StateMachine" {
+				statesNode = child
+				break
+			}
+		}
+	}
+
+	if statesNode == nil {
+		return
+	}
+
+	// 3. Iterate States
+	for _, state := range statesNode.Children {
+		dsUsage := make(map[*index.ProjectNode]string) // DS Node -> Thread Name
+		var threads []*index.ProjectNode
+
+		// Search for threads in the state (either direct children or inside "Threads" container)
+		for _, child := range state.Children {
+			if child.RealName == "Threads" {
+				for _, t := range child.Children {
+					if cls, ok := t.Metadata["Class"]; ok && cls == "RealTimeThread" {
+						threads = append(threads, t)
+					}
+				}
+			} else {
+				if cls, ok := child.Metadata["Class"]; ok && cls == "RealTimeThread" {
+					threads = append(threads, child)
+				}
+			}
+		}
+
+		for _, thread := range threads {
+			gams := v.getThreadGAMs(thread)
+			for _, gam := range gams {
+				dss := v.getGAMDataSources(gam)
+				for _, ds := range dss {
+					if existingThread, ok := dsUsage[ds]; ok {
+						if existingThread != thread.RealName {
+							if !v.isMultithreaded(ds) {
+								v.Diagnostics = append(v.Diagnostics, Diagnostic{
+									Level:    LevelError,
+									Message:  fmt.Sprintf("DataSource '%s' is not multithreaded but used in multiple threads (%s, %s) in state '%s'", ds.RealName, existingThread, thread.RealName, state.RealName),
+									Position: v.getNodePosition(gam),
+									File:     v.getNodeFile(gam),
+								})
+							}
+						}
+					} else {
+						dsUsage[ds] = thread.RealName
+					}
+				}
+			}
+		}
+	}
+}
+
+func (v *Validator) getThreadGAMs(thread *index.ProjectNode) []*index.ProjectNode {
+	var gams []*index.ProjectNode
+	fields := v.getFields(thread)
+	if funcs, ok := fields["Functions"]; ok && len(funcs) > 0 {
+		f := funcs[0]
+		if arr, ok := f.Value.(*parser.ArrayValue); ok {
+			for _, elem := range arr.Elements {
+				if ref, ok := elem.(*parser.ReferenceValue); ok {
+					target := v.resolveReference(ref.Value, v.getNodeFile(thread), isGAM)
+					if target != nil {
+						gams = append(gams, target)
+					}
+				}
+			}
+		}
+	}
+	return gams
+}
+
+func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNode {
+	dsMap := make(map[*index.ProjectNode]bool)
+
+	processSignals := func(container *index.ProjectNode) {
+		if container == nil {
+			return
+		}
+		for _, sig := range container.Children {
+			fields := v.getFields(sig)
+			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+				dsName := v.getFieldValue(dsFields[0])
+				dsNode := v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
+				if dsNode != nil {
+					dsMap[dsNode] = true
+				}
+			}
+		}
+	}
+
+	processSignals(gam.Children["InputSignals"])
+	processSignals(gam.Children["OutputSignals"])
+
+	var dss []*index.ProjectNode
+	for ds := range dsMap {
+		dss = append(dss, ds)
+	}
+	return dss
+}
+
+func (v *Validator) isMultithreaded(ds *index.ProjectNode) bool {
+	fields := v.getFields(ds)
+	if mt, ok := fields["#multithreaded"]; ok && len(mt) > 0 {
+		val := v.getFieldValue(mt[0])
+		return val == "true"
 	}
 	return false
 }

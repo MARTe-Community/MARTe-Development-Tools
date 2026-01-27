@@ -23,6 +23,7 @@ func TestGAMSignalLinking(t *testing.T) {
 
 +MyGAM = {
     Class = IOGAM
+    //! ignore(unused)
     InputSignals = {
         MySig = {
             DataSource = MyDS

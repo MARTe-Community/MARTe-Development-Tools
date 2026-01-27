@@ -129,7 +129,7 @@ func (l *Lexer) NextToken() Token {
 		case '/':
 			return l.lexComment()
 		case '#':
-			return l.lexPackage()
+			return l.lexHashIdentifier()
 		case '+':
 			fallthrough
 		case '$':
@@ -243,18 +243,19 @@ func (l *Lexer) lexUntilNewline(t TokenType) Token {
 	}
 }
 
-func (l *Lexer) lexPackage() Token {
+func (l *Lexer) lexHashIdentifier() Token {
 	// We are at '#', l.start is just before it
 	for {
 		r := l.next()
-		if unicode.IsLetter(r) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' || r == ':' || r == '#' {
 			continue
 		}
 		l.backup()
 		break
 	}
-	if l.input[l.start:l.pos] == "#package" {
+	val := l.input[l.start:l.pos]
+	if val == "#package" {
 		return l.lexUntilNewline(TokenPackage)
 	}
-	return l.emit(TokenError)
+	return l.emit(TokenIdentifier)
 }

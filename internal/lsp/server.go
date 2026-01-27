@@ -49,6 +49,7 @@ var Tree = index.NewProjectTree()
 var Documents = make(map[string]string)
 var ProjectRoot string
 var GlobalSchema *schema.Schema
+var Output io.Writer = os.Stdout
 
 type JsonRpcMessage struct {
 	Jsonrpc string          `json:"jsonrpc"`
@@ -404,7 +405,6 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 func runValidation(_ string) {
 	v := validator.NewValidator(Tree, ProjectRoot)
 	v.ValidateProject()
-	v.CheckUnused()
 
 	// Group diagnostics by file
 	fileDiags := make(map[string][]LSPDiagnostic)
@@ -646,7 +646,7 @@ func suggestGAMSignals(_ *index.ProjectNode, direction string) *CompletionList {
 
 		dir := "NIL"
 		if GlobalSchema != nil {
-			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.direction", cls))
+			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.#direction", cls))
 			val := GlobalSchema.Value.LookupPath(classPath)
 			if val.Err() == nil {
 				var s string
@@ -1342,5 +1342,5 @@ func respond(id any, result any) {
 
 func send(msg any) {
 	body, _ := json.Marshal(msg)
-	fmt.Printf("Content-Length: %d\r\n\r\n%s", len(body), body)
+	fmt.Fprintf(Output, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }
