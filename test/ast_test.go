@@ -10,9 +10,6 @@ func TestASTCoverage(t *testing.T) {
 	pos := parser.Position{Line: 1, Column: 1}
 
 	var n parser.Node
-	// var d parser.Definition // Definition has unexported method, can't assign?
-	// Yes I can assign if I am using the interface type exported by parser.
-	// But I cannot call the method.
 	var d parser.Definition
 	var v parser.Value
 

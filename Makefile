@@ -1,9 +1,9 @@
 BINARY_NAME=mdt
 BUILD_DIR=build
 
-.PHONY: all build test coverage clean install
+.PHONY: all build test coverage clean install vet fmt
 
-all: test build
+all: vet test build
 
 build:
 	mkdir -p $(BUILD_DIR)
@@ -15,6 +15,12 @@ test:
 coverage:
 	go test -cover -coverprofile=coverage.out ./test/... -coverpkg=./internal/...
 	go tool cover -func=coverage.out
+
+vet:
+	go vet ./...
+
+fmt:
+	go fmt ./...
 
 clean:
 	rm -rf $(BUILD_DIR)
