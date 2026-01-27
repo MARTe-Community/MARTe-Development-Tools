@@ -26,8 +26,10 @@ func TestLSPValidationThreading(t *testing.T) {
     Class = ReferenceContainer
     +SharedDS = {
         Class = GAMDataSource
-        #direction = "INOUT"
-        #multithreaded = false
+        #meta = {
+            direction = "INOUT"
+            multithreaded = false
+        }
         Signals = {
             Sig1 = { Type = uint32 }
         }

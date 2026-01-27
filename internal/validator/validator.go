@@ -315,8 +315,8 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	dsClass := v.getNodeClass(dsNode)
 	if dsClass != "" {
 		// Lookup class definition in Schema
-		// path: #Classes.ClassName.direction
-		path := cue.ParsePath(fmt.Sprintf("#Classes.%s.#direction", dsClass))
+		// path: #Classes.ClassName.#meta.direction
+		path := cue.ParsePath(fmt.Sprintf("#Classes.%s.#meta.direction", dsClass))
 		val := v.Schema.Value.LookupPath(path)
 
 		if val.Err() == nil {
@@ -875,10 +875,12 @@ func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNo
 }
 
 func (v *Validator) isMultithreaded(ds *index.ProjectNode) bool {
-	fields := v.getFields(ds)
-	if mt, ok := fields["#multithreaded"]; ok && len(mt) > 0 {
-		val := v.getFieldValue(mt[0])
-		return val == "true"
+	if meta, ok := ds.Children["#meta"]; ok {
+		fields := v.getFields(meta)
+		if mt, ok := fields["multithreaded"]; ok && len(mt) > 0 {
+			val := v.getFieldValue(mt[0])
+			return val == "true"
+		}
 	}
 	return false
 }

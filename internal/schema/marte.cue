@@ -43,8 +43,8 @@ package schema
 		...
 	}
 	TimingDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	IOGAM: {
@@ -67,84 +67,84 @@ package schema
 	FileDataSource: {
 		Filename:       string
 		Format?:        string
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	LoggerDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	DANStream: {
 		Timeout?:       int
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	EPICSCAInput: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	EPICSCAOutput: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	EPICSPVAInput: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	EPICSPVAOutput: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	SDNSubscriber: {
 		Address:        string
 		Port:           int
 		Interface?:     string
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	SDNPublisher: {
 		Address:        string
 		Port:           int
 		Interface?:     string
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	UDPReceiver: {
 		Port:           int
 		Address?:       string
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	UDPSender: {
 		Destination:    string
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	FileReader: {
 		Filename:       string
 		Format?:        string
 		Interpolate?:   string
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	FileWriter: {
 		Filename:        string
 		Format?:         string
 		StoreOnTrigger?: int
-		#multithreaded:  bool | *false
-		#direction:      "OUT"
+		#meta: multithreaded:  bool | *false
+		#meta: direction:      "OUT"
 		...
 	}
 	OrderedClass: {
@@ -187,8 +187,8 @@ package schema
 	TriggeredIOGAM: {...}
 	WaveformGAM: {...}
 	DAN: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	LinuxTimer: {
@@ -199,13 +199,13 @@ package schema
 		CPUMask?:         int
 		TimeProvider?: {...}
 		Signals: {...}
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	LinkDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	MDSReader: {
@@ -213,8 +213,8 @@ package schema
 		ShotNumber: int
 		Frequency:  float | int
 		Signals: {...}
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	MDSWriter: {
@@ -230,74 +230,74 @@ package schema
 		NumberOfPostTriggers?: int
 		Signals: {...}
 		Messages?: {...}
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	NI1588TimeStamp: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	NI6259ADC: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	NI6259DAC: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	NI6259DIO: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	NI6368ADC: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	NI6368DAC: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	NI6368DIO: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	NI9157CircularFifoReader: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	NI9157MxiDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	OPCUADSInput: {
-		#multithreaded: bool | *false
-		#direction:     "IN"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "IN"
 		...
 	}
 	OPCUADSOutput: {
-		#multithreaded: bool | *false
-		#direction:     "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	RealTimeThreadAsyncBridge: {
-		#direction:     "INOUT"
-		#multithreaded: bool | true
+		#meta: direction:     "INOUT"
+		#meta: multithreaded: bool | true
 		...
 	}
 	RealTimeThreadSynchronisation: {...}
 	UARTDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 	BaseLib2Wrapper: {...}
@@ -307,8 +307,8 @@ package schema
 	OPCUA: {...}
 	SysLogger: {...}
 	GAMDataSource: {
-		#multithreaded: bool | *false
-		#direction:     "INOUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "INOUT"
 		...
 	}
 }

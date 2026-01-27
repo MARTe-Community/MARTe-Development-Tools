@@ -13,6 +13,7 @@ type ProjectTree struct {
 	References    []Reference
 	IsolatedFiles map[string]*ProjectNode
 	GlobalPragmas map[string][]string
+	NodeMap       map[string][]*ProjectNode
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -385,7 +386,19 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 	}
 }
 
+func (pt *ProjectTree) RebuildIndex() {
+	pt.NodeMap = make(map[string][]*ProjectNode)
+	visitor := func(n *ProjectNode) {
+		pt.NodeMap[n.Name] = append(pt.NodeMap[n.Name], n)
+		if n.RealName != n.Name {
+			pt.NodeMap[n.RealName] = append(pt.NodeMap[n.RealName], n)
+		}
+	}
+	pt.Walk(visitor)
+}
+
 func (pt *ProjectTree) ResolveReferences() {
+	pt.RebuildIndex()
 	for i := range pt.References {
 		ref := &pt.References[i]
 		if isoNode, ok := pt.IsolatedFiles[ref.File]; ok {
@@ -397,14 +410,21 @@ func (pt *ProjectTree) ResolveReferences() {
 }
 
 func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
+	if pt.NodeMap == nil {
+		pt.RebuildIndex()
+	}
+
 	if strings.Contains(name, ".") {
 		parts := strings.Split(name, ".")
 		rootName := parts[0]
 
-		var candidates []*ProjectNode
-		pt.findAllNodes(root, rootName, &candidates)
+		candidates := pt.NodeMap[rootName]
 
 		for _, cand := range candidates {
+			if !pt.isDescendant(cand, root) {
+				continue
+			}
+
 			curr := cand
 			valid := true
 			for i := 1; i < len(parts); i++ {
@@ -426,26 +446,33 @@ func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*
 		return nil
 	}
 
-	if root.RealName == name || root.Name == name {
-		if predicate == nil || predicate(root) {
-			return root
+	candidates := pt.NodeMap[name]
+	for _, cand := range candidates {
+		if !pt.isDescendant(cand, root) {
+			continue
 		}
-	}
-	for _, child := range root.Children {
-		if res := pt.FindNode(child, name, predicate); res != nil {
-			return res
+		if predicate == nil || predicate(cand) {
+			return cand
 		}
 	}
 	return nil
 }
 
-func (pt *ProjectTree) findAllNodes(root *ProjectNode, name string, results *[]*ProjectNode) {
-	if root.RealName == name || root.Name == name {
-		*results = append(*results, root)
+func (pt *ProjectTree) isDescendant(node, root *ProjectNode) bool {
+	if node == root {
+		return true
 	}
-	for _, child := range root.Children {
-		pt.findAllNodes(child, name, results)
+	if root == nil {
+		return true
 	}
+	curr := node
+	for curr != nil {
+		if curr == root {
+			return true
+		}
+		curr = curr.Parent
+	}
+	return false
 }
 
 type QueryResult struct {

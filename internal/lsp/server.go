@@ -92,7 +92,9 @@ type VersionedTextDocumentIdentifier struct {
 }
 
 type TextDocumentContentChangeEvent struct {
-	Text string `json:"text"`
+	Range       *Range `json:"range,omitempty"`
+	RangeLength int    `json:"rangeLength,omitempty"`
+	Text        string `json:"text"`
 }
 
 type HoverParams struct {
@@ -253,7 +255,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 
 		respond(msg.ID, map[string]any{
 			"capabilities": map[string]any{
-				"textDocumentSync":           1, // Full sync
+				"textDocumentSync":           2, // Incremental sync
 				"hoverProvider":              true,
 				"definitionProvider":         true,
 				"referencesProvider":         true,
@@ -347,26 +349,74 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 }
 
 func HandleDidChange(params DidChangeTextDocumentParams) {
-	if len(params.ContentChanges) == 0 {
-		return
+	uri := params.TextDocument.URI
+	text, ok := Documents[uri]
+	if !ok {
+		// If not found, rely on full sync being first or error
 	}
-	text := params.ContentChanges[0].Text
-	Documents[params.TextDocument.URI] = text
-	path := uriToPath(params.TextDocument.URI)
+
+	for _, change := range params.ContentChanges {
+		if change.Range == nil {
+			text = change.Text
+		} else {
+			text = applyContentChange(text, change)
+		}
+	}
+
+	Documents[uri] = text
+	path := uriToPath(uri)
 	p := parser.NewParser(text)
 	config, err := p.Parse()
 
 	if err != nil {
-		publishParserError(params.TextDocument.URI, err)
+		publishParserError(uri, err)
 	} else {
-		publishParserError(params.TextDocument.URI, nil)
+		publishParserError(uri, nil)
 	}
 
 	if config != nil {
 		Tree.AddFile(path, config)
 		Tree.ResolveReferences()
-		runValidation(params.TextDocument.URI)
+		runValidation(uri)
 	}
+}
+
+func applyContentChange(text string, change TextDocumentContentChangeEvent) string {
+	startOffset := offsetAt(text, change.Range.Start)
+	endOffset := offsetAt(text, change.Range.End)
+
+	if startOffset == -1 || endOffset == -1 {
+		return text
+	}
+
+	return text[:startOffset] + change.Text + text[endOffset:]
+}
+
+func offsetAt(text string, pos Position) int {
+	line := 0
+	col := 0
+	for i, r := range text {
+		if line == pos.Line && col == pos.Character {
+			return i
+		}
+		if line > pos.Line {
+			break
+		}
+		if r == '\n' {
+			line++
+			col = 0
+		} else {
+			if r >= 0x10000 {
+				col += 2
+			} else {
+				col++
+			}
+		}
+	}
+	if line == pos.Line && col == pos.Character {
+		return len(text)
+	}
+	return -1
 }
 
 func HandleFormatting(params DocumentFormattingParams) []TextEdit {
@@ -646,7 +696,7 @@ func suggestGAMSignals(_ *index.ProjectNode, direction string) *CompletionList {
 
 		dir := "NIL"
 		if GlobalSchema != nil {
-			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.#direction", cls))
+			classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s.#meta.direction", cls))
 			val := GlobalSchema.Value.LookupPath(classPath)
 			if val.Err() == nil {
 				var s string
@@ -1161,7 +1211,20 @@ func formatNodeInfo(node *index.ProjectNode) string {
 				curr := container
 				for curr != nil {
 					if isGAM(curr) {
-						gams = append(gams, curr.RealName)
+						suffix := ""
+						p := container
+						for p != nil && p != curr {
+							if p.Name == "InputSignals" {
+								suffix = " (Input)"
+								break
+							}
+							if p.Name == "OutputSignals" {
+								suffix = " (Output)"
+								break
+							}
+							p = p.Parent
+						}
+						gams = append(gams, curr.RealName+suffix)
 						break
 					}
 					curr = curr.Parent
@@ -1175,7 +1238,11 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		if n.Target == node {
 			if n.Parent != nil && (n.Parent.Name == "InputSignals" || n.Parent.Name == "OutputSignals") {
 				if n.Parent.Parent != nil && isGAM(n.Parent.Parent) {
-					gams = append(gams, n.Parent.Parent.RealName)
+					suffix := " (Input)"
+					if n.Parent.Name == "OutputSignals" {
+						suffix = " (Output)"
+					}
+					gams = append(gams, n.Parent.Parent.RealName+suffix)
 				}
 			}
 		}

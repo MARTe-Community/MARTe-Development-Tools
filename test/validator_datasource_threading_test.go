@@ -15,16 +15,20 @@ func TestDataSourceThreadingValidation(t *testing.T) {
     Class = ReferenceContainer
     +SharedDS = {
         Class = GAMDataSource
-        #direction = "INOUT"
-        #multithreaded = false
+        #meta = {
+            direction = "INOUT"
+            multithreaded = false
+        }
         Signals = {
             Sig1 = { Type = uint32 }
         }
     }
     +MultiDS = {
         Class = GAMDataSource
-        #direction = "INOUT"
-        #multithreaded = true
+        #meta = {
+            direction = "INOUT"
+            multithreaded = true
+        }
         Signals = {
             Sig1 = { Type = uint32 }
         }

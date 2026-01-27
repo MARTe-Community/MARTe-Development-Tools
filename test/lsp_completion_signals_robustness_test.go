@@ -20,7 +20,7 @@ func TestSuggestSignalsRobustness(t *testing.T) {
 	custom := []byte(`
 package schema
 #Classes: {
-    InOutReader: { #direction: "INOUT" }
+    InOutReader: { #meta: direction: "INOUT" }
 }
 `)
 	val := lsp.GlobalSchema.Context.CompileBytes(custom)
