@@ -65,8 +65,8 @@ package schema
 		...
 	}
 	FileDataSource: {
-		Filename:       string
-		Format?:        string
+		Filename: string
+		Format?:  string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
 		...
@@ -77,7 +77,7 @@ package schema
 		...
 	}
 	DANStream: {
-		Timeout?:       int
+		Timeout?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
 		...
@@ -103,38 +103,43 @@ package schema
 		...
 	}
 	SDNSubscriber: {
-		Address:        string
-		Port:           int
-		Interface?:     string
+		ExecutionMode?:      *"IndependentThread" | "RealTimeThread"
+		Topic!:              string
+		Address?:            string
+		Interface!:          string
+		CPUs?:               uint32
+		InternalTimeout?:    uint32
+		Timeout?:            uint32
+		IgnoreTimeoutError?: 0 | 1
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
 		...
 	}
 	SDNPublisher: {
-		Address:        string
-		Port:           int
-		Interface?:     string
+		Address:    string
+		Port:       int
+		Interface?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
 		...
 	}
 	UDPReceiver: {
-		Port:           int
-		Address?:       string
+		Port:     int
+		Address?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
 		...
 	}
 	UDPSender: {
-		Destination:    string
+		Destination: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
 		...
 	}
 	FileReader: {
-		Filename:       string
-		Format?:        string
-		Interpolate?:   string
+		Filename:     string
+		Format?:      string
+		Interpolate?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
 		...
@@ -143,8 +148,8 @@ package schema
 		Filename:        string
 		Format?:         string
 		StoreOnTrigger?: int
-		#meta: multithreaded:  bool | *false
-		#meta: direction:      "OUT"
+		#meta: multithreaded: bool | *false
+		#meta: direction:     "OUT"
 		...
 	}
 	OrderedClass: {

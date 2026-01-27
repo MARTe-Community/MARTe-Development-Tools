@@ -15,7 +15,7 @@ func TestSDNSubscriberValidation(t *testing.T) {
 +MySDN = {
     Class = SDNSubscriber
     Address = "239.0.0.1"
-    // Missing Port
+    // Missing Interface
 }
 `
 	p := parser.NewParser(content)
@@ -32,7 +32,7 @@ func TestSDNSubscriberValidation(t *testing.T) {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if strings.Contains(d.Message, "Port: incomplete value") {
+		if strings.Contains(d.Message, "Interface: field is required but not present") {
 			found = true
 			break
 		}
