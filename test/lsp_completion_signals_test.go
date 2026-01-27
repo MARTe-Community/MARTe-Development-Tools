@@ -75,7 +75,7 @@ package schema
 	foundIn := false
 	foundOut := false
 	for _, item := range listIn.Items {
-		if item.Label == "InSig:InDS" {
+		if item.Label == "InDS:InSig" {
 			foundIn = true
 			// Normalize spaces for check
 			insert := strings.ReplaceAll(item.InsertText, " ", "")
@@ -85,16 +85,16 @@ package schema
 				t.Errorf("InsertText mismatch: %s", item.InsertText)
 			}
 		}
-		if item.Label == "OutSig:OutDS" {
+		if item.Label == "OutDS:OutSig" {
 			foundOut = true
 		}
 	}
 
 	if !foundIn {
-		t.Error("Did not find InSig:InDS")
+		t.Error("Did not find InDS:InSig")
 	}
 	if foundOut {
-		t.Error("Should not find OutSig:OutDS in InputSignals")
+		t.Error("Should not find OutDS:OutSig in InputSignals")
 	}
 
 	// 2. Suggest in OutputSignals
@@ -111,18 +111,18 @@ package schema
 	foundIn = false
 	foundOut = false
 	for _, item := range listOut.Items {
-		if item.Label == "InSig:InDS" {
+		if item.Label == "InDS:InSig" {
 			foundIn = true
 		}
-		if item.Label == "OutSig:OutDS" {
+		if item.Label == "OutDS:OutSig" {
 			foundOut = true
 		}
 	}
 
 	if foundIn {
-		t.Error("Should not find InSig:InDS in OutputSignals")
+		t.Error("Should not find InDS:InSig in OutputSignals")
 	}
 	if !foundOut {
-		t.Error("Did not find OutSig:OutDS in OutputSignals")
+		t.Error("Did not find OutDS:OutSig in OutputSignals")
 	}
 }

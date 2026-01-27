@@ -222,6 +222,12 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 }
 
 func HandleMessage(msg *JsonRpcMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Printf("Panic in HandleMessage: %v", r)
+		}
+	}()
+
 	switch msg.Method {
 	case "initialize":
 		var params InitializeParams
@@ -1326,10 +1332,10 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 }
 
 func respond(id any, result any) {
-	msg := JsonRpcMessage{
-		Jsonrpc: "2.0",
-		ID:      id,
-		Result:  result,
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"result":  result,
 	}
 	send(msg)
 }

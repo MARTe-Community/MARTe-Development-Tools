@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
@@ -456,9 +455,7 @@ type QueryResult struct {
 }
 
 func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
-	logger.Printf("File: %s:%d:%d", file, line, col)
 	for i := range pt.References {
-		logger.Printf("%s", pt.Root.Name)
 		ref := &pt.References[i]
 		if ref.File == file {
 			if line == ref.Position.Line && col >= ref.Position.Column && col < ref.Position.Column+len(ref.Name) {
