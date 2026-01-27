@@ -77,6 +77,10 @@ package schema
 
 #Classes: {
     MyCustomGAM: {
+        #meta: {
+            direction: "INOUT"
+            multithreaded: true
+        }
         Param1: int
         Param2?: string
         ...

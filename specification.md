@@ -21,11 +21,12 @@ The executable should support the following subcommands:
 The LSP server should provide the following capabilities:
 
 - **Diagnostics**: Report syntax errors and validation issues.
+- **Incremental Sync**: Supports `textDocumentSync` kind 2 (Incremental) for better performance with large files.
 - **Hover Documentation**:
   - **Objects**: Display `CLASS::Name` and any associated docstrings.
   - **Signals**: Display `DataSource.Name TYPE (SIZE) [IN/OUT/INOUT]` along with docstrings.
   - **GAMs**: Show the list of States where the GAM is referenced.
-  - **Referenced Signals**: Show the list of GAMs where the signal is referenced.
+  - **Referenced Signals**: Show the list of GAMs where the signal is referenced (indicating Input/Output direction).
 - **Go to Definition**: Jump to the definition of a reference, supporting navigation across any file in the current project.
 - **Go to References**: Find usages of a node or field, supporting navigation across any file in the current project.
 - **Code Completion**: Autocomplete fields, values, and references.
@@ -173,6 +174,7 @@ The tool must build an index of the configuration to support LSP features and va
     - **Conditional Fields**: Validation of fields whose presence or value depends on the values of other fields within the same node or context.
   - **Schema Definition**:
     - Class validation rules must be defined in a separate schema file using the **CUE** language.
+    - **Metadata**: Class properties like direction (`#direction`) and multithreading support (`#multithreaded`) are stored within a `#meta` field in the class definition (e.g., `#meta: { direction: "IN", multithreaded: true }`).
     - **Project-Specific Classes**: Developers can define their own project-specific classes and corresponding validation rules, expanding the validation capabilities for their specific needs.
   - **Schema Loading**:
     - **Default Schema**: The tool should look for a default schema file `marte_schema.cue` in standard system locations:
@@ -218,6 +220,7 @@ The LSP and `check` command should report the following:
     - Field type mismatches.
     - Grammar errors (e.g., missing closing brackets).
     - **Invalid Function Reference**: Elements in the `Functions` array of a `State.Thread` must be valid references to defined GAM nodes.
+  - **Threading Violation**: A DataSource that is not marked as multithreaded (via `#meta.multithreaded`) is used by GAMs running in different threads within the same State.
 
 ## Logging
 
