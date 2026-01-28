@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 
 	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
@@ -176,23 +175,23 @@ func runInit(args []string) {
 	}
 
 	projectName := args[0]
-	if err := os.MkdirAll(filepath.Join(projectName, "src"), 0755); err != nil {
+	if err := os.MkdirAll("src", 0755); err != nil {
 		logger.Fatalf("Error creating project directories: %v", err)
 	}
 
 	files := map[string]string{
-		"Makefile": "MDT=mdt\n\nall: check build\n\ncheck:\n\t$(MDT) check src/*.marte\n\nbuild:\n\t$(MDT) build -o app.marte src/*.marte\n\nfmt:\n\t$(MDT) fmt src/*.marte\n",
-		".marte_schema.cue": "package schema\n\n#Classes: {\n    // Add your project-specific classes here\n}\n",
-		"src/app.marte": "#package App\n\n+Main = {\n    Class = RealTimeApplication\n    +States = {\n        Class = ReferenceContainer\n        +Run = {\n            Class = RealTimeState\n            +MainThread = {\n                Class = RealTimeThread\n                Functions = {}\n            }\n        }\n    }\n    +Data = {\n        Class = ReferenceContainer\n    }\n}\n",
-		"src/components.marte": "#package App.Data\n\n// Define your DataSources here\n",
+		"Makefile":            "MDT=mdt\n\nall: check build\n\ncheck:\n\t$(MDT) check src/*.marte\n\nbuild:\n\t$(MDT) build -o app.marte src/*.marte\n\nfmt:\n\t$(MDT) fmt src/*.marte\n",
+		".marte_schema.cue":   "package schema\n\n#Classes: {\n    // Add your project-specific classes here\n}\n",
+		"src/app.marte":       "#package " + projectName + "\n\n+App = {\n  Class = RealTimeApplication\n  +Data = {\n    Class = ReferenceContainer\n  }\n  +Functions = {\n    Class = ReferenceContainer\n  }\n  +States = {\n    Class = ReferenceContainer\n  }\n  +Scheduler = {\n    Class = GAMScheduler\n    TimingDataSource = TimingDataSource\n  }\n}\n",
+		"src/data.marte":      "#package " + projectName + ".App.Data\n\n// Define your DataSources here\nDefaultDataSource = DDB\n//# Default DB\n+DDB = {\n  Class=GAMDataSource\n}\n//# Timing Data Source to track threads timings\n+TimingDataSource = {\n  Class = TimingDataSource\n}",
+		"src/functions.marte": "#package " + projectName + ".App.Functions\n\n// Define your GAMs here\n",
 	}
 
 	for path, content := range files {
-		fullPath := filepath.Join(projectName, path)
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-			logger.Fatalf("Error creating file %s: %v", fullPath, err)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			logger.Fatalf("Error creating file %s: %v", path, err)
 		}
-		logger.Printf("Created %s\n", fullPath)
+		logger.Printf("Created %s\n", path)
 	}
 
 	logger.Printf("Project '%s' initialized successfully.\n", projectName)
