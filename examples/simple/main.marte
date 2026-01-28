@@ -1,0 +1,60 @@
+//# Main Application
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+    +Timer = {
+      Class = LinuxTimer
+      Signals = {
+        Counter = {
+          Type = uint32
+        }
+        //! unused: Time variable is not used 
+        Time = {
+          Type = uint32
+        }
+      }
+    }
+    +Logger = {
+      Class = LoggerDataSource
+    }
+    +DDB1 = {
+      Class = GAMDataSource
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +Idle = {
+      Class = RealTimeState
+      +Thread1 = {
+        Class = RealTimeThread
+        CPUs = 0x1
+        Functions = { MyGAM }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +MyGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Counter = {
+          DataSource = Timer
+          Type = uint32
+          Frequency = 100 //Hz
+        }
+      }
+      OutputSignals = {
+        CounterCopy = {
+          DataSource = Logger
+          Type = uint32
+        }
+      }
+    }
+  }
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = Timer
+  }
+}

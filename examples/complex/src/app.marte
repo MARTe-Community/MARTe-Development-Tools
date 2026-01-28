@@ -1,0 +1,42 @@
+#package complex_ex
+
++App = {
+  Class = RealTimeApplication
+  +States = {
+    Class = ReferenceContainer
+    +Run = {
+      Class = RealTimeState
+      +ControlThread = {
+        Class = RealTimeThread
+        Functions = { Controller }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +Controller = {
+      Class = CustomController // Defined in .marte_schema.cue
+      Gain = 10.5
+      InputSignals = {
+        Ref = {
+          DataSource = App.Data.References
+          Type = float32
+        }
+      }
+      OutputSignals = {
+        Actuation = {
+          DataSource = App.Data.Actuators
+          Type = float32
+        }
+      }
+    }
+  }
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+  }
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = TimingDS
+  }
+}

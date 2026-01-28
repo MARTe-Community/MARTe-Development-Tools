@@ -20,6 +20,13 @@ Few additional features have been added to the standard MARTe configuration lang
 - Doc-strings support
 - Pragmas for warning suppression / documentation
 
+## Documentation
+
+- [Step-by-Step Tutorial](docs/TUTORIAL.md)
+- [Editor Integration Guide](docs/EDITOR_INTEGRATION.md)
+- [Configuration Guide](docs/CONFIGURATION_GUIDE.md)
+- [Examples Readme](/examples/README.md)
+
 ## Installation
 
 ### From Source
@@ -34,13 +41,17 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
 
 ### CLI Commands
 
+- **Init**: Initialize a MARTe project.
+  ```bash
+  mdt init project_name
+  ```
 - **Check**: Run validation on a file or project.
   ```bash
   mdt check path/to/project
   ```
 - **Build**: Merge project files into a single output.
   ```bash
-  mdt build -o output.marte main.marte
+  mdt build [-o output.marte] main.marte ...
   ```
 - **Format**: Format configuration files.
   ```bash
@@ -92,10 +103,10 @@ package schema
 
 Use comments starting with `//!` to control validation behavior:
 
-- `//!unused: Reason` - Suppress "Unused GAM" or "Unused Signal" warnings.
-- `//!implicit: Reason` - Suppress "Implicitly Defined Signal" warnings.
-- `//!cast(DefinedType, UsageType)` - Allow type mismatch between definition and usage (e.g. `//!cast(uint32, int32)`).
-- `//!allow(unused)` - Global suppression for the file.
+- `//! unused: Reason` - Suppress "Unused GAM" or "Unused Signal" warnings.
+- `//! implicit: Reason` - Suppress "Implicitly Defined Signal" warnings.
+- `//! cast(DefinedType, UsageType)` - Allow type mismatch between definition and usage (e.g. `//!cast(uint32, int32)`).
+- `//! allow(unused)` - Global suppression for the file.
 
 ## Development
 

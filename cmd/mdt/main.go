@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 
 	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
@@ -16,7 +17,11 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		logger.Println("Usage: mdt <command> [arguments]")
-		logger.Println("Commands: lsp, build, check, fmt")
+		logger.Println("Commands: lsp, build, check, fmt, init")
+		logger.Println("  build [-o output_file] <input_files...>")
+		logger.Println("  check <input_files...>")
+		logger.Println("  fmt <input_files...>")
+		logger.Println("  init <project_name>")
 		os.Exit(1)
 	}
 
@@ -30,6 +35,8 @@ func main() {
 		runCheck(os.Args[2:])
 	case "fmt":
 		runFmt(os.Args[2:])
+	case "init":
+		runInit(os.Args[2:])
 	default:
 		logger.Printf("Unknown command: %s\n", command)
 		os.Exit(1)
@@ -42,12 +49,45 @@ func runLSP() {
 
 func runBuild(args []string) {
 	if len(args) < 1 {
-		logger.Println("Usage: mdt build <input_files...>")
+		logger.Println("Usage: mdt build [-o output_file] <input_files...>")
 		os.Exit(1)
 	}
 
-	b := builder.NewBuilder(args)
-	err := b.Build(os.Stdout)
+	var outputFilePath string
+	var inputFiles []string
+
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-o" {
+			if i+1 < len(args) {
+				outputFilePath = args[i+1]
+				i++
+			} else {
+				logger.Println("Error: -o requires a file path")
+				os.Exit(1)
+			}
+		} else {
+			inputFiles = append(inputFiles, args[i])
+		}
+	}
+
+	if len(inputFiles) < 1 {
+		logger.Println("Usage: mdt build [-o output_file] <input_files...>")
+		os.Exit(1)
+	}
+
+	output := os.Stdout
+	if outputFilePath != "" {
+		f, err := os.Create(outputFilePath)
+		if err != nil {
+			logger.Printf("Error creating output file %s: %v\n", outputFilePath, err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		output = f
+	}
+
+	b := builder.NewBuilder(inputFiles)
+	err := b.Build(output)
 	if err != nil {
 		logger.Printf("Build failed: %v\n", err)
 		os.Exit(1)
@@ -61,7 +101,6 @@ func runCheck(args []string) {
 	}
 
 	tree := index.NewProjectTree()
-	// configs := make(map[string]*parser.Configuration) // We don't strictly need this map if we just build the tree
 
 	for _, file := range args {
 		content, err := os.ReadFile(file)
@@ -80,12 +119,8 @@ func runCheck(args []string) {
 		tree.AddFile(file, config)
 	}
 
-	// idx.ResolveReferences() // Not implemented in new tree yet, but Validator uses Tree directly
 	v := validator.NewValidator(tree, ".")
 	v.ValidateProject()
-
-	// Legacy loop removed as ValidateProject covers it via recursion
-
 
 	for _, diag := range v.Diagnostics {
 		level := "ERROR"
@@ -132,4 +167,33 @@ func runFmt(args []string) {
 		}
 		logger.Printf("Formatted %s\n", file)
 	}
+}
+
+func runInit(args []string) {
+	if len(args) < 1 {
+		logger.Println("Usage: mdt init <project_name>")
+		os.Exit(1)
+	}
+
+	projectName := args[0]
+	if err := os.MkdirAll(filepath.Join(projectName, "src"), 0755); err != nil {
+		logger.Fatalf("Error creating project directories: %v", err)
+	}
+
+	files := map[string]string{
+		"Makefile": "MDT=mdt\n\nall: check build\n\ncheck:\n\t$(MDT) check src/*.marte\n\nbuild:\n\t$(MDT) build -o app.marte src/*.marte\n\nfmt:\n\t$(MDT) fmt src/*.marte\n",
+		".marte_schema.cue": "package schema\n\n#Classes: {\n    // Add your project-specific classes here\n}\n",
+		"src/app.marte": "#package App\n\n+Main = {\n    Class = RealTimeApplication\n    +States = {\n        Class = ReferenceContainer\n        +Run = {\n            Class = RealTimeState\n            +MainThread = {\n                Class = RealTimeThread\n                Functions = {}\n            }\n        }\n    }\n    +Data = {\n        Class = ReferenceContainer\n    }\n}\n",
+		"src/components.marte": "#package App.Data\n\n// Define your DataSources here\n",
+	}
+
+	for path, content := range files {
+		fullPath := filepath.Join(projectName, path)
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			logger.Fatalf("Error creating file %s: %v", fullPath, err)
+		}
+		logger.Printf("Created %s\n", fullPath)
+	}
+
+	logger.Printf("Project '%s' initialized successfully.\n", projectName)
 }

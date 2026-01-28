@@ -1,0 +1,24 @@
+#package complex_ex.App.Data
+
++References = {
+  Class = GAMDataSource
+  Signals = {
+    Ref = {
+      Type = float32
+    }
+  }
+}
++Actuators = {
+  Class = GAMDataSource
+  Signals = {
+    Actuation = {
+      Type = float32
+    }
+  }
+}
++TimingDS = {
+  Class = TimingDataSource
+}
++DDB1 = {
+  Class = GAMDataSource
+}

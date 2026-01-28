@@ -58,7 +58,7 @@ The LSP server should provide the following capabilities:
 - **Build Process**:
   - The build tool merges all files sharing the same base namespace into a **single output configuration**.
   - **Namespace Consistency**: The build tool must verify that all input files belong to the same project namespace (the first segment of the `#package` URI). If multiple project namespaces are detected, the build must fail with an error.
-  - **Target**: The build output is written to a single target file (e.g., provided via CLI or API).
+  - **Target**: The build output is written to standard output (`stdout`) by default. It can be written to a target file if the `-o` (or `--output`) argument is provided via CLI.
   - **Multi-File Definitions**: Nodes and objects can be defined across multiple files. The build tool, validator, and LSP must merge these definitions (including all fields and sub-nodes) from the entire project to create a unified view before processing or validating.
   - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project. Support for dot-separated paths (e.g., `Node.SubNode`) is required.
   - **Merging Order**: For objects defined across multiple files, definitions are merged. The build tool must preserve the relative order of fields and sub-nodes as they appear in the source files, interleaving them correctly in the final output.
