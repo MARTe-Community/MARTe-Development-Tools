@@ -2,9 +2,32 @@ package schema
 
 #Classes: {
 	RealTimeApplication: {
-		Functions: {...} // type: node
-		Data!: {...} // type: node
-		States!: {...} // type: node
+		Functions!: {
+			Class: "ReferenceContainer"
+			[_= !~"^Class$"]: {
+				#meta: type: "gam"
+				...
+			}
+		} // type: node
+		Data!: {
+			Class:             "ReferenceContainer"
+			DefaultDataSource: string
+			[_= !~"^(Class|DefaultDataSource)$"]: {
+				#meta: type: "datasource"
+				...
+			}
+		}
+		States!: {
+			Class: "ReferenceContainer"
+			[_= !~"^Class$"]: {
+				Class: "RealTimeState"
+				...
+			}
+		} // type: node
+		Scheduler!: {
+			...
+			#meta: type: "scheduler"
+		}
 		...
 	}
 	Message: {
@@ -23,7 +46,7 @@ package schema
 			Class: "ReferenceContainer"
 			...
 		}
-		[_ = !~"^(Class|ENTER)$"]: StateMachineEvent
+		[_ = !~"^(Class|ENTER|EXIT)$"]: StateMachineEvent
 		...
 	}
 	StateMachine: {
@@ -40,16 +63,19 @@ package schema
 	}
 	GAMScheduler: {
 		TimingDataSource: string // type: reference
+		#meta: type: "scheduler"
 		...
 	}
 	TimingDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	IOGAM: {
 		InputSignals?: {...} // type: node
 		OutputSignals?: {...} // type: node
+		#meta: type: "gam"
 		...
 	}
 	ReferenceContainer: {
@@ -57,11 +83,13 @@ package schema
 	}
 	ConstantGAM: {
 		...
+		#meta: type: "gam"
 	}
 	PIDGAM: {
 		Kp: float | int // type: float (allow int as it promotes)
 		Ki: float | int
 		Kd: float | int
+		#meta: type: "gam"
 		...
 	}
 	FileDataSource: {
@@ -69,37 +97,44 @@ package schema
 		Format?:  string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	LoggerDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	DANStream: {
 		Timeout?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	EPICSCAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	EPICSCAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	EPICSPVAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	EPICSPVAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	SDNSubscriber: {
@@ -113,6 +148,7 @@ package schema
 		IgnoreTimeoutError?: 0 | 1
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	SDNPublisher: {
@@ -121,6 +157,7 @@ package schema
 		Interface?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	UDPReceiver: {
@@ -128,12 +165,14 @@ package schema
 		Address?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	UDPSender: {
 		Destination: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	FileReader: {
@@ -142,6 +181,7 @@ package schema
 		Interpolate?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	FileWriter: {
@@ -150,6 +190,7 @@ package schema
 		StoreOnTrigger?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	OrderedClass: {
@@ -157,15 +198,25 @@ package schema
 		Second: string
 		...
 	}
-	BaseLib2GAM: {...}
-	ConversionGAM: {...}
-	DoubleHandshakeGAM: {...}
+	BaseLib2GAM: {
+		#meta: type: "gam"
+		...
+	}
+	ConversionGAM: {
+		#meta: type: "gam"
+		...
+	}
+	DoubleHandshakeGAM: {
+		#meta: type: "gam"
+		...
+	}
 	FilterGAM: {
 		Num: [...]
 		Den: [...]
 		ResetInEachState?: _
 		InputSignals?: {...}
 		OutputSignals?: {...}
+		#meta: type: "gam"
 		...
 	}
 	HistogramGAM: {
@@ -173,24 +224,57 @@ package schema
 		StateChangeResetName?: string
 		InputSignals?: {...}
 		OutputSignals?: {...}
+		#meta: type: "gam"
 		...
 	}
-	Interleaved2FlatGAM: {...}
-	FlattenedStructIOGAM: {...}
+	Interleaved2FlatGAM: {
+		#meta: type: "gam"
+		...
+	}
+	FlattenedStructIOGAM: {
+		#meta: type: "gam"
+		...
+	}
 	MathExpressionGAM: {
 		Expression: string
 		InputSignals?: {...}
 		OutputSignals?: {...}
+		#meta: type: "gam"
 		...
 	}
-	MessageGAM: {...}
-	MuxGAM: {...}
-	SimulinkWrapperGAM: {...}
-	SSMGAM: {...}
-	StatisticsGAM: {...}
-	TimeCorrectionGAM: {...}
-	TriggeredIOGAM: {...}
-	WaveformGAM: {...}
+	MessageGAM: {
+		#meta: type: "gam"
+		...
+	}
+	MuxGAM: {
+		#meta: type: "gam"
+		...
+	}
+	SimulinkWrapperGAM: {
+		#meta: type: "gam"
+		...
+	}
+	SSMGAM: {
+		#meta: type: "gam"
+		...
+	}
+	StatisticsGAM: {
+		#meta: type: "gam"
+		...
+	}
+	TimeCorrectionGAM: {
+		#meta: type: "gam"
+		...
+	}
+	TriggeredIOGAM: {
+
+		#meta: type: "gam"
+		...
+	}
+	WaveformGAM: {
+		#meta: type: "gam"
+		...
+	}
 	DAN: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
@@ -206,11 +290,13 @@ package schema
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	LinkDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	MDSReader: {
@@ -220,6 +306,7 @@ package schema
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	MDSWriter: {
@@ -237,72 +324,86 @@ package schema
 		Messages?: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	NI1588TimeStamp: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6259ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6259DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6259DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6368ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6368DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	NI6368DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	NI9157CircularFifoReader: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	NI9157MxiDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	OPCUADSInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
+		#meta: type:          "datasource"
 		...
 	}
 	OPCUADSOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
+		#meta: type:          "datasource"
 		...
 	}
 	RealTimeThreadAsyncBridge: {
 		#meta: direction:     "INOUT"
 		#meta: multithreaded: bool | true
+		#meta: type:          "datasource"
 		...
 	}
 	RealTimeThreadSynchronisation: {...}
 	UARTDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
 	BaseLib2Wrapper: {...}
@@ -314,8 +415,15 @@ package schema
 	GAMDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
+		#meta: type:          "datasource"
 		...
 	}
+}
+
+#Meta: {
+	direction?: "IN" | "OUT" | "INOUT"
+	multithreaded?: bool
+	...
 }
 
 // Definition for any Object.
@@ -323,6 +431,7 @@ package schema
 // Based on Class, it validates against #Classes.
 #Object: {
 	Class: string
+	"#meta"?: #Meta
 	// Allow any other field by default (extensibility),
 	// unless #Classes definition is closed.
 	// We allow open structs now.
