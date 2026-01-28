@@ -56,26 +56,43 @@ func (b *Builder) Build(f *os.File) error {
 		tree.AddFile(file, config)
 	}
 
+	// Determine root node to print
+	rootNode := tree.Root
+	if expectedProject != "" {
+		if child, ok := tree.Root.Children[expectedProject]; ok {
+			rootNode = child
+		}
+	}
+
 	// Write entire root content (definitions and children) to the single output file
-	b.writeNodeContent(f, tree.Root, 0)
+	b.writeNodeBody(f, rootNode, 0)
 
 	return nil
 }
 
 func (b *Builder) writeNodeContent(f *os.File, node *index.ProjectNode, indent int) {
-	// 1. Sort Fragments: Class first
-	sort.SliceStable(node.Fragments, func(i, j int) bool {
-		return hasClass(node.Fragments[i]) && !hasClass(node.Fragments[j])
-	})
-
 	indentStr := strings.Repeat("  ", indent)
 
 	// If this node has a RealName (e.g. +App), we print it as an object definition
 	if node.RealName != "" {
 		fmt.Fprintf(f, "%s%s = {\n", indentStr, node.RealName)
 		indent++
-		indentStr = strings.Repeat("  ", indent)
 	}
+
+	b.writeNodeBody(f, node, indent)
+
+	if node.RealName != "" {
+		indent--
+		indentStr = strings.Repeat("  ", indent)
+		fmt.Fprintf(f, "%s}\n", indentStr)
+	}
+}
+
+func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int) {
+	// 1. Sort Fragments: Class first
+	sort.SliceStable(node.Fragments, func(i, j int) bool {
+		return hasClass(node.Fragments[i]) && !hasClass(node.Fragments[j])
+	})
 
 	writtenChildren := make(map[string]bool)
 
@@ -109,12 +126,6 @@ func (b *Builder) writeNodeContent(f *os.File, node *index.ProjectNode, indent i
 	for _, k := range sortedChildren {
 		child := node.Children[k]
 		b.writeNodeContent(f, child, indent)
-	}
-
-	if node.RealName != "" {
-		indent--
-		indentStr = strings.Repeat("  ", indent)
-		fmt.Fprintf(f, "%s}\n", indentStr)
 	}
 }
 
