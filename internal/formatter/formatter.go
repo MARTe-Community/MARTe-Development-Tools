@@ -104,6 +104,14 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 
 		fmt.Fprintf(f.writer, "%s}", indentStr)
 		return d.Subnode.EndPosition.Line
+	case *parser.VariableDefinition:
+		fmt.Fprintf(f.writer, "%s#var %s: %s", indentStr, d.Name, d.TypeExpr)
+		if d.DefaultValue != nil {
+			fmt.Fprint(f.writer, " = ")
+			endLine := f.formatValue(d.DefaultValue, indent)
+			return endLine
+		}
+		return d.Position.Line
 	}
 	return 0
 }
@@ -141,6 +149,9 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		return v.Position.Line
 	case *parser.ReferenceValue:
 		fmt.Fprint(f.writer, v.Value)
+		return v.Position.Line
+	case *parser.VariableReferenceValue:
+		fmt.Fprint(f.writer, v.Name)
 		return v.Position.Line
 	case *parser.ArrayValue:
 		fmt.Fprint(f.writer, "{ ")
