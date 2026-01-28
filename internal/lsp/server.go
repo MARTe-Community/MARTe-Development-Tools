@@ -591,6 +591,8 @@ func HandleHover(params HoverParams) *Hover {
 		}
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
+	} else if res.Variable != nil {
+		content = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", res.Variable.Name, res.Variable.TypeExpr)
 	} else if res.Reference != nil {
 		targetName := "Unresolved"
 		fullInfo := ""
@@ -600,6 +602,10 @@ func HandleHover(params HoverParams) *Hover {
 			targetName = res.Reference.Target.RealName
 			targetDoc = res.Reference.Target.Doc
 			fullInfo = formatNodeInfo(res.Reference.Target)
+		} else if res.Reference.TargetVariable != nil {
+			v := res.Reference.TargetVariable
+			targetName = v.Name
+			fullInfo = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", v.Name, v.TypeExpr)
 		}
 
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)

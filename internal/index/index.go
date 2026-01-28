@@ -14,6 +14,7 @@ type ProjectTree struct {
 	IsolatedFiles map[string]*ProjectNode
 	GlobalPragmas map[string][]string
 	NodeMap       map[string][]*ProjectNode
+	Variables     map[string]*parser.VariableDefinition
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -37,10 +38,11 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 }
 
 type Reference struct {
-	Name     string
-	Position parser.Position
-	File     string
-	Target   *ProjectNode // Resolved target
+	Name           string
+	Position       parser.Position
+	File           string
+	Target         *ProjectNode
+	TargetVariable *parser.VariableDefinition
 }
 
 type ProjectNode struct {
@@ -72,6 +74,7 @@ func NewProjectTree() *ProjectTree {
 		},
 		IsolatedFiles: make(map[string]*ProjectNode),
 		GlobalPragmas: make(map[string][]string),
+		Variables:     make(map[string]*parser.VariableDefinition),
 	}
 }
 
@@ -219,6 +222,9 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.Field:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.indexValue(file, d.Value)
+		case *parser.VariableDefinition:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.Variables[d.Name] = d
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			norm := NormalizeName(d.Name)
@@ -274,6 +280,9 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			frag.Definitions = append(frag.Definitions, d)
 			pt.indexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
+		case *parser.VariableDefinition:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.Variables[d.Name] = d
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			norm := NormalizeName(d.Name)
@@ -379,6 +388,12 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 			Position: v.Position,
 			File:     file,
 		})
+	case *parser.VariableReferenceValue:
+		pt.References = append(pt.References, Reference{
+			Name:     strings.TrimPrefix(v.Name, "$"),
+			Position: v.Position,
+			File:     file,
+		})
 	case *parser.ArrayValue:
 		for _, elem := range v.Elements {
 			pt.indexValue(file, elem)
@@ -401,6 +416,12 @@ func (pt *ProjectTree) ResolveReferences() {
 	pt.RebuildIndex()
 	for i := range pt.References {
 		ref := &pt.References[i]
+
+		if v, ok := pt.Variables[ref.Name]; ok {
+			ref.TargetVariable = v
+			continue
+		}
+
 		if isoNode, ok := pt.IsolatedFiles[ref.File]; ok {
 			ref.Target = pt.FindNode(isoNode, ref.Name, nil)
 		} else {
@@ -479,6 +500,7 @@ type QueryResult struct {
 	Node      *ProjectNode
 	Field     *parser.Field
 	Reference *Reference
+	Variable  *parser.VariableDefinition
 }
 
 func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
@@ -527,6 +549,10 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 				if f, ok := def.(*parser.Field); ok {
 					if line == f.Position.Line && col >= f.Position.Column && col < f.Position.Column+len(f.Name) {
 						return &QueryResult{Field: f}
+					}
+				} else if v, ok := def.(*parser.VariableDefinition); ok {
+					if line == v.Position.Line {
+						return &QueryResult{Variable: v}
 					}
 				}
 			}

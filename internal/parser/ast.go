@@ -125,3 +125,21 @@ type Pragma struct {
 }
 
 func (p *Pragma) Pos() Position { return p.Position }
+
+type VariableDefinition struct {
+	Position     Position
+	Name         string
+	TypeExpr     string
+	DefaultValue Value
+}
+
+func (v *VariableDefinition) Pos() Position { return v.Position }
+func (v *VariableDefinition) isDefinition() {}
+
+type VariableReferenceValue struct {
+	Position Position
+	Name     string
+}
+
+func (v *VariableReferenceValue) Pos() Position { return v.Position }
+func (v *VariableReferenceValue) isValue()      {}

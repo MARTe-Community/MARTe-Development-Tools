@@ -55,6 +55,7 @@ func (v *Validator) ValidateProject() {
 	}
 	v.CheckUnused()
 	v.CheckDataSourceThreading()
+	v.CheckINOUTOrdering()
 }
 
 func (v *Validator) validateNode(node *index.ProjectNode) {
@@ -883,4 +884,122 @@ func (v *Validator) isMultithreaded(ds *index.ProjectNode) bool {
 		}
 	}
 	return false
+}
+
+func (v *Validator) CheckINOUTOrdering() {
+	if v.Tree.Root == nil {
+		return
+	}
+
+	var appNode *index.ProjectNode
+	findApp := func(n *index.ProjectNode) {
+		if cls, ok := n.Metadata["Class"]; ok && cls == "RealTimeApplication" {
+			appNode = n
+		}
+	}
+	v.Tree.Walk(findApp)
+
+	if appNode == nil {
+		return
+	}
+
+	var statesNode *index.ProjectNode
+	if s, ok := appNode.Children["States"]; ok {
+		statesNode = s
+	} else {
+		for _, child := range appNode.Children {
+			if cls, ok := child.Metadata["Class"]; ok && cls == "StateMachine" {
+				statesNode = child
+				break
+			}
+		}
+	}
+
+	if statesNode == nil {
+		return
+	}
+
+	for _, state := range statesNode.Children {
+		var threads []*index.ProjectNode
+		for _, child := range state.Children {
+			if child.RealName == "Threads" {
+				for _, t := range child.Children {
+					if cls, ok := t.Metadata["Class"]; ok && cls == "RealTimeThread" {
+						threads = append(threads, t)
+					}
+				}
+			} else {
+				if cls, ok := child.Metadata["Class"]; ok && cls == "RealTimeThread" {
+					threads = append(threads, child)
+				}
+			}
+		}
+
+		for _, thread := range threads {
+			producedSignals := make(map[*index.ProjectNode]bool)
+			gams := v.getThreadGAMs(thread)
+			for _, gam := range gams {
+				v.processGAMSignalsForOrdering(gam, "InputSignals", producedSignals, true, thread, state)
+				v.processGAMSignalsForOrdering(gam, "OutputSignals", producedSignals, false, thread, state)
+			}
+		}
+	}
+}
+
+func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, containerName string, produced map[*index.ProjectNode]bool, isInput bool, thread, state *index.ProjectNode) {
+	container := gam.Children[containerName]
+	if container == nil {
+		return
+	}
+
+	for _, sig := range container.Children {
+		if sig.Target == nil {
+			continue
+		}
+
+		targetSig := sig.Target
+		if targetSig.Parent == nil || targetSig.Parent.Parent == nil {
+			continue
+		}
+		ds := targetSig.Parent.Parent
+
+		if v.isMultithreaded(ds) {
+			continue
+		}
+
+		dir := v.getDataSourceDirection(ds)
+		if dir != "INOUT" {
+			continue
+		}
+
+		if isInput {
+			if !produced[targetSig] {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelError,
+					Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", targetSig.RealName, ds.RealName, gam.RealName, thread.RealName, state.RealName),
+					Position: v.getNodePosition(sig),
+					File:     v.getNodeFile(sig),
+				})
+			}
+		} else {
+			produced[targetSig] = true
+		}
+	}
+}
+
+func (v *Validator) getDataSourceDirection(ds *index.ProjectNode) string {
+	cls := v.getNodeClass(ds)
+	if cls == "" {
+		return ""
+	}
+	if v.Schema == nil {
+		return ""
+	}
+	path := cue.ParsePath(fmt.Sprintf("#Classes.%s.#meta.direction", cls))
+	val := v.Schema.Value.LookupPath(path)
+	if val.Err() == nil {
+		s, _ := val.String()
+		return s
+	}
+	return ""
 }

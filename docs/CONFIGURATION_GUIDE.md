@@ -76,6 +76,8 @@ GAMs declare inputs and outputs. You can refer to signals directly or alias them
 ### Threading Rules
 **Validation Rule**: A DataSource that is **not** marked as multithreaded (default) cannot be used by GAMs running in different threads within the same State.
 
+**Ordering Rule**: For `INOUT` signals (data dependency within a thread), the Producer GAM must appear **before** the Consumer GAM in the thread's `Functions` list. This ensures correct data flow within the cycle. This rule is skipped if the DataSource is marked as `multithreaded: true`.
+
 To allow sharing, the DataSource class in the schema must have `#meta: multithreaded: true`.
 
 ## 3. Schemas and Validation
@@ -160,3 +162,27 @@ If validation is too strict, you can suppress warnings using pragmas (`//!`).
       Type = int32
   }
   ```
+
+## 6. Variables
+
+You can define variables using `#var`. The type expression supports CUE syntax.
+
+```marte
+#var MyVar: uint32 = 100
+#var Env: "PROD" | "DEV" = "DEV"
+```
+
+### Usage
+Reference a variable using `$`:
+
+```marte
+Field = $MyVar
+```
+
+### Build Override
+You can override variable values during build:
+
+```bash
+mdt build -vMyVar=200 -vEnv="PROD" src/*.marte
+```
+

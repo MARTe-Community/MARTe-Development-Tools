@@ -11,11 +11,13 @@ import (
 )
 
 type Builder struct {
-	Files []string
+	Files     []string
+	Overrides map[string]string
+	variables map[string]parser.Value
 }
 
-func NewBuilder(files []string) *Builder {
-	return &Builder{Files: files}
+func NewBuilder(files []string, overrides map[string]string) *Builder {
+	return &Builder{Files: files, Overrides: overrides, variables: make(map[string]parser.Value)}
 }
 
 func (b *Builder) Build(f *os.File) error {
@@ -54,6 +56,22 @@ func (b *Builder) Build(f *os.File) error {
 		}
 
 		tree.AddFile(file, config)
+	}
+
+	b.collectVariables(tree)
+
+	if expectedProject == "" {
+		for _, iso := range tree.IsolatedFiles {
+			tree.Root.Fragments = append(tree.Root.Fragments, iso.Fragments...)
+			for name, child := range iso.Children {
+				if existing, ok := tree.Root.Children[name]; ok {
+					b.mergeNodes(existing, child)
+				} else {
+					tree.Root.Children[name] = child
+					child.Parent = tree.Root
+				}
+			}
+		}
 	}
 
 	// Determine root node to print
@@ -102,6 +120,8 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int)
 			switch d := def.(type) {
 			case *parser.Field:
 				b.writeDefinition(f, d, indent)
+			case *parser.VariableDefinition:
+				continue
 			case *parser.ObjectNode:
 				norm := index.NormalizeName(d.Name)
 				if child, ok := node.Children[norm]; ok {
@@ -150,6 +170,12 @@ func (b *Builder) formatValue(val parser.Value) string {
 		return v.Raw
 	case *parser.BoolValue:
 		return fmt.Sprintf("%v", v.Value)
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(v.Name, "$")
+		if val, ok := b.variables[name]; ok {
+			return b.formatValue(val)
+		}
+		return v.Name
 	case *parser.ReferenceValue:
 		return v.Value
 	case *parser.ArrayValue:
@@ -163,6 +189,18 @@ func (b *Builder) formatValue(val parser.Value) string {
 	}
 }
 
+func (b *Builder) mergeNodes(dest, src *index.ProjectNode) {
+	dest.Fragments = append(dest.Fragments, src.Fragments...)
+	for name, child := range src.Children {
+		if existing, ok := dest.Children[name]; ok {
+			b.mergeNodes(existing, child)
+		} else {
+			dest.Children[name] = child
+			child.Parent = dest
+		}
+	}
+}
+
 func hasClass(frag *index.Fragment) bool {
 	for _, def := range frag.Definitions {
 		if f, ok := def.(*parser.Field); ok && f.Name == "Class" {
@@ -170,4 +208,29 @@ func hasClass(frag *index.Fragment) bool {
 		}
 	}
 	return false
+}
+
+func (b *Builder) collectVariables(tree *index.ProjectTree) {
+	processNode := func(n *index.ProjectNode) {
+		for _, frag := range n.Fragments {
+			for _, def := range frag.Definitions {
+				if vdef, ok := def.(*parser.VariableDefinition); ok {
+					if valStr, ok := b.Overrides[vdef.Name]; ok {
+						p := parser.NewParser("Temp = " + valStr)
+						cfg, _ := p.Parse()
+						if len(cfg.Definitions) > 0 {
+							if f, ok := cfg.Definitions[0].(*parser.Field); ok {
+								b.variables[vdef.Name] = f.Value
+								continue
+							}
+						}
+					}
+					if vdef.DefaultValue != nil {
+						b.variables[vdef.Name] = vdef.DefaultValue
+					}
+				}
+			}
+		}
+	}
+	tree.Walk(processNode)
 }

@@ -168,7 +168,7 @@ func TestBuildCommand(t *testing.T) {
 
 	// Test Merge
 	files := []string{"integration/build_merge_1.marte", "integration/build_merge_2.marte"}
-	b := builder.NewBuilder(files)
+	b := builder.NewBuilder(files, nil)
 
 	outputFile, err := os.Create("build_test/TEST.marte")
 	if err != nil {
@@ -195,7 +195,7 @@ func TestBuildCommand(t *testing.T) {
 
 	// Test Order (Class First)
 	filesOrder := []string{"integration/build_order_1.marte", "integration/build_order_2.marte"}
-	bOrder := builder.NewBuilder(filesOrder)
+	bOrder := builder.NewBuilder(filesOrder, nil)
 
 	outputFileOrder, err := os.Create("build_test/ORDER.marte")
 	if err != nil {

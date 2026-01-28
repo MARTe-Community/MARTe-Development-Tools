@@ -32,7 +32,7 @@ FieldB = 20
 	os.WriteFile("build_multi_test/f2.marte", []byte(f2Content), 0644)
 
 	// Execute Build
-	b := builder.NewBuilder([]string{"build_multi_test/f1.marte", "build_multi_test/f2.marte"})
+	b := builder.NewBuilder([]string{"build_multi_test/f1.marte", "build_multi_test/f2.marte"}, nil)
 
 	// Prepare output file
 	// Should be +MyObj.marte (normalized MyObj.marte) - Actually checking content

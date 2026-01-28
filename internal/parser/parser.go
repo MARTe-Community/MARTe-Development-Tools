@@ -101,6 +101,9 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 	switch tok.Type {
 	case TokenIdentifier:
 		name := tok.Value
+		if name == "#var" {
+			return p.parseVariableDefinition(tok)
+		}
 		if p.peek().Type != TokenEqual {
 			p.addError(tok.Position, "expected =")
 			return nil, false
@@ -244,6 +247,8 @@ func (p *Parser) parseValue() (Value, bool) {
 			true
 	case TokenIdentifier:
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
+	case TokenObjectIdentifier:
+		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
 	case TokenLBrace:
 		arr := &ArrayValue{Position: tok.Position}
 		for {
@@ -268,4 +273,54 @@ func (p *Parser) parseValue() (Value, bool) {
 		p.addError(tok.Position, fmt.Sprintf("unexpected value token %v", tok.Value))
 		return nil, false
 	}
+}
+
+func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
+	nameTok := p.next()
+	if nameTok.Type != TokenIdentifier {
+		p.addError(nameTok.Position, "expected variable name")
+		return nil, false
+	}
+
+	if p.next().Type != TokenColon {
+		p.addError(nameTok.Position, "expected :")
+		return nil, false
+	}
+
+	var typeTokens []Token
+	startLine := nameTok.Position.Line
+
+	for {
+		t := p.peek()
+		if t.Position.Line > startLine || t.Type == TokenEOF {
+			break
+		}
+		if t.Type == TokenEqual {
+			break
+		}
+		typeTokens = append(typeTokens, p.next())
+	}
+
+	typeExpr := ""
+	for _, t := range typeTokens {
+		typeExpr += t.Value + " "
+	}
+
+	var defVal Value
+	if p.peek().Type == TokenEqual {
+		p.next()
+		val, ok := p.parseValue()
+		if ok {
+			defVal = val
+		} else {
+			return nil, false
+		}
+	}
+
+	return &VariableDefinition{
+		Position:     startTok.Position,
+		Name:         nameTok.Value,
+		TypeExpr:     strings.TrimSpace(typeExpr),
+		DefaultValue: defVal,
+	}, true
 }

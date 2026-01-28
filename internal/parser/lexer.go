@@ -23,6 +23,11 @@ const (
 	TokenComment
 	TokenDocstring
 	TokenComma
+	TokenColon
+	TokenPipe
+	TokenLBracket
+	TokenRBracket
+	TokenSymbol
 )
 
 type Token struct {
@@ -124,6 +129,16 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenRBrace)
 		case ',':
 			return l.emit(TokenComma)
+		case ':':
+			return l.emit(TokenColon)
+		case '|':
+			return l.emit(TokenPipe)
+		case '[':
+			return l.emit(TokenLBracket)
+		case ']':
+			return l.emit(TokenRBracket)
+		case '&', '?', '!', '<', '>', '*', '(', ')':
+			return l.emit(TokenSymbol)
 		case '"':
 			return l.lexString()
 		case '/':
@@ -151,7 +166,7 @@ func (l *Lexer) NextToken() Token {
 func (l *Lexer) lexIdentifier() Token {
 	for {
 		r := l.next()
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' || r == ':' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
 			continue
 		}
 		l.backup()
@@ -247,7 +262,7 @@ func (l *Lexer) lexHashIdentifier() Token {
 	// We are at '#', l.start is just before it
 	for {
 		r := l.next()
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' || r == ':' || r == '#' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' || r == '#' {
 			continue
 		}
 		l.backup()
