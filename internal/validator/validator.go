@@ -56,6 +56,7 @@ func (v *Validator) ValidateProject() {
 	v.CheckUnused()
 	v.CheckDataSourceThreading()
 	v.CheckINOUTOrdering()
+	v.CheckVariables()
 }
 
 func (v *Validator) validateNode(node *index.ProjectNode) {
@@ -936,53 +937,111 @@ func (v *Validator) CheckINOUTOrdering() {
 		}
 
 		for _, thread := range threads {
-			producedSignals := make(map[*index.ProjectNode]bool)
+			producedSignals := make(map[*index.ProjectNode]map[string][]*index.ProjectNode)
+			consumedSignals := make(map[*index.ProjectNode]map[string]bool)
+
 			gams := v.getThreadGAMs(thread)
 			for _, gam := range gams {
-				v.processGAMSignalsForOrdering(gam, "InputSignals", producedSignals, true, thread, state)
-				v.processGAMSignalsForOrdering(gam, "OutputSignals", producedSignals, false, thread, state)
+				v.processGAMSignalsForOrdering(gam, "InputSignals", producedSignals, consumedSignals, true, thread, state)
+				v.processGAMSignalsForOrdering(gam, "OutputSignals", producedSignals, consumedSignals, false, thread, state)
+			}
+
+			// Check for produced but not consumed
+			for ds, signals := range producedSignals {
+				for sigName, producers := range signals {
+					consumed := false
+					if cSet, ok := consumedSignals[ds]; ok {
+						if cSet[sigName] {
+							consumed = true
+						}
+					}
+					if !consumed {
+						for _, prod := range producers {
+							v.Diagnostics = append(v.Diagnostics, Diagnostic{
+								Level:    LevelWarning,
+								Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
+								Position: v.getNodePosition(prod),
+								File:     v.getNodeFile(prod),
+							})
+						}
+					}
+				}
 			}
 		}
 	}
 }
 
-func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, containerName string, produced map[*index.ProjectNode]bool, isInput bool, thread, state *index.ProjectNode) {
+func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, containerName string, produced map[*index.ProjectNode]map[string][]*index.ProjectNode, consumed map[*index.ProjectNode]map[string]bool, isInput bool, thread, state *index.ProjectNode) {
 	container := gam.Children[containerName]
 	if container == nil {
 		return
 	}
 
 	for _, sig := range container.Children {
-		if sig.Target == nil {
+		fields := v.getFields(sig)
+		var dsNode *index.ProjectNode
+		var sigName string
+
+		if sig.Target != nil {
+			if sig.Target.Parent != nil && sig.Target.Parent.Parent != nil {
+				dsNode = sig.Target.Parent.Parent
+				sigName = sig.Target.RealName
+			}
+		}
+
+		if dsNode == nil {
+			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+				dsName := v.getFieldValue(dsFields[0])
+				dsNode = v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
+			}
+			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
+				sigName = v.getFieldValue(aliasFields[0])
+			} else {
+				sigName = sig.RealName
+			}
+		}
+
+		if dsNode == nil || sigName == "" {
 			continue
 		}
 
-		targetSig := sig.Target
-		if targetSig.Parent == nil || targetSig.Parent.Parent == nil {
-			continue
-		}
-		ds := targetSig.Parent.Parent
+		sigName = index.NormalizeName(sigName)
 
-		if v.isMultithreaded(ds) {
+		if v.isMultithreaded(dsNode) {
 			continue
 		}
 
-		dir := v.getDataSourceDirection(ds)
+		dir := v.getDataSourceDirection(dsNode)
 		if dir != "INOUT" {
 			continue
 		}
 
 		if isInput {
-			if !produced[targetSig] {
+			isProduced := false
+			if set, ok := produced[dsNode]; ok {
+				if len(set[sigName]) > 0 {
+					isProduced = true
+				}
+			}
+
+			if !isProduced {
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
-					Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", targetSig.RealName, ds.RealName, gam.RealName, thread.RealName, state.RealName),
+					Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
 					Position: v.getNodePosition(sig),
 					File:     v.getNodeFile(sig),
 				})
 			}
+
+			if consumed[dsNode] == nil {
+				consumed[dsNode] = make(map[string]bool)
+			}
+			consumed[dsNode][sigName] = true
 		} else {
-			produced[targetSig] = true
+			if produced[dsNode] == nil {
+				produced[dsNode] = make(map[string][]*index.ProjectNode)
+			}
+			produced[dsNode][sigName] = append(produced[dsNode][sigName], sig)
 		}
 	}
 }
@@ -1002,4 +1061,43 @@ func (v *Validator) getDataSourceDirection(ds *index.ProjectNode) string {
 		return s
 	}
 	return ""
+}
+
+func (v *Validator) CheckVariables() {
+	if v.Schema == nil {
+		return
+	}
+	ctx := v.Schema.Context
+
+	for _, info := range v.Tree.Variables {
+		def := info.Def
+
+		// Compile Type
+		typeVal := ctx.CompileString(def.TypeExpr)
+		if typeVal.Err() != nil {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", def.Name, typeVal.Err()),
+				Position: def.Position,
+				File:     info.File,
+			})
+			continue
+		}
+
+		if def.DefaultValue != nil {
+			valInterface := v.valueToInterface(def.DefaultValue)
+			valVal := ctx.Encode(valInterface)
+
+			// Unify
+			res := typeVal.Unify(valVal)
+			if err := res.Validate(cue.Concrete(true)); err != nil {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelError,
+					Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", def.Name, err),
+					Position: def.Position,
+					File:     info.File,
+				})
+			}
+		}
+	}
 }

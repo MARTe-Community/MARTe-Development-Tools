@@ -8,13 +8,18 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
+type VariableInfo struct {
+	Def  *parser.VariableDefinition
+	File string
+}
+
 type ProjectTree struct {
 	Root          *ProjectNode
 	References    []Reference
 	IsolatedFiles map[string]*ProjectNode
 	GlobalPragmas map[string][]string
 	NodeMap       map[string][]*ProjectNode
-	Variables     map[string]*parser.VariableDefinition
+	Variables     map[string]VariableInfo
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -74,7 +79,7 @@ func NewProjectTree() *ProjectTree {
 		},
 		IsolatedFiles: make(map[string]*ProjectNode),
 		GlobalPragmas: make(map[string][]string),
-		Variables:     make(map[string]*parser.VariableDefinition),
+		Variables:     make(map[string]VariableInfo),
 	}
 }
 
@@ -224,7 +229,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.indexValue(file, d.Value)
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
-			pt.Variables[d.Name] = d
+			pt.Variables[d.Name] = VariableInfo{Def: d, File: file}
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			norm := NormalizeName(d.Name)
@@ -282,7 +287,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.extractFieldMetadata(node, d)
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
-			pt.Variables[d.Name] = d
+			pt.Variables[d.Name] = VariableInfo{Def: d, File: file}
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			norm := NormalizeName(d.Name)
@@ -418,7 +423,7 @@ func (pt *ProjectTree) ResolveReferences() {
 		ref := &pt.References[i]
 
 		if v, ok := pt.Variables[ref.Name]; ok {
-			ref.TargetVariable = v
+			ref.TargetVariable = v.Def
 			continue
 		}
 

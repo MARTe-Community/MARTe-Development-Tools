@@ -413,7 +413,7 @@ package schema
 	OPCUA: {...}
 	SysLogger: {...}
 	GAMDataSource: {
-		#meta: multithreaded: bool | *false
+		#meta: multithreaded: false
 		#meta: direction:     "INOUT"
 		#meta: type:          "datasource"
 		...
@@ -421,7 +421,7 @@ package schema
 }
 
 #Meta: {
-	direction?: "IN" | "OUT" | "INOUT"
+	direction?:     "IN" | "OUT" | "INOUT"
 	multithreaded?: bool
 	...
 }
@@ -430,7 +430,7 @@ package schema
 // It must have a Class field.
 // Based on Class, it validates against #Classes.
 #Object: {
-	Class: string
+	Class:    string
 	"#meta"?: #Meta
 	// Allow any other field by default (extensibility),
 	// unless #Classes definition is closed.
