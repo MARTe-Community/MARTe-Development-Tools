@@ -1011,13 +1011,33 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	var targetNode *index.ProjectNode
-	if res.Reference != nil && res.Reference.Target != nil {
-		targetNode = res.Reference.Target
+	var targetVar *parser.VariableDefinition
+
+	if res.Reference != nil {
+		if res.Reference.Target != nil {
+			targetNode = res.Reference.Target
+		} else if res.Reference.TargetVariable != nil {
+			targetVar = res.Reference.TargetVariable
+		}
 	} else if res.Node != nil {
 		if res.Node.Target != nil {
 			targetNode = res.Node.Target
 		} else {
 			targetNode = res.Node
+		}
+	} else if res.Variable != nil {
+		targetVar = res.Variable
+	}
+
+	if targetVar != nil {
+		if info, ok := Tree.Variables[targetVar.Name]; ok {
+			return []Location{{
+				URI: "file://" + info.File,
+				Range: Range{
+					Start: Position{Line: targetVar.Position.Line - 1, Character: targetVar.Position.Column - 1},
+					End:   Position{Line: targetVar.Position.Line - 1, Character: targetVar.Position.Column - 1 + len(targetVar.Name) + 5}, // #var + space + Name? Rough estimate
+				},
+			}}
 		}
 	}
 
@@ -1051,10 +1071,47 @@ func HandleReferences(params ReferenceParams) []Location {
 	}
 
 	var targetNode *index.ProjectNode
+	var targetVar *parser.VariableDefinition
+
 	if res.Node != nil {
 		targetNode = res.Node
-	} else if res.Reference != nil && res.Reference.Target != nil {
-		targetNode = res.Reference.Target
+	} else if res.Reference != nil {
+		if res.Reference.Target != nil {
+			targetNode = res.Reference.Target
+		} else if res.Reference.TargetVariable != nil {
+			targetVar = res.Reference.TargetVariable
+		}
+	} else if res.Variable != nil {
+		targetVar = res.Variable
+	}
+
+	if targetVar != nil {
+		var locations []Location
+		// Declaration
+		if params.Context.IncludeDeclaration {
+			if info, ok := Tree.Variables[targetVar.Name]; ok {
+				locations = append(locations, Location{
+					URI: "file://" + info.File,
+					Range: Range{
+						Start: Position{Line: targetVar.Position.Line - 1, Character: targetVar.Position.Column - 1},
+						End:   Position{Line: targetVar.Position.Line - 1, Character: targetVar.Position.Column - 1 + len(targetVar.Name) + 5},
+					},
+				})
+			}
+		}
+		// References
+		for _, ref := range Tree.References {
+			if ref.TargetVariable == targetVar {
+				locations = append(locations, Location{
+					URI: "file://" + ref.File,
+					Range: Range{
+						Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+						End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name) + 1}, // $Name
+					},
+				})
+			}
+		}
+		return locations
 	}
 
 	if targetNode == nil {
