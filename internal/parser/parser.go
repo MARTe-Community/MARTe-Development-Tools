@@ -296,6 +296,12 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 			break
 		}
 		if t.Type == TokenEqual {
+			if p.peekN(1).Type == TokenSymbol && p.peekN(1).Value == "~" {
+				p.next()
+				p.next()
+				typeTokens = append(typeTokens, Token{Type: TokenSymbol, Value: "=~", Position: t.Position})
+				continue
+			}
 			break
 		}
 		typeTokens = append(typeTokens, p.next())

@@ -137,7 +137,7 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenLBracket)
 		case ']':
 			return l.emit(TokenRBracket)
-		case '&', '?', '!', '<', '>', '*', '(', ')':
+		case '&', '?', '!', '<', '>', '*', '(', ')', '~', '%', '^':
 			return l.emit(TokenSymbol)
 		case '"':
 			return l.lexString()
