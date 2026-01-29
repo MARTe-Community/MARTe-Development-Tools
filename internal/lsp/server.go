@@ -593,6 +593,9 @@ func HandleHover(params HoverParams) *Hover {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
 	} else if res.Variable != nil {
 		content = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", res.Variable.Name, res.Variable.TypeExpr)
+		if res.Variable.DefaultValue != nil {
+			content += fmt.Sprintf("\nDefault: `%s`", valueToString(res.Variable.DefaultValue))
+		}
 	} else if res.Reference != nil {
 		targetName := "Unresolved"
 		fullInfo := ""
@@ -606,12 +609,15 @@ func HandleHover(params HoverParams) *Hover {
 			v := res.Reference.TargetVariable
 			targetName = v.Name
 			fullInfo = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", v.Name, v.TypeExpr)
+			if v.DefaultValue != nil {
+				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue))
+			}
 		}
 
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
 		if fullInfo != "" {
 			content += fmt.Sprintf("\n\n---\n%s", fullInfo)
-		} else if targetDoc != "" { // Fallback if formatNodeInfo returned empty (unlikely)
+		} else if targetDoc != "" {
 			content += fmt.Sprintf("\n\n%s", targetDoc)
 		}
 	}
@@ -625,6 +631,34 @@ func HandleHover(params HoverParams) *Hover {
 			Kind:  "markdown",
 			Value: content,
 		},
+	}
+}
+
+func valueToString(val parser.Value) string {
+	switch v := val.(type) {
+	case *parser.StringValue:
+		if v.Quoted {
+			return fmt.Sprintf("\"%s\"", v.Value)
+		}
+		return v.Value
+	case *parser.IntValue:
+		return v.Raw
+	case *parser.FloatValue:
+		return v.Raw
+	case *parser.BoolValue:
+		return fmt.Sprintf("%v", v.Value)
+	case *parser.ReferenceValue:
+		return v.Value
+	case *parser.VariableReferenceValue:
+		return v.Name
+	case *parser.ArrayValue:
+		elements := []string{}
+		for _, e := range v.Elements {
+			elements = append(elements, valueToString(e))
+		}
+		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
+	default:
+		return ""
 	}
 }
 
