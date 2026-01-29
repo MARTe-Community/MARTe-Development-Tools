@@ -427,11 +427,8 @@ func (pt *ProjectTree) ResolveReferences() {
 			continue
 		}
 
-		if isoNode, ok := pt.IsolatedFiles[ref.File]; ok {
-			ref.Target = pt.FindNode(isoNode, ref.Name, nil)
-		} else {
-			ref.Target = pt.FindNode(pt.Root, ref.Name, nil)
-		}
+		container := pt.GetNodeContaining(ref.File, ref.Position)
+		ref.Target = pt.resolveScopedName(container, ref.Name)
 	}
 }
 
@@ -611,4 +608,46 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 		}
 	}
 	return nil
+}
+
+func (pt *ProjectTree) resolveScopedName(ctx *ProjectNode, name string) *ProjectNode {
+	if ctx == nil {
+		return pt.FindNode(pt.Root, name, nil)
+	}
+
+	parts := strings.Split(name, ".")
+	first := parts[0]
+	normFirst := NormalizeName(first)
+
+	var startNode *ProjectNode
+	curr := ctx
+
+	for curr != nil {
+		if child, ok := curr.Children[normFirst]; ok {
+			startNode = child
+			break
+		}
+		curr = curr.Parent
+	}
+
+	if startNode == nil && ctx != pt.Root {
+		if child, ok := pt.Root.Children[normFirst]; ok {
+			startNode = child
+		}
+	}
+
+	if startNode == nil {
+		return nil
+	}
+
+	curr = startNode
+	for i := 1; i < len(parts); i++ {
+		norm := NormalizeName(parts[i])
+		if child, ok := curr.Children[norm]; ok {
+			curr = child
+		} else {
+			return nil
+		}
+	}
+	return curr
 }

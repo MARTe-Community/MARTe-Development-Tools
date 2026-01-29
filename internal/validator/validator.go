@@ -221,6 +221,14 @@ func (v *Validator) valueToInterface(val parser.Value) interface{} {
 		return t.Value
 	case *parser.ReferenceValue:
 		return t.Value
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(t.Name, "$")
+		if info, ok := v.Tree.Variables[name]; ok {
+			if info.Def.DefaultValue != nil {
+				return v.valueToInterface(info.Def.DefaultValue)
+			}
+		}
+		return nil
 	case *parser.ArrayValue:
 		var arr []interface{}
 		for _, e := range t.Elements {
