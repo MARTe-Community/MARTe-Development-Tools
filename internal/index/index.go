@@ -19,7 +19,6 @@ type ProjectTree struct {
 	IsolatedFiles map[string]*ProjectNode
 	GlobalPragmas map[string][]string
 	NodeMap       map[string][]*ProjectNode
-	Variables     map[string]VariableInfo
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -48,6 +47,7 @@ type Reference struct {
 	File           string
 	Target         *ProjectNode
 	TargetVariable *parser.VariableDefinition
+	IsVariable     bool
 }
 
 type ProjectNode struct {
@@ -60,6 +60,7 @@ type ProjectNode struct {
 	Metadata  map[string]string // Store extra info like Class, Type, Size
 	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
 	Pragmas   []string
+	Variables map[string]VariableInfo
 }
 
 type Fragment struct {
@@ -74,12 +75,12 @@ type Fragment struct {
 func NewProjectTree() *ProjectTree {
 	return &ProjectTree{
 		Root: &ProjectNode{
-			Children: make(map[string]*ProjectNode),
-			Metadata: make(map[string]string),
+			Children:  make(map[string]*ProjectNode),
+			Metadata:  make(map[string]string),
+			Variables: make(map[string]VariableInfo),
 		},
 		IsolatedFiles: make(map[string]*ProjectNode),
 		GlobalPragmas: make(map[string][]string),
-		Variables:     make(map[string]VariableInfo),
 	}
 }
 
@@ -182,8 +183,9 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 
 	if config.Package == nil {
 		node := &ProjectNode{
-			Children: make(map[string]*ProjectNode),
-			Metadata: make(map[string]string),
+			Children:  make(map[string]*ProjectNode),
+			Metadata:  make(map[string]string),
+			Variables: make(map[string]VariableInfo),
 		}
 		pt.IsolatedFiles[file] = node
 		pt.populateNode(node, file, config)
@@ -200,11 +202,12 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		}
 		if _, ok := node.Children[part]; !ok {
 			node.Children[part] = &ProjectNode{
-				Name:     part,
-				RealName: part,
-				Children: make(map[string]*ProjectNode),
-				Parent:   node,
-				Metadata: make(map[string]string),
+				Name:      part,
+				RealName:  part,
+				Children:  make(map[string]*ProjectNode),
+				Parent:    node,
+				Metadata:  make(map[string]string),
+				Variables: make(map[string]VariableInfo),
 			}
 		}
 		node = node.Children[part]
@@ -229,17 +232,18 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.indexValue(file, d.Value)
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
-			pt.Variables[d.Name] = VariableInfo{Def: d, File: file}
+			node.Variables[d.Name] = VariableInfo{Def: d, File: file}
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
-					Name:     norm,
-					RealName: d.Name,
-					Children: make(map[string]*ProjectNode),
-					Parent:   node,
-					Metadata: make(map[string]string),
+					Name:      norm,
+					RealName:  d.Name,
+					Children:  make(map[string]*ProjectNode),
+					Parent:    node,
+					Metadata:  make(map[string]string),
+					Variables: make(map[string]VariableInfo),
 				}
 			}
 			child := node.Children[norm]
@@ -287,17 +291,18 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.extractFieldMetadata(node, d)
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
-			pt.Variables[d.Name] = VariableInfo{Def: d, File: file}
+			node.Variables[d.Name] = VariableInfo{Def: d, File: file}
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
-					Name:     norm,
-					RealName: d.Name,
-					Children: make(map[string]*ProjectNode),
-					Parent:   node,
-					Metadata: make(map[string]string),
+					Name:      norm,
+					RealName:  d.Name,
+					Children:  make(map[string]*ProjectNode),
+					Parent:    node,
+					Metadata:  make(map[string]string),
+					Variables: make(map[string]VariableInfo),
 				}
 			}
 			child := node.Children[norm]
@@ -395,9 +400,10 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 		})
 	case *parser.VariableReferenceValue:
 		pt.References = append(pt.References, Reference{
-			Name:     strings.TrimPrefix(v.Name, "$"),
-			Position: v.Position,
-			File:     file,
+			Name:       strings.TrimPrefix(v.Name, "$"),
+			Position:   v.Position,
+			File:       file,
+			IsVariable: true,
 		})
 	case *parser.ArrayValue:
 		for _, elem := range v.Elements {
@@ -422,12 +428,13 @@ func (pt *ProjectTree) ResolveReferences() {
 	for i := range pt.References {
 		ref := &pt.References[i]
 
-		if v, ok := pt.Variables[ref.Name]; ok {
+		container := pt.GetNodeContaining(ref.File, ref.Position)
+
+		if v := pt.ResolveVariable(container, ref.Name); v != nil {
 			ref.TargetVariable = v.Def
 			continue
 		}
 
-		container := pt.GetNodeContaining(ref.File, ref.Position)
 		ref.Target = pt.resolveScopedName(container, ref.Name)
 	}
 }
@@ -637,7 +644,12 @@ func (pt *ProjectTree) resolveScopedName(ctx *ProjectNode, name string) *Project
 	}
 
 	if startNode == nil {
-		return nil
+		// Fallback to deep search from context root
+		root := ctx
+		for root.Parent != nil {
+			root = root.Parent
+		}
+		return pt.FindNode(root, name, nil)
 	}
 
 	curr = startNode
@@ -650,4 +662,20 @@ func (pt *ProjectTree) resolveScopedName(ctx *ProjectNode, name string) *Project
 		}
 	}
 	return curr
+}
+
+func (pt *ProjectTree) ResolveVariable(ctx *ProjectNode, name string) *VariableInfo {
+	curr := ctx
+	for curr != nil {
+		if v, ok := curr.Variables[name]; ok {
+			return &v
+		}
+		curr = curr.Parent
+	}
+	if ctx == nil {
+		if v, ok := pt.Root.Variables[name]; ok {
+			return &v
+		}
+	}
+	return nil
 }

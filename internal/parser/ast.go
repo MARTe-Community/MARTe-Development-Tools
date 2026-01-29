@@ -143,3 +143,13 @@ type VariableReferenceValue struct {
 
 func (v *VariableReferenceValue) Pos() Position { return v.Position }
 func (v *VariableReferenceValue) isValue()      {}
+
+type BinaryExpression struct {
+	Position Position
+	Left     Value
+	Operator Token
+	Right    Value
+}
+
+func (b *BinaryExpression) Pos() Position { return b.Position }
+func (b *BinaryExpression) isValue()      {}

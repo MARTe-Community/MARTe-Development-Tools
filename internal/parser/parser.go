@@ -226,6 +226,56 @@ func (p *Parser) parseSubnode() (Subnode, bool) {
 }
 
 func (p *Parser) parseValue() (Value, bool) {
+	return p.parseExpression(0)
+}
+
+func getPrecedence(t TokenType) int {
+	switch t {
+	case TokenStar, TokenSlash, TokenPercent:
+		return 5
+	case TokenPlus, TokenMinus:
+		return 4
+	case TokenConcat:
+		return 3
+	case TokenAmpersand:
+		return 2
+	case TokenPipe, TokenCaret:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func (p *Parser) parseExpression(minPrecedence int) (Value, bool) {
+	left, ok := p.parseAtom()
+	if !ok {
+		return nil, false
+	}
+
+	for {
+		t := p.peek()
+		prec := getPrecedence(t.Type)
+		if prec == 0 || prec <= minPrecedence {
+			break
+		}
+		p.next()
+
+		right, ok := p.parseExpression(prec)
+		if !ok {
+			return nil, false
+		}
+
+		left = &BinaryExpression{
+			Position: left.Pos(),
+			Left:     left,
+			Operator: t,
+			Right:    right,
+		}
+	}
+	return left, true
+}
+
+func (p *Parser) parseAtom() (Value, bool) {
 	tok := p.next()
 	switch tok.Type {
 	case TokenString:

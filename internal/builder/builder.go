@@ -158,6 +158,7 @@ func (b *Builder) writeDefinition(f *os.File, def parser.Definition, indent int)
 }
 
 func (b *Builder) formatValue(val parser.Value) string {
+	val = b.evaluate(val)
 	switch v := val.(type) {
 	case *parser.StringValue:
 		if v.Quoted {
@@ -171,10 +172,6 @@ func (b *Builder) formatValue(val parser.Value) string {
 	case *parser.BoolValue:
 		return fmt.Sprintf("%v", v.Value)
 	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(v.Name, "$")
-		if val, ok := b.variables[name]; ok {
-			return b.formatValue(val)
-		}
 		return v.Name
 	case *parser.ReferenceValue:
 		return v.Value
@@ -233,4 +230,109 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 		}
 	}
 	tree.Walk(processNode)
+}
+
+func (b *Builder) evaluate(val parser.Value) parser.Value {
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(v.Name, "$")
+		if res, ok := b.variables[name]; ok {
+			return b.evaluate(res)
+		}
+		return v
+	case *parser.BinaryExpression:
+		left := b.evaluate(v.Left)
+		right := b.evaluate(v.Right)
+		return b.compute(left, v.Operator, right)
+	}
+	return val
+}
+
+func (b *Builder) compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
+	if op.Type == parser.TokenConcat {
+		s1 := b.valToString(left)
+		s2 := b.valToString(right)
+		return &parser.StringValue{Value: s1 + s2, Quoted: true}
+	}
+
+	lF, lIsF := b.valToFloat(left)
+	rF, rIsF := b.valToFloat(right)
+
+	if lIsF || rIsF {
+		res := 0.0
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lF + rF
+		case parser.TokenMinus:
+			res = lF - rF
+		case parser.TokenStar:
+			res = lF * rF
+		case parser.TokenSlash:
+			res = lF / rF
+		}
+		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
+	}
+
+	lI, lIsI := b.valToInt(left)
+	rI, rIsI := b.valToInt(right)
+
+	if lIsI && rIsI {
+		res := int64(0)
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lI + rI
+		case parser.TokenMinus:
+			res = lI - rI
+		case parser.TokenStar:
+			res = lI * rI
+		case parser.TokenSlash:
+			if rI != 0 {
+				res = lI / rI
+			}
+		case parser.TokenPercent:
+			if rI != 0 {
+				res = lI % rI
+			}
+		case parser.TokenAmpersand:
+			res = lI & rI
+		case parser.TokenPipe:
+			res = lI | rI
+		case parser.TokenCaret:
+			res = lI ^ rI
+		}
+		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
+	}
+
+	return left
+}
+
+func (b *Builder) valToString(v parser.Value) string {
+	switch val := v.(type) {
+	case *parser.StringValue:
+		return val.Value
+	case *parser.IntValue:
+		return val.Raw
+	case *parser.FloatValue:
+		return val.Raw
+	default:
+		return ""
+	}
+}
+
+func (b *Builder) valToFloat(v parser.Value) (float64, bool) {
+	switch val := v.(type) {
+	case *parser.FloatValue:
+		return val.Value, true
+	case *parser.IntValue:
+		return float64(val.Value), true
+	}
+	return 0, false
+}
+
+func (b *Builder) valToInt(v parser.Value) (int64, bool) {
+	switch val := v.(type) {
+	case *parser.IntValue:
+		return val.Value, true
+	}
+	return 0, false
 }

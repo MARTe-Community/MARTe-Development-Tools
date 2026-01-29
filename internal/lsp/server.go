@@ -248,8 +248,11 @@ func HandleMessage(msg *JsonRpcMessage) {
 				if err := Tree.ScanDirectory(root); err != nil {
 					logger.Printf("ScanDirectory failed: %v\n", err)
 				}
+				logger.Printf("Scan done")
 				Tree.ResolveReferences()
+				logger.Printf("Resolve done")
 				GlobalSchema = schema.LoadFullSchema(ProjectRoot)
+				logger.Printf("Schema done")
 			}
 		}
 
@@ -1064,7 +1067,8 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	if targetVar != nil {
-		if info, ok := Tree.Variables[targetVar.Name]; ok {
+		container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+		if info := Tree.ResolveVariable(container, targetVar.Name); info != nil {
 			return []Location{{
 				URI: "file://" + info.File,
 				Range: Range{
@@ -1123,7 +1127,8 @@ func HandleReferences(params ReferenceParams) []Location {
 		var locations []Location
 		// Declaration
 		if params.Context.IncludeDeclaration {
-			if info, ok := Tree.Variables[targetVar.Name]; ok {
+			container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+			if info := Tree.ResolveVariable(container, targetVar.Name); info != nil {
 				locations = append(locations, Location{
 					URI: "file://" + info.File,
 					Range: Range{

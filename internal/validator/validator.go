@@ -57,6 +57,7 @@ func (v *Validator) ValidateProject() {
 	v.CheckDataSourceThreading()
 	v.CheckINOUTOrdering()
 	v.CheckVariables()
+	v.CheckUnresolvedVariables()
 }
 
 func (v *Validator) validateNode(node *index.ProjectNode) {
@@ -95,7 +96,7 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	className := ""
 	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
 		if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
-			className = v.getFieldValue(classFields[0])
+			className = v.getFieldValue(classFields[0], node)
 		}
 
 		hasType := false
@@ -188,7 +189,7 @@ func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
 	for name, defs := range fields {
 		if len(defs) > 0 {
 			// Use the last definition (duplicates checked elsewhere)
-			m[name] = v.valueToInterface(defs[len(defs)-1].Value)
+			m[name] = v.valueToInterface(defs[len(defs)-1].Value, node)
 		}
 	}
 
@@ -207,13 +208,13 @@ func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
 	return m
 }
 
-func (v *Validator) valueToInterface(val parser.Value) interface{} {
+func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) interface{} {
 	switch t := val.(type) {
 	case *parser.StringValue:
 		return t.Value
 	case *parser.IntValue:
 		i, _ := strconv.ParseInt(t.Raw, 0, 64)
-		return i // CUE handles int64
+		return i
 	case *parser.FloatValue:
 		f, _ := strconv.ParseFloat(t.Raw, 64)
 		return f
@@ -223,16 +224,16 @@ func (v *Validator) valueToInterface(val parser.Value) interface{} {
 		return t.Value
 	case *parser.VariableReferenceValue:
 		name := strings.TrimPrefix(t.Name, "$")
-		if info, ok := v.Tree.Variables[name]; ok {
+		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
-				return v.valueToInterface(info.Def.DefaultValue)
+				return v.valueToInterface(info.Def.DefaultValue, ctx)
 			}
 		}
 		return nil
 	case *parser.ArrayValue:
 		var arr []interface{}
 		for _, e := range t.Elements {
-			arr = append(arr, v.valueToInterface(e))
+			arr = append(arr, v.valueToInterface(e, ctx))
 		}
 		return arr
 	}
@@ -296,7 +297,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	fields := v.getFields(signalNode)
 	var dsName string
 	if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
-		dsName = v.getFieldValue(dsFields[0])
+		dsName = v.getFieldValue(dsFields[0], signalNode)
 	}
 
 	if dsName == "" {
@@ -355,7 +356,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	// Check Signal Existence
 	targetSignalName := index.NormalizeName(signalNode.RealName)
 	if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
-		targetSignalName = v.getFieldValue(aliasFields[0]) // Alias is usually the name in DataSource
+		targetSignalName = v.getFieldValue(aliasFields[0], signalNode) // Alias is usually the name in DataSource
 	}
 
 	var targetNode *index.ProjectNode
@@ -404,7 +405,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			})
 		} else {
 			// Check Type validity even for implicit
-			typeVal := v.getFieldValue(typeFields[0])
+			typeVal := v.getFieldValue(typeFields[0], signalNode)
 			if !isValidType(typeVal) {
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
@@ -430,7 +431,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 
 		// Check Type validity if present
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
-			typeVal := v.getFieldValue(typeFields[0])
+			typeVal := v.getFieldValue(typeFields[0], signalNode)
 			if !isValidType(typeVal) {
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
@@ -511,7 +512,7 @@ func (v *Validator) getFields(node *index.ProjectNode) map[string][]*parser.Fiel
 	return fields
 }
 
-func (v *Validator) getFieldValue(f *parser.Field) string {
+func (v *Validator) getFieldValue(f *parser.Field, ctx *index.ProjectNode) string {
 	switch val := f.Value.(type) {
 	case *parser.StringValue:
 		return val.Value
@@ -523,6 +524,13 @@ func (v *Validator) getFieldValue(f *parser.Field) string {
 		return val.Raw
 	case *parser.BoolValue:
 		return strconv.FormatBool(val.Value)
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(val.Name, "$")
+		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
+			if info.Def.DefaultValue != nil {
+				return v.getFieldValue(&parser.Field{Value: info.Def.DefaultValue}, ctx)
+			}
+		}
 	}
 	return ""
 }
@@ -865,7 +873,7 @@ func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNo
 		for _, sig := range container.Children {
 			fields := v.getFields(sig)
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
-				dsName := v.getFieldValue(dsFields[0])
+				dsName := v.getFieldValue(dsFields[0], sig)
 				dsNode := v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
 				if dsNode != nil {
 					dsMap[dsNode] = true
@@ -888,7 +896,7 @@ func (v *Validator) isMultithreaded(ds *index.ProjectNode) bool {
 	if meta, ok := ds.Children["#meta"]; ok {
 		fields := v.getFields(meta)
 		if mt, ok := fields["multithreaded"]; ok && len(mt) > 0 {
-			val := v.getFieldValue(mt[0])
+			val := v.getFieldValue(mt[0], meta)
 			return val == "true"
 		}
 	}
@@ -999,11 +1007,11 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 
 		if dsNode == nil {
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
-				dsName := v.getFieldValue(dsFields[0])
+				dsName := v.getFieldValue(dsFields[0], sig)
 				dsNode = v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
 			}
 			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
-				sigName = v.getFieldValue(aliasFields[0])
+				sigName = v.getFieldValue(aliasFields[0], sig)
 			} else {
 				sigName = sig.RealName
 			}
@@ -1077,35 +1085,51 @@ func (v *Validator) CheckVariables() {
 	}
 	ctx := v.Schema.Context
 
-	for _, info := range v.Tree.Variables {
-		def := info.Def
+	checkNodeVars := func(node *index.ProjectNode) {
+		for _, info := range node.Variables {
+			def := info.Def
 
-		// Compile Type
-		typeVal := ctx.CompileString(def.TypeExpr)
-		if typeVal.Err() != nil {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", def.Name, typeVal.Err()),
-				Position: def.Position,
-				File:     info.File,
-			})
-			continue
-		}
-
-		if def.DefaultValue != nil {
-			valInterface := v.valueToInterface(def.DefaultValue)
-			valVal := ctx.Encode(valInterface)
-
-			// Unify
-			res := typeVal.Unify(valVal)
-			if err := res.Validate(cue.Concrete(true)); err != nil {
+			// Compile Type
+			typeVal := ctx.CompileString(def.TypeExpr)
+			if typeVal.Err() != nil {
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
-					Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", def.Name, err),
+					Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", def.Name, typeVal.Err()),
 					Position: def.Position,
 					File:     info.File,
 				})
+				continue
+			}
+
+			if def.DefaultValue != nil {
+				valInterface := v.valueToInterface(def.DefaultValue, node)
+				valVal := ctx.Encode(valInterface)
+
+				// Unify
+				res := typeVal.Unify(valVal)
+				if err := res.Validate(cue.Concrete(true)); err != nil {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", def.Name, err),
+						Position: def.Position,
+						File:     info.File,
+					})
+				}
 			}
 		}
 	}
-}
+
+	v.Tree.Walk(checkNodeVars)
+}					
+					func (v *Validator) CheckUnresolvedVariables() {
+						for _, ref := range v.Tree.References {
+							if ref.IsVariable && ref.TargetVariable == nil {
+								v.Diagnostics = append(v.Diagnostics, Diagnostic{
+									Level:    LevelError,
+									Message:  fmt.Sprintf("Unresolved variable reference: '$%s'", ref.Name),
+									Position: ref.Position,
+									File:     ref.File,
+								})
+							}
+						}
+					}

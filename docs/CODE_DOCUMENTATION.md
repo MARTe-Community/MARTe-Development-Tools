@@ -34,16 +34,16 @@ Responsible for converting MARTe configuration text into structured data.
 
 *   **Lexer (`lexer.go`)**: Tokenizes the input stream. Handles MARTe specific syntax like `#package`, `//!` pragmas, and `//#` docstrings. Supports standard identifiers and `#`-prefixed identifiers.
 *   **Parser (`parser.go`)**: Recursive descent parser. Converts tokens into a `Configuration` object containing definitions, comments, and pragmas.
-*   **AST (`ast.go`)**: Defines the node types (`ObjectNode`, `Field`, `Value`, etc.). All nodes implement the `Node` interface providing position information.
+*   **AST (`ast.go`)**: Defines the node types (`ObjectNode`, `Field`, `Value`, `VariableDefinition`, etc.). All nodes implement the `Node` interface providing position information.
 
 ### 2. `internal/index`
 
 The brain of the system. It maintains a holistic view of the project.
 
 *   **ProjectTree**: The central data structure. It holds the root of the configuration hierarchy (`Root`), references, and isolated files.
-*   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments.
+*   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments. It also stores locally defined variables in its `Variables` map.
 *   **NodeMap**: A hash map index (`map[string][]*ProjectNode`) for $O(1)$ symbol lookups, optimizing `FindNode` operations.
-*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` using the `NodeMap`.
+*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `resolveScopedName` to respect lexical scoping rules, searching up the hierarchy from the reference's container.
 
 ### 3. `internal/validator`
 
@@ -54,7 +54,9 @@ Ensures configuration correctness.
     *   **Structure**: Duplicate fields, invalid content.
     *   **Schema**: Unifies nodes with CUE schemas (loaded via `internal/schema`) to validate types and mandatory fields.
     *   **Signals**: Verifies that signals referenced in GAMs exist in DataSources and match types.
-    *   **Threading**: Checks `checkDataSourceThreading` to ensure non-multithreaded DataSources are not shared across threads in the same state.
+    *   **Threading**: Checks `CheckDataSourceThreading` to ensure non-multithreaded DataSources are not shared across threads in the same state.
+    *   **Ordering**: `CheckINOUTOrdering` verifies that for `INOUT` signals, the producing GAM appears before the consuming GAM in the thread's execution list.
+    *   **Variables**: `CheckVariables` validates variable values against their defined CUE types (e.g. `uint`, regex). `CheckUnresolvedVariables` ensures all used variables are defined.
     *   **Unused**: Detects unused GAMs and Signals (suppressible via pragmas).
 
 ### 4. `internal/lsp`
@@ -104,3 +106,11 @@ Manages CUE schemas.
 4.  For each GAM, resolves connected `DataSources` via Input/Output signals.
 5.  Maps `DataSource -> Thread` within the context of a State.
 6.  If a DataSource is seen in >1 Thread, it checks the `#meta.multithreaded` property. If false (default), an error is raised.
+
+### INOUT Ordering Logic
+1.  Iterates Threads.
+2.  Iterates GAMs in execution order.
+3.  Tracks `producedSignals` and `consumedSignals`.
+4.  For each GAM, checks Inputs. If Input is `INOUT` (and not multithreaded) and not in `producedSignals`, reports "Consumed before Produced" error.
+5.  Registers Outputs in `producedSignals`.
+6.  At end of thread, checks for signals that were produced but never consumed, reporting a warning.

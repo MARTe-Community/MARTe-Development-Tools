@@ -28,6 +28,14 @@ const (
 	TokenLBracket
 	TokenRBracket
 	TokenSymbol
+	TokenPlus
+	TokenMinus
+	TokenStar
+	TokenSlash
+	TokenPercent
+	TokenCaret
+	TokenAmpersand
+	TokenConcat
 )
 
 type Token struct {
@@ -137,16 +145,45 @@ func (l *Lexer) NextToken() Token {
 			return l.emit(TokenLBracket)
 		case ']':
 			return l.emit(TokenRBracket)
-		case '&', '?', '!', '<', '>', '*', '(', ')', '~', '%', '^':
+		case '+':
+			if unicode.IsSpace(l.peek()) {
+				return l.emit(TokenPlus)
+			}
+			return l.lexObjectIdentifier()
+		case '-':
+			if unicode.IsDigit(l.peek()) {
+				return l.lexNumber()
+			}
+			if unicode.IsSpace(l.peek()) {
+				return l.emit(TokenMinus)
+			}
+			return l.lexIdentifier()
+		case '*':
+			return l.emit(TokenStar)
+		case '/':
+			p := l.peek()
+			if p == '/' || p == '*' || p == '#' || p == '!' {
+				return l.lexComment()
+			}
+			return l.emit(TokenSlash)
+		case '%':
+			return l.emit(TokenPercent)
+		case '^':
+			return l.emit(TokenCaret)
+		case '&':
+			return l.emit(TokenAmpersand)
+		case '.':
+			if l.peek() == '.' {
+				l.next()
+				return l.emit(TokenConcat)
+			}
+			return l.emit(TokenSymbol)
+		case '~', '!', '<', '>', '(', ')', '?', '\\':
 			return l.emit(TokenSymbol)
 		case '"':
 			return l.lexString()
-		case '/':
-			return l.lexComment()
 		case '#':
 			return l.lexHashIdentifier()
-		case '+':
-			fallthrough
 		case '$':
 			return l.lexObjectIdentifier()
 		}

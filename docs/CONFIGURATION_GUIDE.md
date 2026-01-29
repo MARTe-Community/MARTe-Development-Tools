@@ -179,6 +179,17 @@ Reference a variable using `$`:
 Field = $MyVar
 ```
 
+### Expressions
+You can use operators in field values. Supported operators:
+- **Math**: `+`, `-`, `*`, `/`, `%`, `^` (XOR), `&`, `|` (Bitwise)
+- **String Concatenation**: `..`
+
+```marte
+Field1 = 10 + 20 * 2  // 50
+Field2 = "Hello " .. "World"
+Field3 = $MyVar + 5
+```
+
 ### Build Override
 You can override variable values during build:
 
