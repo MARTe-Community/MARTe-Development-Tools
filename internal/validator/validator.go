@@ -1044,6 +1044,14 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 		}
 
 		if isInput {
+			// Check if signal has 'Value' field - treat as produced/initialized
+			if _, hasValue := fields["Value"]; hasValue {
+				if produced[dsNode] == nil {
+					produced[dsNode] = make(map[string][]*index.ProjectNode)
+				}
+				produced[dsNode][sigName] = append(produced[dsNode][sigName], sig)
+			}
+
 			if !not_produced_suppress {
 				isProduced := false
 				if set, ok := produced[dsNode]; ok {
