@@ -16,7 +16,7 @@ func TestLSPHoverVariable(t *testing.T) {
 	content := `
 #var MyInt: int = 123
 +Obj = {
-    Field = $MyInt
+    Field = @MyInt
 }
 `
 	uri := "file://hover_var.marte"
@@ -47,8 +47,8 @@ func TestLSPHoverVariable(t *testing.T) {
 		t.Errorf("Hover def missing default value. Got: %s", contentDef)
 	}
 
-	// 2. Hover on Reference ($MyInt)
-	// Line 4 (index 3). $MyInt is at col 12.
+	// 2. Hover on Reference (@MyInt)
+	// Line 4 (index 3). @MyInt is at col 12.
 	paramsRef := lsp.HoverParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 		Position:     lsp.Position{Line: 3, Character: 12},

@@ -173,10 +173,10 @@ You can define variables using `#var`. The type expression supports CUE syntax.
 ```
 
 ### Usage
-Reference a variable using `$`:
+Reference a variable using `@`:
 
 ```marte
-Field = $MyVar
+Field = @MyVar
 ```
 
 ### Expressions
@@ -187,7 +187,7 @@ You can use operators in field values. Supported operators:
 ```marte
 Field1 = 10 + 20 * 2  // 50
 Field2 = "Hello " .. "World"
-Field3 = $MyVar + 5
+Field3 = @MyVar + 5
 ```
 
 ### Build Override

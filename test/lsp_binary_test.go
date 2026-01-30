@@ -151,7 +151,7 @@ diags := params["diagnostics"].([]interface{})
 						foundOrdering = true
 						t.Log("Found Ordering error")
 					}
-					if strings.Contains(m, "Unresolved variable reference: '$Value'") {
+					if strings.Contains(m, "Unresolved variable reference: '@Value'") {
 						foundVariable = true
 						t.Log("Found Variable error")
 					}

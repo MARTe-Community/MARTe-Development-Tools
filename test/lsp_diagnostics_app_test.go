@@ -41,7 +41,7 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
         A = {
           DataSource = DDB
           Type = uint32
-          Value = $Value
+          Value = @Value
         }
       }
       OutputSignals = {
@@ -87,9 +87,9 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
 		t.Fatal("LSP did not publish diagnostics")
 	}
 
-	// 1. Check Unresolved Variable Error ($Value)
-	if !strings.Contains(output, "Unresolved variable reference: '$Value'") {
-		t.Error("Missing diagnostic for unresolved variable '$Value'")
+	// 1. Check Unresolved Variable Error (@Value)
+	if !strings.Contains(output, "Unresolved variable reference: '@Value'") {
+		t.Error("Missing diagnostic for unresolved variable '@Value'")
 	}
 
 	// 2. Check INOUT Ordering Error (Signal A consumed but not produced)

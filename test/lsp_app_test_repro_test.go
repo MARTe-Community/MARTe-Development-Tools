@@ -38,7 +38,7 @@ func TestLSPAppTestRepro(t *testing.T) {
         A = {
           DataSource = DDB
           Type = uint32
-          Value = $Value
+          Value = @Value
         }
       }
       OutputSignals = {
@@ -75,7 +75,7 @@ func TestLSPAppTestRepro(t *testing.T) {
 	output := buf.String()
 
 	// Check Unresolved Variable
-	if !strings.Contains(output, "Unresolved variable reference: '$Value'") {
+	if !strings.Contains(output, "Unresolved variable reference: '@Value'") {
 		t.Error("LSP missing unresolved variable error")
 	}
 

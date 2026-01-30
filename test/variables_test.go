@@ -16,8 +16,8 @@ func TestVariables(t *testing.T) {
 
 +Obj = {
     Class = Test
-    Field1 = $MyInt
-    Field2 = $MyStr
+    Field1 = @MyInt
+    Field2 = @MyStr
 }
 `
 	// Test Parsing

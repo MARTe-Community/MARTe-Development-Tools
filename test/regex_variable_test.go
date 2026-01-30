@@ -15,7 +15,7 @@ func TestRegexVariable(t *testing.T) {
 #var BadIP: string & =~"^[0-9.]+$" = "abc"
 
 +Obj = {
-    IP = $IP
+    IP = @IP
 }
 `
 	// Test Validator

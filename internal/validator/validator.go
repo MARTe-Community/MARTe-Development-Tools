@@ -223,7 +223,7 @@ func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) i
 	case *parser.ReferenceValue:
 		return t.Value
 	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(t.Name, "$")
+		name := strings.TrimPrefix(t.Name, "@")
 		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return v.valueToInterface(info.Def.DefaultValue, ctx)
@@ -525,7 +525,7 @@ func (v *Validator) getFieldValue(f *parser.Field, ctx *index.ProjectNode) strin
 	case *parser.BoolValue:
 		return strconv.FormatBool(val.Value)
 	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(val.Name, "$")
+		name := strings.TrimPrefix(val.Name, "@")
 		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return v.getFieldValue(&parser.Field{Value: info.Def.DefaultValue}, ctx)
@@ -1126,7 +1126,7 @@ func (v *Validator) CheckVariables() {
 							if ref.IsVariable && ref.TargetVariable == nil {
 								v.Diagnostics = append(v.Diagnostics, Diagnostic{
 									Level:    LevelError,
-									Message:  fmt.Sprintf("Unresolved variable reference: '$%s'", ref.Name),
+									Message:  fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
 									Position: ref.Position,
 									File:     ref.File,
 								})

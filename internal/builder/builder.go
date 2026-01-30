@@ -235,7 +235,7 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 func (b *Builder) evaluate(val parser.Value) parser.Value {
 	switch v := val.(type) {
 	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(v.Name, "$")
+		name := strings.TrimPrefix(v.Name, "@")
 		if res, ok := b.variables[name]; ok {
 			return b.evaluate(res)
 		}

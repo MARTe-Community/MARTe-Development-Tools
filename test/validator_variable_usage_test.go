@@ -44,7 +44,7 @@ func TestVariableValidation(t *testing.T) {
 #var MyStr: string = "hello"
 +MyPID = {
     Class = PIDGAM
-    Kp = $MyStr
+    Kp = @MyStr
     Ki = 0.0
     Kd = 0.0
 }
@@ -79,7 +79,7 @@ func TestVariableValidation(t *testing.T) {
 #var MyGain: float = 1.5
 +MyPID = {
     Class = PIDGAM
-    Kp = $MyGain
+    Kp = @MyGain
     Ki = 0.0
     Kd = 0.0
 }

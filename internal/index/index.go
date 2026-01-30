@@ -400,7 +400,7 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 		})
 	case *parser.VariableReferenceValue:
 		pt.References = append(pt.References, Reference{
-			Name:       strings.TrimPrefix(v.Name, "$"),
+			Name:       strings.TrimPrefix(v.Name, "@"),
 			Position:   v.Position,
 			File:       file,
 			IsVariable: true,

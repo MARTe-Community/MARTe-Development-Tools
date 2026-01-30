@@ -17,9 +17,9 @@ func TestOperators(t *testing.T) {
 #var S2: string = "World"
 
 +Obj = {
-    Math = $A + $B
-    Precedence = $A + $B * 2
-    Concat = $S1 .. " " .. $S2
+    Math = @A + @B
+    Precedence = @A + @B * 2
+    Concat = @S1 .. " " .. @S2
 }
 `
 	// Check Parser

@@ -297,7 +297,7 @@ func (p *Parser) parseAtom() (Value, bool) {
 			true
 	case TokenIdentifier:
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
-	case TokenObjectIdentifier:
+	case TokenVariableReference:
 		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
 	case TokenLBrace:
 		arr := &ArrayValue{Position: tok.Position}

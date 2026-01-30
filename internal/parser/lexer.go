@@ -36,6 +36,7 @@ const (
 	TokenCaret
 	TokenAmpersand
 	TokenConcat
+	TokenVariableReference
 )
 
 type Token struct {
@@ -184,6 +185,8 @@ func (l *Lexer) NextToken() Token {
 			return l.lexString()
 		case '#':
 			return l.lexHashIdentifier()
+		case '@':
+			return l.lexVariableReference()
 		case '$':
 			return l.lexObjectIdentifier()
 		}
@@ -310,4 +313,15 @@ func (l *Lexer) lexHashIdentifier() Token {
 		return l.lexUntilNewline(TokenPackage)
 	}
 	return l.emit(TokenIdentifier)
+}
+
+func (l *Lexer) lexVariableReference() Token {
+	for {
+		r := l.next()
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			continue
+		}
+		l.backup()
+		return l.emit(TokenVariableReference)
+	}
 }

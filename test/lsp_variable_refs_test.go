@@ -15,7 +15,7 @@ func TestLSPVariableRefs(t *testing.T) {
 	content := `
 #var MyVar: int = 1
 +Obj = {
-    Field = $MyVar
+    Field = @MyVar
 }
 `
 	uri := "file://vars.marte"
@@ -29,11 +29,11 @@ func TestLSPVariableRefs(t *testing.T) {
 	lsp.Tree.ResolveReferences()
 
 	// 1. Definition from Usage
-	// Line 4: "    Field = $MyVar"
-	// $ is at col 12 (0-based) ?
+	// Line 4: "    Field = @MyVar"
+	// @ is at col 12 (0-based) ?
 	// "    Field = " is 4 + 6 + 3 = 13 chars?
 	// 4 spaces. Field (5). " = " (3). 4+5+3 = 12.
-	// So $ is at 12.
+	// So @ is at 12.
 	paramsDef := lsp.DefinitionParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 		Position:     lsp.Position{Line: 3, Character: 12},

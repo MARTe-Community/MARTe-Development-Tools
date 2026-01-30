@@ -15,8 +15,8 @@ func TestFormatterVariables(t *testing.T) {
 #var MyStr: string | "A" = "default"
 
 +Obj = {
-    Field1 = $MyInt
-    Field2 = $MyStr
+    Field1 = @MyInt
+    Field2 = @MyStr
 }
 `
 	p := parser.NewParser(content)
@@ -35,11 +35,10 @@ func TestFormatterVariables(t *testing.T) {
 		t.Errorf("Variable MyInt formatted incorrectly. Got:\n%s", output)
 	}
 	// Note: parser adds space after each token in TypeExpr
-	// string | "A" -> "string | \"A\"" 
+	// string | "A" -> "string | \"A\""
 	if !strings.Contains(output, "#var MyStr: string | \"A\" = \"default\"") {
 		t.Errorf("Variable MyStr formatted incorrectly. Got:\n%s", output)
 	}
-	if !strings.Contains(output, "Field1 = $MyInt") {
-		t.Errorf("Variable reference $MyInt formatted incorrectly. Got:\n%s", output)
-	}
-}
+	if !strings.Contains(output, "Field1 = @MyInt") {
+		t.Errorf("Variable reference @MyInt formatted incorrectly. Got:\n%s", output)
+	}}

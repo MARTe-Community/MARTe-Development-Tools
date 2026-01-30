@@ -611,7 +611,7 @@ func HandleHover(params HoverParams) *Hover {
 		} else if res.Reference.TargetVariable != nil {
 			v := res.Reference.TargetVariable
 			targetName = v.Name
-			fullInfo = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", v.Name, v.TypeExpr)
+			fullInfo = fmt.Sprintf("**Variable**: `@%s`\nType: `%s`", v.Name, v.TypeExpr)
 			if v.DefaultValue != nil {
 				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue))
 			}
