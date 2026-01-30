@@ -2,11 +2,12 @@
 
 `mdt` includes a Language Server Protocol (LSP) implementation that provides features like:
 
-- Syntax highlighting and error reporting
+- Syntax highlighting and error reporting (Parser & Semantic)
 - Auto-completion
 - Go to Definition / References
 - Hover documentation
 - Symbol renaming
+- Incremental synchronization (Robust)
 
 The LSP server is started via the command:
 

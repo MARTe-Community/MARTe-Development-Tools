@@ -435,7 +435,7 @@ func (pt *ProjectTree) ResolveReferences() {
 			continue
 		}
 
-		ref.Target = pt.resolveScopedName(container, ref.Name)
+		ref.Target = pt.ResolveName(container, ref.Name, nil)
 	}
 }
 
@@ -617,51 +617,19 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 	return nil
 }
 
-func (pt *ProjectTree) resolveScopedName(ctx *ProjectNode, name string) *ProjectNode {
+func (pt *ProjectTree) ResolveName(ctx *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
 	if ctx == nil {
-		return pt.FindNode(pt.Root, name, nil)
+		return pt.FindNode(pt.Root, name, predicate)
 	}
 
-	parts := strings.Split(name, ".")
-	first := parts[0]
-	normFirst := NormalizeName(first)
-
-	var startNode *ProjectNode
 	curr := ctx
-
 	for curr != nil {
-		if child, ok := curr.Children[normFirst]; ok {
-			startNode = child
-			break
+		if found := pt.FindNode(curr, name, predicate); found != nil {
+			return found
 		}
 		curr = curr.Parent
 	}
-
-	if startNode == nil && ctx != pt.Root {
-		if child, ok := pt.Root.Children[normFirst]; ok {
-			startNode = child
-		}
-	}
-
-	if startNode == nil {
-		// Fallback to deep search from context root
-		root := ctx
-		for root.Parent != nil {
-			root = root.Parent
-		}
-		return pt.FindNode(root, name, nil)
-	}
-
-	curr = startNode
-	for i := 1; i < len(parts); i++ {
-		norm := NormalizeName(parts[i])
-		if child, ok := curr.Children[norm]; ok {
-			curr = child
-		} else {
-			return nil
-		}
-	}
-	return curr
+	return nil
 }
 
 func (pt *ProjectTree) ResolveVariable(ctx *ProjectNode, name string) *VariableInfo {

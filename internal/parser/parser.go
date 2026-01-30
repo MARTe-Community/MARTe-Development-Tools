@@ -299,6 +299,8 @@ func (p *Parser) parseAtom() (Value, bool) {
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
 	case TokenVariableReference:
 		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
+	case TokenObjectIdentifier:
+		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
 	case TokenLBrace:
 		arr := &ArrayValue{Position: tok.Position}
 		for {
@@ -379,4 +381,8 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 		TypeExpr:     strings.TrimSpace(typeExpr),
 		DefaultValue: defVal,
 	}, true
+}
+
+func (p *Parser) Errors() []error {
+	return p.errors
 }

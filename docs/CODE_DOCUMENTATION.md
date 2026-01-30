@@ -43,7 +43,7 @@ The brain of the system. It maintains a holistic view of the project.
 *   **ProjectTree**: The central data structure. It holds the root of the configuration hierarchy (`Root`), references, and isolated files.
 *   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments. It also stores locally defined variables in its `Variables` map.
 *   **NodeMap**: A hash map index (`map[string][]*ProjectNode`) for $O(1)$ symbol lookups, optimizing `FindNode` operations.
-*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `resolveScopedName` to respect lexical scoping rules, searching up the hierarchy from the reference's container.
+*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `ResolveName` (exported) which respects lexical scoping rules by searching the hierarchy upwards from the reference's container, using `FindNode` for deep searches within each scope.
 
 ### 3. `internal/validator`
 
@@ -100,12 +100,13 @@ Manages CUE schemas.
 5.  Diagnostics are printed (CLI) or published via `textDocument/publishDiagnostics` (LSP).
 
 ### Threading Check Logic
-1.  Finds the `RealTimeApplication` node.
-2.  Iterates through `States` and `Threads`.
-3.  For each Thread, resolves the `Functions` (GAMs).
-4.  For each GAM, resolves connected `DataSources` via Input/Output signals.
-5.  Maps `DataSource -> Thread` within the context of a State.
-6.  If a DataSource is seen in >1 Thread, it checks the `#meta.multithreaded` property. If false (default), an error is raised.
+1.  Iterates all `RealTimeApplication` nodes found in the project.
+2.  For each App:
+    1.  Finds `States` and `Threads`.
+    2.  For each Thread, resolves the `Functions` (GAMs).
+    3.  For each GAM, resolves connected `DataSources` via Input/Output signals.
+    4.  Maps `DataSource -> Thread` within the context of a State.
+    5.  If a DataSource is seen in >1 Thread, it checks the `#meta.multithreaded` property. If false (default), an error is raised.
 
 ### INOUT Ordering Logic
 1.  Iterates Threads.

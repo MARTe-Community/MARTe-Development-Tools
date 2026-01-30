@@ -138,6 +138,7 @@ func runCheck(args []string) {
 	}
 
 	tree := index.NewProjectTree()
+	syntaxErrors := 0
 
 	for _, file := range args {
 		content, err := os.ReadFile(file)
@@ -147,13 +148,17 @@ func runCheck(args []string) {
 		}
 
 		p := parser.NewParser(string(content))
-		config, err := p.Parse()
-		if err != nil {
-			logger.Printf("%s: Grammar error: %v\n", file, err)
-			continue
+		config, _ := p.Parse()
+		if len(p.Errors()) > 0 {
+			syntaxErrors += len(p.Errors())
+			for _, e := range p.Errors() {
+				logger.Printf("%s: Grammar error: %v\n", file, e)
+			}
 		}
 
-		tree.AddFile(file, config)
+		if config != nil {
+			tree.AddFile(file, config)
+		}
 	}
 
 	v := validator.NewValidator(tree, ".")
@@ -167,8 +172,9 @@ func runCheck(args []string) {
 		logger.Printf("%s:%d:%d: %s: %s\n", diag.File, diag.Position.Line, diag.Position.Column, level, diag.Message)
 	}
 
-	if len(v.Diagnostics) > 0 {
-		logger.Printf("\nFound %d issues.\n", len(v.Diagnostics))
+	totalIssues := len(v.Diagnostics) + syntaxErrors
+	if totalIssues > 0 {
+		logger.Printf("\nFound %d issues.\n", totalIssues)
 	} else {
 		logger.Println("No issues found.")
 	}

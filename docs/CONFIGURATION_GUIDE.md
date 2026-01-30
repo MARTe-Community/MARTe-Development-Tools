@@ -173,9 +173,11 @@ You can define variables using `#var`. The type expression supports CUE syntax.
 ```
 
 ### Usage
-Reference a variable using `@`:
+Reference a variable using `$` (preferred) or `@`:
 
 ```marte
+Field = $MyVar
+// or
 Field = @MyVar
 ```
 
@@ -187,7 +189,7 @@ You can use operators in field values. Supported operators:
 ```marte
 Field1 = 10 + 20 * 2  // 50
 Field2 = "Hello " .. "World"
-Field3 = @MyVar + 5
+Field3 = $MyVar + 5
 ```
 
 ### Build Override
@@ -196,4 +198,22 @@ You can override variable values during build:
 ```bash
 mdt build -vMyVar=200 -vEnv="PROD" src/*.marte
 ```
+
+## 7. Validation Rules (Detail)
+
+### Data Flow Validation
+`mdt` checks for logical data flow errors:
+- **Consumed before Produced**: If a GAM reads an INOUT signal that hasn't been written by a previous GAM in the same cycle, an error is reported.
+- **Produced but not Consumed**: If a GAM writes an INOUT signal that is never read by subsequent GAMs, a warning is reported.
+- **Initialization**: Providing a `Value` field in an `InputSignal` treats it as "produced" (initialized), resolving "Consumed before Produced" errors.
+
+### Threading Rules
+A DataSource that is **not** marked as multithreaded (default) cannot be used by GAMs running in different threads within the same State.
+
+To allow sharing, the DataSource class in the schema must have `#meta: multithreaded: true`.
+
+### Implicit vs Explicit Signals
+- **Explicit**: Signal defined in `DataSource.Signals`.
+- **Implicit**: Signal used in GAM but not defined in DataSource. `mdt` reports a warning unless suppressed.
+
 

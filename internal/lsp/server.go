@@ -336,13 +336,9 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 	path := uriToPath(params.TextDocument.URI)
 	Documents[params.TextDocument.URI] = params.TextDocument.Text
 	p := parser.NewParser(params.TextDocument.Text)
-	config, err := p.Parse()
+	config, _ := p.Parse()
 
-	if err != nil {
-		publishParserError(params.TextDocument.URI, err)
-	} else {
-		publishParserError(params.TextDocument.URI, nil)
-	}
+	publishParserErrors(params.TextDocument.URI, p.Errors())
 
 	if config != nil {
 		Tree.AddFile(path, config)
@@ -369,13 +365,9 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	Documents[uri] = text
 	path := uriToPath(uri)
 	p := parser.NewParser(text)
-	config, err := p.Parse()
+	config, _ := p.Parse()
 
-	if err != nil {
-		publishParserError(uri, err)
-	} else {
-		publishParserError(uri, nil)
-	}
+	publishParserErrors(uri, p.Errors())
 
 	if config != nil {
 		Tree.AddFile(path, config)
@@ -465,6 +457,9 @@ func runValidation(_ string) {
 	// Collect all known files to ensure we clear diagnostics for fixed files
 	knownFiles := make(map[string]bool)
 	collectFiles(Tree.Root, knownFiles)
+	for _, node := range Tree.IsolatedFiles {
+		collectFiles(node, knownFiles)
+	}
 
 	// Initialize all known files with empty diagnostics
 	for f := range knownFiles {
@@ -473,8 +468,10 @@ func runValidation(_ string) {
 
 	for _, d := range v.Diagnostics {
 		severity := 1 // Error
+		levelStr := "ERROR"
 		if d.Level == validator.LevelWarning {
 			severity = 2 // Warning
+			levelStr = "WARNING"
 		}
 
 		diag := LSPDiagnostic{
@@ -483,7 +480,7 @@ func runValidation(_ string) {
 				End:   Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1 + 10}, // Arbitrary length
 			},
 			Severity: severity,
-			Message:  d.Message,
+			Message:  fmt.Sprintf("%s: %s", levelStr, d.Message),
 			Source:   "mdt",
 		}
 
@@ -508,44 +505,36 @@ func runValidation(_ string) {
 	}
 }
 
-func publishParserError(uri string, err error) {
-	if err == nil {
-		notification := JsonRpcMessage{
-			Jsonrpc: "2.0",
-			Method:  "textDocument/publishDiagnostics",
-			Params: mustMarshal(PublishDiagnosticsParams{
-				URI:         uri,
-				Diagnostics: []LSPDiagnostic{},
-			}),
-		}
-		send(notification)
-		return
-	}
+func publishParserErrors(uri string, errors []error) {
+	diagnostics := []LSPDiagnostic{}
 
-	var line, col int
-	var msg string
-	// Try parsing "line:col: message"
-	n, _ := fmt.Sscanf(err.Error(), "%d:%d: ", &line, &col)
-	if n == 2 {
-		parts := strings.SplitN(err.Error(), ": ", 2)
-		if len(parts) == 2 {
-			msg = parts[1]
+	for _, err := range errors {
+		var line, col int
+		var msg string
+		// Try parsing "line:col: message"
+		n, _ := fmt.Sscanf(err.Error(), "%d:%d: ", &line, &col)
+		if n == 2 {
+			parts := strings.SplitN(err.Error(), ": ", 2)
+			if len(parts) == 2 {
+				msg = parts[1]
+			}
+		} else {
+			// Fallback
+			line = 1
+			col = 1
+			msg = err.Error()
 		}
-	} else {
-		// Fallback
-		line = 1
-		col = 1
-		msg = err.Error()
-	}
 
-	diag := LSPDiagnostic{
-		Range: Range{
-			Start: Position{Line: line - 1, Character: col - 1},
-			End:   Position{Line: line - 1, Character: col},
-		},
-		Severity: 1, // Error
-		Message:  msg,
-		Source:   "mdt-parser",
+		diag := LSPDiagnostic{
+			Range: Range{
+				Start: Position{Line: line - 1, Character: col - 1},
+				End:   Position{Line: line - 1, Character: col},
+			},
+			Severity: 1, // Error
+			Message:  msg,
+			Source:   "mdt-parser",
+		}
+		diagnostics = append(diagnostics, diag)
 	}
 
 	notification := JsonRpcMessage{
@@ -553,13 +542,16 @@ func publishParserError(uri string, err error) {
 		Method:  "textDocument/publishDiagnostics",
 		Params: mustMarshal(PublishDiagnosticsParams{
 			URI:         uri,
-			Diagnostics: []LSPDiagnostic{diag},
+			Diagnostics: diagnostics,
 		}),
 	}
 	send(notification)
 }
 
 func collectFiles(node *index.ProjectNode, files map[string]bool) {
+	if node == nil {
+		return
+	}
 	for _, frag := range node.Fragments {
 		files[frag.File] = true
 	}

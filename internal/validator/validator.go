@@ -304,7 +304,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		return // Ignore implicit signals or missing datasource (handled elsewhere if mandatory)
 	}
 
-	dsNode := v.resolveReference(dsName, v.getNodeFile(signalNode), isDataSource)
+	dsNode := v.resolveReference(dsName, signalNode, isDataSource)
 	if dsNode == nil {
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
@@ -565,17 +565,8 @@ func (v *Validator) getFieldValue(f *parser.Field, ctx *index.ProjectNode) strin
 	return ""
 }
 
-func (v *Validator) resolveReference(name string, file string, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
-	if isoNode, ok := v.Tree.IsolatedFiles[file]; ok {
-		if found := v.Tree.FindNode(isoNode, name, predicate); found != nil {
-			return found
-		}
-		return nil
-	}
-	if v.Tree.Root == nil {
-		return nil
-	}
-	return v.Tree.FindNode(v.Tree.Root, name, predicate)
+func (v *Validator) resolveReference(name string, ctx *index.ProjectNode, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
+	return v.Tree.ResolveName(ctx, name, predicate)
 }
 
 func (v *Validator) getNodeClass(node *index.ProjectNode) string {
@@ -740,7 +731,7 @@ func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[stri
 		if arr, ok := f.Value.(*parser.ArrayValue); ok {
 			for _, elem := range arr.Elements {
 				if ref, ok := elem.(*parser.ReferenceValue); ok {
-					target := v.resolveReference(ref.Value, v.getNodeFile(node), isGAM)
+					target := v.resolveReference(ref.Value, node, isGAM)
 					if target == nil {
 						v.Diagnostics = append(v.Diagnostics, Diagnostic{
 							Level:    LevelError,
@@ -799,19 +790,20 @@ func (v *Validator) CheckDataSourceThreading() {
 		return
 	}
 
-	// 1. Find RealTimeApplication
-	var appNode *index.ProjectNode
+	var appNodes []*index.ProjectNode
 	findApp := func(n *index.ProjectNode) {
 		if cls, ok := n.Metadata["Class"]; ok && cls == "RealTimeApplication" {
-			appNode = n
+			appNodes = append(appNodes, n)
 		}
 	}
 	v.Tree.Walk(findApp)
 
-	if appNode == nil {
-		return
+	for _, appNode := range appNodes {
+		v.checkAppDataSourceThreading(appNode)
 	}
+}
 
+func (v *Validator) checkAppDataSourceThreading(appNode *index.ProjectNode) {
 	// 2. Find States
 	var statesNode *index.ProjectNode
 	if s, ok := appNode.Children["States"]; ok {
@@ -882,7 +874,7 @@ func (v *Validator) getThreadGAMs(thread *index.ProjectNode) []*index.ProjectNod
 		if arr, ok := f.Value.(*parser.ArrayValue); ok {
 			for _, elem := range arr.Elements {
 				if ref, ok := elem.(*parser.ReferenceValue); ok {
-					target := v.resolveReference(ref.Value, v.getNodeFile(thread), isGAM)
+					target := v.resolveReference(ref.Value, thread, isGAM)
 					if target != nil {
 						gams = append(gams, target)
 					}
@@ -904,7 +896,7 @@ func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNo
 			fields := v.getFields(sig)
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 				dsName := v.getFieldValue(dsFields[0], sig)
-				dsNode := v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
+				dsNode := v.resolveReference(dsName, sig, isDataSource)
 				if dsNode != nil {
 					dsMap[dsNode] = true
 				}
@@ -938,18 +930,20 @@ func (v *Validator) CheckINOUTOrdering() {
 		return
 	}
 
-	var appNode *index.ProjectNode
+	var appNodes []*index.ProjectNode
 	findApp := func(n *index.ProjectNode) {
 		if cls, ok := n.Metadata["Class"]; ok && cls == "RealTimeApplication" {
-			appNode = n
+			appNodes = append(appNodes, n)
 		}
 	}
 	v.Tree.Walk(findApp)
 
-	if appNode == nil {
-		return
+	for _, appNode := range appNodes {
+		v.checkAppINOUTOrdering(appNode)
 	}
+}
 
+func (v *Validator) checkAppINOUTOrdering(appNode *index.ProjectNode) {
 	var statesNode *index.ProjectNode
 	if s, ok := appNode.Children["States"]; ok {
 		statesNode = s
@@ -1049,7 +1043,7 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 		if dsNode == nil {
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 				dsName := v.getFieldValue(dsFields[0], sig)
-				dsNode = v.resolveReference(dsName, v.getNodeFile(sig), isDataSource)
+				dsNode = v.resolveReference(dsName, sig, isDataSource)
 			}
 			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
 				sigName = v.getFieldValue(aliasFields[0], sig)
