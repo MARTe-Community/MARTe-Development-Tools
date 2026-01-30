@@ -182,19 +182,13 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	}
 
 	if config.Package == nil {
-		node := &ProjectNode{
-			Children:  make(map[string]*ProjectNode),
-			Metadata:  make(map[string]string),
-			Variables: make(map[string]VariableInfo),
-		}
-		pt.IsolatedFiles[file] = node
-		pt.populateNode(node, file, config)
+		pt.populateNode(pt.Root, file, config)
 		return
 	}
 
 	node := pt.Root
 	parts := strings.Split(config.Package.URI, ".")
-	
+
 	for i := 0; i < len(parts); i++ {
 		part := strings.TrimSpace(parts[i])
 		if part == "" {
@@ -399,8 +393,9 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 			File:     file,
 		})
 	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(v.Name, "@")
 		pt.References = append(pt.References, Reference{
-			Name:       strings.TrimPrefix(v.Name, "@"),
+			Name:       name,
 			Position:   v.Position,
 			File:       file,
 			IsVariable: true,

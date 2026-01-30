@@ -194,7 +194,7 @@ func TestIsolatedFileValidation(t *testing.T) {
 		t.Fatal("Reference SharedObj not found in index")
 	}
 
-	if ref.Target != nil {
-		t.Errorf("Expected reference in isolated file to be unresolved, but got target in %s", ref.Target.Fragments[0].File)
+	if ref.Target == nil {
+		t.Errorf("Expected reference in root file (iso.marte) to resolve to global SharedObj")
 	}
 }

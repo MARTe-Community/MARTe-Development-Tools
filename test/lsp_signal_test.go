@@ -45,7 +45,7 @@ func TestLSPSignalReferences(t *testing.T) {
 	v.ValidateProject()
 
 	// Find definition of MySig in MyDS
-	root := idx.IsolatedFiles["signal_refs.marte"]
+	root := idx.Root
 	if root == nil {
 		t.Fatal("Root node not found")
 	}
