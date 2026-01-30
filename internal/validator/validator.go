@@ -442,6 +442,36 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			}
 		}
 	}
+
+	// Validate Value initialization
+	if valField, hasValue := fields["Value"]; hasValue && len(valField) > 0 {
+		var typeStr string
+		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
+			typeStr = v.getFieldValue(typeFields[0], signalNode)
+		} else if signalNode.Target != nil {
+			if t, ok := signalNode.Target.Metadata["Type"]; ok {
+				typeStr = t
+			}
+		}
+
+		if typeStr != "" && v.Schema != nil {
+			ctx := v.Schema.Context
+			typeVal := ctx.CompileString(typeStr)
+			if typeVal.Err() == nil {
+				valInterface := v.valueToInterface(valField[0].Value, signalNode)
+				valVal := ctx.Encode(valInterface)
+				res := typeVal.Unify(valVal)
+				if err := res.Validate(cue.Concrete(true)); err != nil {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("Value initialization mismatch for signal '%s': %v", signalNode.RealName, err),
+						Position: valField[0].Position,
+						File:     v.getNodeFile(signalNode),
+					})
+				}
+			}
+		}
+	}
 }
 
 func (v *Validator) checkSignalProperty(gamSig, dsSig *index.ProjectNode, prop string) {

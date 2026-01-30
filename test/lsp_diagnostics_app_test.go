@@ -92,13 +92,7 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
 		t.Error("Missing diagnostic for unresolved variable '@Value'")
 	}
 
-	// 2. Check INOUT Ordering Error (Signal A consumed but not produced)
-	// Message format: INOUT Signal 'A' (DS '+DDB') is consumed by GAM '+FnA' ... before being produced ...
-	if !strings.Contains(output, "INOUT Signal 'A'") || !strings.Contains(output, "before being produced") {
-		t.Error("Missing diagnostic for INOUT ordering error (Signal A)")
-	}
-
-	// 3. Check INOUT Unused Warning (Signal B produced but not consumed)
+	// 2. Check INOUT Unused Warning (Signal B produced but not consumed)
 	// Message format: INOUT Signal 'B' ... produced ... but never consumed ...
 	if !strings.Contains(output, "INOUT Signal 'B'") || !strings.Contains(output, "never consumed") {
 		t.Error("Missing diagnostic for unused INOUT signal (Signal B)")

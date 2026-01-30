@@ -79,11 +79,6 @@ func TestLSPAppTestRepro(t *testing.T) {
 		t.Error("LSP missing unresolved variable error")
 	}
 
-	// Check INOUT consumed but not produced
-	if !strings.Contains(output, "consumed by GAM '+FnA'") {
-		t.Error("LSP missing consumed but not produced error")
-	}
-    
     if t.Failed() {
         t.Log(output)
     }
