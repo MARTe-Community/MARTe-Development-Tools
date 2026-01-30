@@ -45,17 +45,15 @@ func Format(config *parser.Configuration, w io.Writer) {
 }
 
 func fixComment(text string) string {
-	if strings.HasPrefix(text, "//!") {
-		if len(text) > 3 && text[3] != ' ' {
-			return "//! " + text[3:]
-		}
-	} else if strings.HasPrefix(text, "//#") {
-		if len(text) > 3 && text[3] != ' ' {
-			return "//# " + text[3:]
-		}
-	} else if strings.HasPrefix(text, "//") {
-		if len(text) > 2 && text[2] != ' ' && text[2] != '#' && text[2] != '!' {
-			return "// " + text[2:]
+	if !strings.HasPrefix(text, "//!") {
+		if strings.HasPrefix(text, "//#") {
+			if len(text) > 3 && text[3] != ' ' {
+				return "//# " + text[3:]
+			}
+		} else if strings.HasPrefix(text, "//") {
+			if len(text) > 2 && text[2] != ' ' && text[2] != '#' && text[2] != '!' {
+				return "// " + text[2:]
+			}
 		}
 	}
 	return text

@@ -936,6 +936,7 @@ func (v *Validator) CheckINOUTOrdering() {
 		return
 	}
 
+	suppress := v.isGloballyAllowed("not_consumed", v.getNodeFile(appNode))
 	for _, state := range statesNode.Children {
 		var threads []*index.ProjectNode
 		for _, child := range state.Children {
@@ -961,24 +962,25 @@ func (v *Validator) CheckINOUTOrdering() {
 				v.processGAMSignalsForOrdering(gam, "InputSignals", producedSignals, consumedSignals, true, thread, state)
 				v.processGAMSignalsForOrdering(gam, "OutputSignals", producedSignals, consumedSignals, false, thread, state)
 			}
-
-			// Check for produced but not consumed
-			for ds, signals := range producedSignals {
-				for sigName, producers := range signals {
-					consumed := false
-					if cSet, ok := consumedSignals[ds]; ok {
-						if cSet[sigName] {
-							consumed = true
+			if !suppress {
+				// Check for produced but not consumed
+				for ds, signals := range producedSignals {
+					for sigName, producers := range signals {
+						consumed := false
+						if cSet, ok := consumedSignals[ds]; ok {
+							if cSet[sigName] {
+								consumed = true
+							}
 						}
-					}
-					if !consumed {
-						for _, prod := range producers {
-							v.Diagnostics = append(v.Diagnostics, Diagnostic{
-								Level:    LevelWarning,
-								Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
-								Position: v.getNodePosition(prod),
-								File:     v.getNodeFile(prod),
-							})
+						if !consumed {
+							for _, prod := range producers {
+								v.Diagnostics = append(v.Diagnostics, Diagnostic{
+									Level:    LevelWarning,
+									Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
+									Position: v.getNodePosition(prod),
+									File:     v.getNodeFile(prod),
+								})
+							}
 						}
 					}
 				}
@@ -992,7 +994,7 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 	if container == nil {
 		return
 	}
-
+	not_produced_suppress := v.isGloballyAllowed("not_produced", v.getNodeFile(gam))
 	for _, sig := range container.Children {
 		fields := v.getFields(sig)
 		var dsNode *index.ProjectNode
@@ -1033,22 +1035,31 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 		}
 
 		if isInput {
-			isProduced := false
-			if set, ok := produced[dsNode]; ok {
-				if len(set[sigName]) > 0 {
-					isProduced = true
+			if !not_produced_suppress {
+				isProduced := false
+				if set, ok := produced[dsNode]; ok {
+					if len(set[sigName]) > 0 {
+						isProduced = true
+					}
 				}
-			}
+				locally_supressed := false
+				for _, p := range sig.Pragmas {
+					if strings.HasPrefix(p, "not_produced:") || strings.HasPrefix(p, "ignore(not_produced)") {
+						locally_supressed = true
+						break
+					}
+				}
 
-			if !isProduced {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
-					Position: v.getNodePosition(sig),
-					File:     v.getNodeFile(sig),
-				})
-			}
+				if !isProduced && !locally_supressed {
+					v.Diagnostics = append(v.Diagnostics, Diagnostic{
+						Level:    LevelError,
+						Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
+						Position: v.getNodePosition(sig),
+						File:     v.getNodeFile(sig),
+					})
+				}
 
+			}
 			if consumed[dsNode] == nil {
 				consumed[dsNode] = make(map[string]bool)
 			}
@@ -1120,16 +1131,16 @@ func (v *Validator) CheckVariables() {
 	}
 
 	v.Tree.Walk(checkNodeVars)
-}					
-					func (v *Validator) CheckUnresolvedVariables() {
-						for _, ref := range v.Tree.References {
-							if ref.IsVariable && ref.TargetVariable == nil {
-								v.Diagnostics = append(v.Diagnostics, Diagnostic{
-									Level:    LevelError,
-									Message:  fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
-									Position: ref.Position,
-									File:     ref.File,
-								})
-							}
-						}
-					}
+}
+func (v *Validator) CheckUnresolvedVariables() {
+	for _, ref := range v.Tree.References {
+		if ref.IsVariable && ref.TargetVariable == nil {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
+				Position: ref.Position,
+				File:     ref.File,
+			})
+		}
+	}
+}

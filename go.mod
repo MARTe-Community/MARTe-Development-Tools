@@ -1,6 +1,6 @@
 module github.com/marte-community/marte-dev-tools
 
-go 1.25.6
+go 1.25
 
 require cuelang.org/go v0.15.3
 
