@@ -974,12 +974,21 @@ func (v *Validator) CheckINOUTOrdering() {
 						}
 						if !consumed {
 							for _, prod := range producers {
-								v.Diagnostics = append(v.Diagnostics, Diagnostic{
-									Level:    LevelWarning,
-									Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
-									Position: v.getNodePosition(prod),
-									File:     v.getNodeFile(prod),
-								})
+								locally_suppressed := false
+								for _, p := range prod.Pragmas {
+									if strings.HasPrefix(p, "not_consumed:") || strings.HasPrefix(p, "ignore(not_consumed)") {
+										locally_suppressed = true
+										break
+									}
+								}
+								if !locally_suppressed {
+									v.Diagnostics = append(v.Diagnostics, Diagnostic{
+										Level:    LevelWarning,
+										Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
+										Position: v.getNodePosition(prod),
+										File:     v.getNodeFile(prod),
+									})
+								}
 							}
 						}
 					}
@@ -1042,15 +1051,15 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 						isProduced = true
 					}
 				}
-				locally_supressed := false
+				locally_suppressed := false
 				for _, p := range sig.Pragmas {
 					if strings.HasPrefix(p, "not_produced:") || strings.HasPrefix(p, "ignore(not_produced)") {
-						locally_supressed = true
+						locally_suppressed = true
 						break
 					}
 				}
 
-				if !isProduced && !locally_supressed {
+				if !isProduced && !locally_suppressed {
 					v.Diagnostics = append(v.Diagnostics, Diagnostic{
 						Level:    LevelError,
 						Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
