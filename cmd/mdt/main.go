@@ -72,6 +72,45 @@ func runBuild(args []string) {
 		os.Exit(1)
 	}
 
+	// 1. Run Validation
+	tree := index.NewProjectTree()
+	for _, file := range files {
+		content, err := os.ReadFile(file)
+		if err != nil {
+			logger.Printf("Error reading %s: %v\n", file, err)
+			os.Exit(1)
+		}
+
+		p := parser.NewParser(string(content))
+		config, err := p.Parse()
+		if err != nil {
+			logger.Printf("%s: Grammar error: %v\n", file, err)
+			os.Exit(1)
+		}
+
+		tree.AddFile(file, config)
+	}
+
+	v := validator.NewValidator(tree, ".")
+	v.ValidateProject()
+
+	hasErrors := false
+	for _, diag := range v.Diagnostics {
+		level := "ERROR"
+		if diag.Level == validator.LevelWarning {
+			level = "WARNING"
+		} else {
+			hasErrors = true
+		}
+		logger.Printf("%s:%d:%d: %s: %s\n", diag.File, diag.Position.Line, diag.Position.Column, level, diag.Message)
+	}
+
+	if hasErrors {
+		logger.Println("Build failed due to validation errors.")
+		os.Exit(1)
+	}
+
+	// 2. Perform Build
 	b := builder.NewBuilder(files, overrides)
 
 	var out *os.File = os.Stdout
