@@ -409,6 +409,11 @@ func (pt *ProjectTree) indexValue(file string, val parser.Value) {
 			File:       file,
 			IsVariable: true,
 		})
+	case *parser.BinaryExpression:
+		pt.indexValue(file, v.Left)
+		pt.indexValue(file, v.Right)
+	case *parser.UnaryExpression:
+		pt.indexValue(file, v.Right)
 	case *parser.ArrayValue:
 		for _, elem := range v.Elements {
 			pt.indexValue(file, elem)
@@ -644,7 +649,7 @@ func (pt *ProjectTree) ResolveVariable(ctx *ProjectNode, name string) *VariableI
 		}
 		curr = curr.Parent
 	}
-	if ctx == nil {
+	if pt.Root != nil {
 		if v, ok := pt.Root.Variables[name]; ok {
 			return &v
 		}

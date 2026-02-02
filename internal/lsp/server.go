@@ -97,13 +97,28 @@ type TextDocumentContentChangeEvent struct {
 	Text        string `json:"text"`
 }
 
+type TextDocumentIdentifier struct {
+	URI string `json:"uri"`
+}
+
+type Position struct {
+	Line      int `json:"line"`
+	Character int `json:"character"`
+}
+
+type Range struct {
+	Start Position `json:"start"`
+	End   Position `json:"end"`
+}
+
+type Location struct {
+	URI   string `json:"uri"`
+	Range Range  `json:"range"`
+}
+
 type HoverParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
-}
-
-type TextDocumentIdentifier struct {
-	URI string `json:"uri"`
 }
 
 type DefinitionParams struct {
@@ -121,19 +136,17 @@ type ReferenceContext struct {
 	IncludeDeclaration bool `json:"includeDeclaration"`
 }
 
-type Location struct {
-	URI   string `json:"uri"`
-	Range Range  `json:"range"`
+type InlayHintParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
 }
 
-type Range struct {
-	Start Position `json:"start"`
-	End   Position `json:"end"`
-}
-
-type Position struct {
-	Line      int `json:"line"`
-	Character int `json:"character"`
+type InlayHint struct {
+	Position     Position `json:"position"`
+	Label        string   `json:"label"`
+	Kind         int      `json:"kind,omitempty"` // 1: Parameter, 2: Type
+	PaddingLeft  bool     `json:"paddingLeft,omitempty"`
+	PaddingRight bool     `json:"paddingRight,omitempty"`
 }
 
 type Hover struct {
@@ -264,6 +277,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				"referencesProvider":         true,
 				"documentFormattingProvider": true,
 				"renameProvider":             true,
+				"inlayHintProvider":          true,
 				"completionProvider": map[string]any{
 					"triggerCharacters": []string{"=", " ", "@"},
 				},
@@ -324,6 +338,11 @@ func HandleMessage(msg *JsonRpcMessage) {
 		var params RenameParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, HandleRename(params))
+		}
+	case "textDocument/inlayHint":
+		var params InlayHintParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleInlayHint(params))
 		}
 	}
 }
@@ -1945,4 +1964,162 @@ func computeUnary(op parser.Token, val parser.Value) parser.Value {
 		}
 	}
 	return val
+}
+
+func isComplexValue(val parser.Value) bool {
+	switch val.(type) {
+	case *parser.BinaryExpression, *parser.UnaryExpression, *parser.VariableReferenceValue:
+		return true
+	}
+	return false
+}
+
+func HandleInlayHint(params InlayHintParams) []InlayHint {
+	path := uriToPath(params.TextDocument.URI)
+	var hints []InlayHint
+	seenPositions := make(map[Position]bool)
+
+	addHint := func(h InlayHint) {
+		if !seenPositions[h.Position] {
+			hints = append(hints, h)
+			seenPositions[h.Position] = true
+		}
+	}
+
+	Tree.Walk(func(node *index.ProjectNode) {
+		for _, frag := range node.Fragments {
+			if frag.File != path {
+				continue
+			}
+
+			// Signal Name Hint (::TYPE[SIZE])
+			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
+				typ := getEvaluatedMetadata(node, "Type")
+				elems := getEvaluatedMetadata(node, "NumberOfElements")
+				dims := getEvaluatedMetadata(node, "NumberOfDimensions")
+
+				if typ == "" && node.Target != nil {
+					typ = node.Target.Metadata["Type"]
+					if elems == "" {
+						elems = node.Target.Metadata["NumberOfElements"]
+					}
+					if dims == "" {
+						dims = node.Target.Metadata["NumberOfDimensions"]
+					}
+				}
+
+				if typ != "" {
+					if elems == "" {
+						elems = "1"
+					}
+					if dims == "" {
+						dims = "1"
+					}
+					label := fmt.Sprintf("::%s[%sx%s]", typ, elems, dims)
+
+					pos := frag.ObjectPos
+					addHint(InlayHint{
+						Position: Position{Line: pos.Line - 1, Character: pos.Column - 1 + len(node.RealName)},
+						Label:    label,
+						Kind:     2, // Type
+					})
+				}
+			}
+
+			// Field-based hints (DataSource class and Expression evaluation)
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok {
+					// DataSource Class Hint
+					if f.Name == "DataSource" && (node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals")) {
+						dsName := valueToString(f.Value, node)
+						dsNode := Tree.ResolveName(node, dsName, isDataSource)
+						if dsNode != nil {
+							cls := dsNode.Metadata["Class"]
+							if cls != "" {
+								addHint(InlayHint{
+									Position: Position{Line: f.Position.Line - 1, Character: f.Position.Column - 1 + len(f.Name) + 3}, // "DataSource = "
+									Label:    cls + "::",
+									Kind:     1, // Parameter
+								})
+							}
+						}
+					}
+
+					// Expression Evaluation Hint
+					if isComplexValue(f.Value) {
+						res := valueToString(f.Value, node)
+						if res != "" {
+							uri := params.TextDocument.URI
+							text, ok := Documents[uri]
+							if ok {
+								lines := strings.Split(text, "\n")
+								lineIdx := f.Position.Line - 1
+								if lineIdx >= 0 && lineIdx < len(lines) {
+									line := lines[lineIdx]
+									addHint(InlayHint{
+										Position: Position{Line: lineIdx, Character: len(line)},
+										Label:    " => " + res,
+										Kind:     2, // Type/Value
+									})
+								}
+							}
+						}
+					}
+				} else if v, ok := def.(*parser.VariableDefinition); ok {
+					// Expression Evaluation Hint for #let/#var
+					if v.DefaultValue != nil && isComplexValue(v.DefaultValue) {
+						res := valueToString(v.DefaultValue, node)
+						if res != "" {
+							uri := params.TextDocument.URI
+							text, ok := Documents[uri]
+							if ok {
+								lines := strings.Split(text, "\n")
+								lineIdx := v.Position.Line - 1
+								if lineIdx >= 0 && lineIdx < len(lines) {
+									line := lines[lineIdx]
+									addHint(InlayHint{
+										Position: Position{Line: lineIdx, Character: len(line)},
+										Label:    " => " + res,
+										Kind:     2,
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	})
+
+	// Add logic for general object references
+	for _, ref := range Tree.References {
+		if ref.File != path {
+			continue
+		}
+		if ref.Target != nil {
+			cls := ref.Target.Metadata["Class"]
+			if cls != "" {
+				addHint(InlayHint{
+					Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+					Label:    cls + "::",
+					Kind:     1, // Parameter
+				})
+			}
+		} else if ref.IsVariable {
+			// Variable reference evaluation hint: @VAR(=> VALUE)
+			container := Tree.GetNodeContaining(ref.File, ref.Position)
+			if info := Tree.ResolveVariable(container, ref.Name); info != nil && info.Def.DefaultValue != nil {
+				val := valueToString(info.Def.DefaultValue, container)
+				if val != "" {
+					addHint(InlayHint{
+						Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name) + 1},
+						Label:    "(=> " + val + ")",
+						Kind:     2,
+					})
+				}
+			}
+		}
+	}
+
+	return hints
 }
