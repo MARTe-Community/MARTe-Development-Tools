@@ -5,7 +5,7 @@
 ## Features
 
 - **Portability**: A single statically compiled executable compatible with any Linux 3.2+ machine (as well as possible to compile and run on Windows and Mac OS X)
-- **LSP Server**: Real-time syntax checking, validation, autocomplete, hover documentation, and navigation (Go to Definition/References).
+- **LSP Server**: Real-time syntax checking, validation, autocomplete, hover documentation, navigation (Go to Definition/References), and Inlay Hints (inline types and evaluation).
 - **Builder**: Merges multiple configuration files into a single, ordered output file.
 - **Formatter**: Standardizes configuration file formatting.
 - **Validator**: Advanced semantic validation using [CUE](https://cuelang.org/) schemas, ensuring type safety and structural correctness.

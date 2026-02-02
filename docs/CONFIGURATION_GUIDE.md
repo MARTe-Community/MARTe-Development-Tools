@@ -27,15 +27,6 @@ Objects are defined using `+` (public/instantiated) or `$` (template/class-like)
   - References: `MyObject`, `MyObject.SubNode`
   - Arrays: `{ 1 2 3 }` or `{ "A" "B" }`
 
-### Comments and Documentation
-- Line comments: `// This is a comment`
-- Docstrings: `//# This documents the following node`. These appear in hover tooltips.
-
-```marte
-//# This is the main application
-+App = { ... }
-```
-
 ## 2. Signals and Data Flow
 
 Signals define how data moves between DataSources (drivers) and GAMs (algorithms).
@@ -73,43 +64,26 @@ GAMs declare inputs and outputs. You can refer to signals directly or alias them
 }
 ```
 
-### Threading Rules
-**Validation Rule**: A DataSource that is **not** marked as multithreaded (default) cannot be used by GAMs running in different threads within the same State.
+## 3. Multi-file Projects
 
-**Ordering Rule**: For `INOUT` signals (data dependency within a thread), the Producer GAM must appear **before** the Consumer GAM in the thread's `Functions` list. This ensures correct data flow within the cycle. This rule is skipped if the DataSource is marked as `multithreaded: true`.
+You can split your configuration into multiple files.
 
-To allow sharing, the DataSource class in the schema must have `#meta: multithreaded: true`.
+### Namespaces
+Use `#package` to define where the file's content fits in the hierarchy.
 
-## 3. Schemas and Validation
+**file1.marte**
+```marte
+#package MyApp.Controller
++MyController = { ... }
+```
 
-`mdt` validates your configuration against CUE schemas.
+This places `MyController` under `MyApp.Controller`.
 
-### Built-in Schema
-Common classes (`RealTimeApplication`, `StateMachine`, `IOGAM`, etc.) are built-in.
+### Building
+The `build` command merges all files.
 
-### Custom Schemas
-You can extend the schema by creating a `.marte_schema.cue` file in your project root.
-
-**Example: Adding a custom GAM**
-
-```cue
-package schema
-
-#Classes: {
-    MyCustomGAM: {
-        // Metadata for Validator/LSP
-        #meta: {
-            direction: "INOUT" // "IN", "OUT", "INOUT"
-            multithreaded: false
-        }
-        
-        // Fields
-        Gain: float
-        Offset?: float // Optional
-        InputSignals: {...}
-        OutputSignals: {...}
-    }
-}
+```bash
+mdt build -o final.marte src/*.marte
 ```
 
 ## 4. Variables and Constants
@@ -125,7 +99,7 @@ Variables can be defined at any level and can be overridden externally (e.g., vi
 
 +MyObject = {
     Class = Timer
-    Timeout = @Timeout
+    Timeout = $Timeout
 }
 ```
 
@@ -170,32 +144,51 @@ You can override variable values during build (only for `#var`):
 mdt build -vMyVar=200 src/*.marte
 ```
 
-### Docstrings
-Docstrings (`//#`) work for variables and constants and are displayed in the LSP hover information.
+## 5. Comments and Documentation
 
-## 5. Multi-file Projects
+- Line comments: `// This is a comment`
+- Docstrings: `//# This documents the following node`. These appear in hover tooltips.
 
-You can split your configuration into multiple files.
-
-### Namespaces
-Use `#package` to define where the file's content fits in the hierarchy.
-
-**file1.marte**
 ```marte
-#package MyApp.Controller
-+MyController = { ... }
+//# This is the main application
++App = { ... }
 ```
 
-This places `MyController` under `MyApp.Controller`.
+Docstrings work for objects, fields, variables, and constants.
 
-### Building
-The `build` command merges all files.
+## 6. Schemas and Validation
 
-```bash
-mdt build -o final.marte src/*.marte
+`mdt` validates your configuration against CUE schemas.
+
+### Built-in Schema
+Common classes (`RealTimeApplication`, `StateMachine`, `IOGAM`, etc.) are built-in.
+
+### Custom Schemas
+You can extend the schema by creating a `.marte_schema.cue` file in your project root.
+
+**Example: Adding a custom GAM**
+
+```cue
+package schema
+
+#Classes: {
+    MyCustomGAM: {
+        // Metadata for Validator/LSP
+        #meta: {
+            direction: "INOUT" // "IN", "OUT", "INOUT"
+            multithreaded: false
+        }
+        
+        // Fields
+        Gain: float
+        Offset?: float // Optional
+        InputSignals: {...}
+        OutputSignals: {...}
+    }
+}
 ```
 
-## 6. Pragmas (Suppressing Warnings)
+## 7. Pragmas (Suppressing Warnings)
 
 If validation is too strict, you can suppress warnings using pragmas (`//!`).
 
@@ -230,7 +223,7 @@ If validation is too strict, you can suppress warnings using pragmas (`//!`).
   //! allow(implicit)
   ```
 
-## 7. Validation Rules (Detail)
+## 8. Validation Rules (Detail)
 
 ### Data Flow Validation
 `mdt` checks for logical data flow errors:
@@ -247,3 +240,16 @@ To allow sharing, the DataSource class in the schema must have `#meta: multithre
 - **Explicit**: Signal defined in `DataSource.Signals`.
 - **Implicit**: Signal used in GAM but not defined in DataSource. `mdt` reports a warning unless suppressed.
 - **Consistency**: All references to the same logical signal (same name in same DataSource) must share the same `Type` and size properties.
+
+## 9. Editor Features (LSP)
+
+The `mdt` LSP server provides several features to improve productivity.
+
+### Inlay Hints
+Inlay hints provide real-time contextual information directly in the editor:
+
+- **Signal Metadata**: Signal usages in GAMs display their evaluated type and size, e.g., `Sig1` **`::uint32[10x1]`**.
+- **Object Class**: References to objects show the object's class, e.g., `DataSource = ` **`FileReader::`** `DS`.
+- **Expression Evaluation**:
+  - Complex expressions show their result at the end of the line, e.g., `Expr = 10 + 20` **` => 30`**.
+  - Variable references show their current value inline, e.g., `@MyVar` **`(=> 10)`**.

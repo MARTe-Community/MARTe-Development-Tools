@@ -185,7 +185,7 @@ You can also use expressions for calculations:
 #let CycleTime: float64 = 1.0 / $SamplingFreq
 ```
 
-LSP hover will show you the evaluated values (e.g., `CycleTime: 0.01`).
+LSP will show you the evaluated values directly in the code via **Inlay Hints** (e.g., `CycleTime: 0.01`) and in the hover documentation.
 
 ## Step 7: Advanced - Custom Schema
 
