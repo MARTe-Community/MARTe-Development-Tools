@@ -148,7 +148,46 @@ make build
 
 This produces `app.marte` (or `final_app.marte`), which contains the flattened, merged configuration ready for the MARTe framework.
 
-## Step 6: Advanced - Custom Schema
+## Step 6: Using Variables and Expressions
+
+You can parameterize your application using variables. Let's define a constant for the sampling frequency.
+
+Modify `src/app.marte`:
+
+```marte
+#package MyContollApp
+
+//# Sampling frequency in Hz
+#let SamplingFreq: uint32 = 100
+
++App = {
+    // ...
+    +Functions = {
+        +Converter = {
+            Class = IOGAM
+            InputSignals = {
+                TimeIn = {
+                    DataSource = Timer
+                    Type = uint32
+                    Frequency = $SamplingFreq
+                    Alias = Time
+                }
+            }
+            // ...
+        }
+    }
+}
+```
+
+You can also use expressions for calculations:
+
+```marte
+#let CycleTime: float64 = 1.0 / $SamplingFreq
+```
+
+LSP hover will show you the evaluated values (e.g., `CycleTime: 0.01`).
+
+## Step 7: Advanced - Custom Schema
 
 Suppose you want to enforce that your DataSources support multithreading. You can modify `.marte_schema.cue`.
 

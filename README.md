@@ -16,9 +16,13 @@ Few additional features have been added to the standard MARTe configuration lang
 
 - Multi file configuration support
   - Multi file definition merging
-  - File level namespace / node
-- Doc-strings support
-- Pragmas for warning suppression / documentation
+  - File level namespace / node (`#package`)
+- Variables and Constants
+  - Overrideable variables (`#var`)
+  - Fixed constants (`#let`)
+  - Powerful expressions (arithmetic, bitwise, string concatenation)
+- Doc-strings support (`//#`) for objects, fields, and variables
+- Pragmas (`//!`) for warning suppression / documentation
 
 ## Documentation
 

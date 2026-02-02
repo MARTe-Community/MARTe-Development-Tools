@@ -32,16 +32,17 @@ internal/
 
 Responsible for converting MARTe configuration text into structured data.
 
-*   **Lexer (`lexer.go`)**: Tokenizes the input stream. Handles MARTe specific syntax like `#package`, `//!` pragmas, and `//#` docstrings. Supports standard identifiers and `#`-prefixed identifiers.
-*   **Parser (`parser.go`)**: Recursive descent parser. Converts tokens into a `Configuration` object containing definitions, comments, and pragmas.
-*   **AST (`ast.go`)**: Defines the node types (`ObjectNode`, `Field`, `Value`, `VariableDefinition`, etc.). All nodes implement the `Node` interface providing position information.
+*   **Lexer (`lexer.go`)**: Tokenizes the input stream. Handles MARTe specific syntax like `#package`, `#let`, `//!` pragmas, and `//#` docstrings. Supports standard identifiers and `#`-prefixed identifiers. Recognizes advanced number formats (hex `0x`, binary `0b`).
+*   **Parser (`parser.go`)**: Recursive descent parser. Converts tokens into a `Configuration` object containing definitions, comments, and pragmas. Implements expression parsing with precedence.
+*   **AST (`ast.go`)**: Defines the node types (`ObjectNode`, `Field`, `Value`, `VariableDefinition`, `BinaryExpression`, etc.). All nodes implement the `Node` interface providing position information.
 
 ### 2. `internal/index`
 
 The brain of the system. It maintains a holistic view of the project.
 
 *   **ProjectTree**: The central data structure. It holds the root of the configuration hierarchy (`Root`), references, and isolated files.
-*   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments. It also stores locally defined variables in its `Variables` map.
+*   **ScanDirectory**: Recursively walks the project directory to find all `.marte` files, adding them to the tree even if they contain partial syntax errors.
+*   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments. It also stores locally defined variables and constants in its `Variables` map.
 *   **NodeMap**: A hash map index (`map[string][]*ProjectNode`) for $O(1)$ symbol lookups, optimizing `FindNode` operations.
 *   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `ResolveName` (exported) which respects lexical scoping rules by searching the hierarchy upwards from the reference's container, using `FindNode` for deep searches within each scope.
 
@@ -53,10 +54,10 @@ Ensures configuration correctness.
 *   **Checks**:
     *   **Structure**: Duplicate fields, invalid content.
     *   **Schema**: Unifies nodes with CUE schemas (loaded via `internal/schema`) to validate types and mandatory fields.
-    *   **Signals**: Verifies that signals referenced in GAMs exist in DataSources and match types.
+    *   **Signals**: Verifies that signals referenced in GAMs exist in DataSources and match types. Performs project-wide consistency checks for implicit signals.
     *   **Threading**: Checks `CheckDataSourceThreading` to ensure non-multithreaded DataSources are not shared across threads in the same state.
     *   **Ordering**: `CheckINOUTOrdering` verifies that for `INOUT` signals, the producing GAM appears before the consuming GAM in the thread's execution list.
-    *   **Variables**: `CheckVariables` validates variable values against their defined CUE types (e.g. `uint`, regex). `CheckUnresolvedVariables` ensures all used variables are defined.
+    *   **Variables**: `CheckVariables` validates variable values against their defined CUE types. Prevents external overrides of `#let` constants. `CheckUnresolvedVariables` ensures all used variables are defined.
     *   **Unused**: Detects unused GAMs and Signals (suppressible via pragmas).
 
 ### 4. `internal/lsp`
@@ -64,11 +65,13 @@ Ensures configuration correctness.
 Implements the Language Server Protocol.
 
 *   **Server (`server.go`)**: Handles JSON-RPC messages over stdio.
+*   **Evaluation**: Implements a lightweight expression evaluator to show evaluated values in Hover and completion snippets.
 *   **Incremental Sync**: Supports `textDocumentSync: 2`. `HandleDidChange` applies patches to the in-memory document buffers using `offsetAt` logic.
 *   **Features**:
-    *   `HandleCompletion`: Context-aware suggestions (Schema fields, Signal references, Class names).
-    *   `HandleHover`: Shows documentation, signal types, and usage analysis (e.g., "Used in GAMs: Controller (Input)").
+    *   `HandleCompletion`: Context-aware suggestions (Macros, Schema fields, Signal references, Class names).
+    *   `HandleHover`: Shows documentation (including docstrings for variables), evaluated signal types/dimensions, and usage analysis.
     *   `HandleDefinition` / `HandleReferences`: specific lookup using the `index`.
+    *   `HandleRename`: Project-wide renaming supporting objects, fields, and signals (including implicit ones).
 
 ### 5. `internal/builder`
 
@@ -76,6 +79,7 @@ Merges multiple MARTe files into a single output.
 
 *   **Logic**: It parses all input files, builds a temporary `ProjectTree`, and then reconstructs the source code.
 *   **Merging**: It interleaves fields and subnodes from different file fragments to produce a coherent single-file configuration, respecting the `#package` hierarchy.
+*   **Evaluation**: Evaluates all expressions and variable references into concrete MARTe values in the final output. Prevents overrides of `#let` constants.
 
 ### 6. `internal/schema`
 

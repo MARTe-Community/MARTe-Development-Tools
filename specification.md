@@ -71,22 +71,31 @@ The LSP server should provide the following capabilities:
 ### Grammar
 
 - `comment` : `//.*`
-- `configuration`: `definition+`
+- `configuration`: `(definition | macro)+`
 - `definition`: `field = value | node = subnode`
+- `macro`: `package | variable | constant`
 - `field`: `[a-zA-Z][a-zA-Z0-9_\-]*`
 - `node`: `[+$][a-zA-Z][a-zA-Z0-9_\-]*`
-- `subnode`: `{ definition+ }`
-- `value`: `string|int|float|bool|reference|array`
+- `subnode`: `{ (definition | macro)+ }`
+- `value`: `expression`
+- `expression`: `atom | binary_expr | unary_expr`
+- `atom`: `string | int | float | bool | reference | array | "(" expression ")"`
+- `binary_expr`: `expression operator expression`
+- `unary_expr`: `unary_operator expression`
+- `operator`: `+ | - | * | / | % | & | | | ^ | ..`
+- `unary_operator`: `- | !`
 - `int`: `/-?[0-9]+|0b[01]+|0x[0-9a-fA-F]+`
-- `float`: `-?[0-9]+\.[0-9]+|-?[0-9]+\.?[0-9]*e\-?[0-9]+`
+- `float`: `-?[0-9]+\.[0-9]+|-?[0-9]+\.?[0-9]*[eE][+-]?[0-9]+`
 - `bool`: `true|false`
 - `string`: `".*"`
-- `reference` : `string|.*`
-- `array`: `{ value }`
+- `reference` : `[a-zA-Z][a-zA-Z0-9_\-\.]* | @[a-zA-Z0-9_]+ | $[a-zA-Z0-9_]+`
+- `array`: `{ (value | ",")* }`
 
 #### Extended grammar
 
 - `package` : `#package URI`
+- `variable`: `#var NAME: TYPE [= expression]`
+- `constant`: `#let NAME: TYPE = expression`
 - `URI`: `PROJECT | PROJECT.PRJ_SUB_URI`
 - `PRJ_SUB_URI`: `NODE | NODE.PRJ_SUB_URI`
 - `docstring` : `//#.*`
@@ -97,13 +106,17 @@ The LSP server should provide the following capabilities:
 - **Nodes (`+` / `$`)**: The prefixes `+` and `$` indicate that the node represents an object.
   - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition (across all files where the node is defined).
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
+- **Variables (`#var`)**: Define overrideable parameters. Can be overridden via CLI (`-vVAR=VAL`).
+- **Constants (`#let`)**: Define fixed parameters. **Cannot** be overridden externally. Must have an initial value.
+- **Expressions**: Evaluated during build and displayed evaluated in LSP hover documentation.
+- **Docstrings (`//#`)**: Associated with the following definition (Node, Field, Variable, or Constant).
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored. Supported pragmas:
   - `//!unused: REASON` or `//!ignore(unused): REASON` - Suppress "Unused GAM" or "Unused Signal" warnings.
   - `//!implicit: REASON` or `//!ignore(implicit): REASON` - Suppress "Implicitly Defined Signal" warnings.
-  - `//!allow(WARNING_TYPE): REASON` or `//!ignore(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`).
+  - `//!allow(WARNING_TYPE): REASON` or `//!ignore(WARNING_TYPE): REASON` - Global suppression for a specific warning type across the whole project (supported: `unused`, `implicit`, `not_consumed`, `not_produced`).
   - `//!cast(DEF_TYPE, CUR_TYPE): REASON` - Suppress "Type Inconsistency" errors if types match.
-- **Structure**: A configuration is composed by one or more definitions.
-- **Strictness**: Any content that is not a valid comment (or pragma/docstring) or a valid definition (Field, Node, or Object) is **not allowed** and must generate a parsing error.
+- **Structure**: A configuration is composed by one or more definitions or macros.
+- **Strictness**: Any content that is not a valid comment (or pragma/docstring) or a valid definition/macro is **not allowed** and must generate a parsing error.
 
 ### Core MARTe Classes
 
@@ -124,6 +137,7 @@ MARTe configurations typically involve several main categories of objects:
     - All signal definitions **must** include a `Type` field with a valid value.
     - **Size Information**: Signals can optionally include `NumberOfDimensions` and `NumberOfElements` fields. If not explicitly defined, these default to `1`.
     - **Property Matching**: Signal references in GAMs must match the properties (`Type`, `NumberOfElements`, `NumberOfDimensions`) of the defined signal in the `DataSource`.
+    - **Consistency**: Implicit signals used across different GAMs must share the same `Type` and size properties.
     - **Extensibility**: Signal definitions can include additional fields as required by the specific application context.
 - **Signal Reference Syntax**:
   - Signals are referenced or defined in `InputSignals` or `OutputSignals` sub-nodes using one of the following formats:
@@ -145,6 +159,7 @@ MARTe configurations typically involve several main categories of objects:
         ```
         In this case, `Alias` points to the DataSource signal name.
   - **Implicit Definition Constraint**: If a signal is implicitly defined within a GAM, the `Type` field **must** be present in the reference block to define the signal's properties.
+- **Renaming**: Renaming a signal (explicit or implicit) via LSP updates all its usages across all GAMs and DataSources in the project. Local aliases (`Alias = Name`) are preserved while their targets are updated.
 - **Directionality**: DataSources and their signals are directional:
   - `Input` (IN): Only providing data. Signals can only be used in `InputSignals`.
   - `Output` (OUT): Only receiving data. Signals can only be used in `OutputSignals`.
@@ -155,9 +170,11 @@ MARTe configurations typically involve several main categories of objects:
 
 The tool must build an index of the configuration to support LSP features and validations:
 
+- **Recursive Indexing**: All `.marte` files in the project root and subdirectories are indexed automatically.
 - **GAMs**: Referenced in `$APPLICATION.States.$STATE_NAME.Threads.$THREAD_NAME.Functions` (where `$APPLICATION` is a `RealTimeApplication` node).
 - **Signals**: Referenced within the `InputSignals` and `OutputSignals` sub-nodes of a GAM.
 - **DataSources**: Referenced within the `DataSource` field of a signal reference/definition.
+- **Variables/Constants**: Referenced via `@NAME` or `$NAME` in expressions.
 - **General References**: Objects can also be referenced in other fields (e.g., as targets for messages).
 
 ### Validation Rules

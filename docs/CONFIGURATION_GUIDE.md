@@ -20,7 +20,7 @@ Objects are defined using `+` (public/instantiated) or `$` (template/class-like)
 ### Fields and Values
 - **Fields**: Alphanumeric identifiers (e.g., `Timeout`, `CycleTime`).
 - **Values**:
-  - Integers: `10`, `-5`, `0xFA`
+  - Integers: `10`, `-5`, `0xFA`, `0b1011`
   - Floats: `3.14`, `1e-3`
   - Strings: `"Text"`
   - Booleans: `true`, `false`
@@ -90,6 +90,28 @@ Common classes (`RealTimeApplication`, `StateMachine`, `IOGAM`, etc.) are built-
 ### Custom Schemas
 You can extend the schema by creating a `.marte_schema.cue` file in your project root.
 
+**Example: Adding a custom GAM**
+
+```cue
+package schema
+
+#Classes: {
+    MyCustomGAM: {
+        // Metadata for Validator/LSP
+        #meta: {
+            direction: "INOUT" // "IN", "OUT", "INOUT"
+            multithreaded: false
+        }
+        
+        // Fields
+        Gain: float
+        Offset?: float // Optional
+        InputSignals: {...}
+        OutputSignals: {...}
+    }
+}
+```
+
 ## 4. Variables and Constants
 
 You can define variables to parameterize your configuration.
@@ -120,51 +142,38 @@ Constants are like variables but **cannot** be overridden externally. They are i
 }
 ```
 
-### Expressions
-Variables and constants can be used in expressions:
-- Arithmetic: `+`, `-`, `*`, `/`, `%`
-- Bitwise: `&`, `|`, `^`
-- String Concatenation: `..`
+### Reference Syntax
+Reference a variable or constant using `$` or `@`:
 
 ```marte
-#var BasePath: string = "/tmp"
-#let LogFile: string = @BasePath .. "/app.log"
+Field = $MyVar
+// or
+Field = @MyVar
+```
+
+### Expressions
+You can use operators in field values. Supported operators:
+- **Math**: `+`, `-`, `*`, `/`, `%`, `^` (XOR), `&`, `|` (Bitwise)
+- **String Concatenation**: `..`
+- **Parentheses**: `(...)` for grouping
+
+```marte
+Field1 = 10 + 20 * 2  // 50
+Field2 = "Hello " .. "World"
+Field3 = ($MyVar + 5) * 2
+```
+
+### Build Override
+You can override variable values during build (only for `#var`):
+
+```bash
+mdt build -vMyVar=200 src/*.marte
 ```
 
 ### Docstrings
 Docstrings (`//#`) work for variables and constants and are displayed in the LSP hover information.
 
-## 5. Pragmas
-Macros can be controlled via pragmas:
-- `//! allow(implicit)`: Suppress warnings for implicitly defined signals.
-- `//! allow(unused)`: Suppress warnings for unused signals/GAMs.
-- `//! ignore(not_consumed)`: Suppress ordering warnings for specific signals.
-
-Pragmas can be global (top-level) or local to a node.
-
-**Example: Adding a custom GAM**
-
-```cue
-package schema
-
-#Classes: {
-    MyCustomGAM: {
-        // Metadata for Validator/LSP
-        #meta: {
-            direction: "INOUT" // "IN", "OUT", "INOUT"
-            multithreaded: false
-        }
-        
-        // Fields
-        Gain: float
-        Offset?: float // Optional
-        InputSignals: {...}
-        OutputSignals: {...}
-    }
-}
-```
-
-## 4. Multi-file Projects
+## 5. Multi-file Projects
 
 You can split your configuration into multiple files.
 
@@ -186,7 +195,7 @@ The `build` command merges all files.
 mdt build -o final.marte src/*.marte
 ```
 
-## 5. Pragmas (Suppressing Warnings)
+## 6. Pragmas (Suppressing Warnings)
 
 If validation is too strict, you can suppress warnings using pragmas (`//!`).
 
@@ -215,41 +224,11 @@ If validation is too strict, you can suppress warnings using pragmas (`//!`).
   }
   ```
 
-## 6. Variables
-
-You can define variables using `#var`. The type expression supports CUE syntax.
-
-```marte
-#var MyVar: uint32 = 100
-#var Env: "PROD" | "DEV" = "DEV"
-```
-
-### Usage
-Reference a variable using `$` (preferred) or `@`:
-
-```marte
-Field = $MyVar
-// or
-Field = @MyVar
-```
-
-### Expressions
-You can use operators in field values. Supported operators:
-- **Math**: `+`, `-`, `*`, `/`, `%`, `^` (XOR), `&`, `|` (Bitwise)
-- **String Concatenation**: `..`
-
-```marte
-Field1 = 10 + 20 * 2  // 50
-Field2 = "Hello " .. "World"
-Field3 = $MyVar + 5
-```
-
-### Build Override
-You can override variable values during build:
-
-```bash
-mdt build -vMyVar=200 -vEnv="PROD" src/*.marte
-```
+- **Global Suppression**:
+  ```marte
+  //! allow(unused)
+  //! allow(implicit)
+  ```
 
 ## 7. Validation Rules (Detail)
 
@@ -267,5 +246,4 @@ To allow sharing, the DataSource class in the schema must have `#meta: multithre
 ### Implicit vs Explicit Signals
 - **Explicit**: Signal defined in `DataSource.Signals`.
 - **Implicit**: Signal used in GAM but not defined in DataSource. `mdt` reports a warning unless suppressed.
-
-
+- **Consistency**: All references to the same logical signal (same name in same DataSource) must share the same `Type` and size properties.
