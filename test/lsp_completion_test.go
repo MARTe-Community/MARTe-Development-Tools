@@ -163,7 +163,7 @@ $App = {
 		}
 	})
 
-		t.Run("Scope-aware suggestions", func(t *testing.T) {
+	t.Run("Scope-aware suggestions", func(t *testing.T) {
 		setup()
 		// Define a project DataSource in one file
 		cfg1, _ := parser.NewParser("#package MYPROJ.Data\n+ProjectDS = { Class = FileReader +Signals = { S1 = { Type = int32 } } }").Parse()
@@ -315,6 +315,68 @@ package schema
 			for _, item := range list.Items {
 				t.Logf("Suggestion: %s", item.Label)
 			}
+		}
+	})
+
+	t.Run("Suggest Variables", func(t *testing.T) {
+		setup()
+		content := `
+#var MyVar: uint = 10
++App = {
+    Field = 
+}
+`
+		lsp.Documents[uri] = content
+		p := parser.NewParser(content)
+		cfg, _ := p.Parse()
+		lsp.Tree.AddFile(path, cfg)
+
+		// 1. Triggered by =
+		params := lsp.CompletionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position:     lsp.Position{Line: 3, Character: 12}, // After "Field = "
+		}
+		list := lsp.HandleCompletion(params)
+		if list == nil {
+			t.Fatal("Expected suggestions")
+		}
+
+		found := false
+		for _, item := range list.Items {
+			if item.Label == "@MyVar" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Expected @MyVar in suggestions for =")
+		}
+
+		// 2. Triggered by $
+		// "Field = $"
+		lsp.Documents[uri] = `
+#var MyVar: uint = 10
++App = {
+    Field = $
+}
+`
+		params2 := lsp.CompletionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position:     lsp.Position{Line: 3, Character: 13}, // After "Field = $"
+		}
+		list2 := lsp.HandleCompletion(params2)
+		if list2 == nil {
+			t.Fatal("Expected suggestions for $")
+		}
+		found = false
+		for _, item := range list2.Items {
+			if item.Label == "MyVar" { // suggestVariables returns "MyVar"
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("Expected MyVar in suggestions for $")
 		}
 	})
 }

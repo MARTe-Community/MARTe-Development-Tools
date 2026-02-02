@@ -265,7 +265,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				"documentFormattingProvider": true,
 				"renameProvider":             true,
 				"completionProvider": map[string]any{
-					"triggerCharacters": []string{"=", " "},
+					"triggerCharacters": []string{"=", " ", "@"},
 				},
 			},
 		})
@@ -675,6 +675,20 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 
 	prefix := lineStr[:col]
 
+	// Case 3: Variable completion
+	varRegex := regexp.MustCompile(`([@$])([a-zA-Z0-9_]*)$`)
+	if matches := varRegex.FindStringSubmatch(prefix); matches != nil {
+		container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		if container == nil {
+			if iso, ok := Tree.IsolatedFiles[path]; ok {
+				container = iso
+			} else {
+				container = Tree.Root
+			}
+		}
+		return suggestVariables(container)
+	}
+
 	// Case 1: Assigning a value (Ends with "=" or "= ")
 	if strings.Contains(prefix, "=") {
 		lastIdx := strings.LastIndex(prefix, "=")
@@ -907,20 +921,41 @@ func suggestFieldValues(container *index.ProjectNode, field string, path string)
 		root = Tree.Root
 	}
 
+	var items []CompletionItem
+
 	if field == "DataSource" {
-		return suggestObjects(root, "DataSource")
-	}
-	if field == "Functions" {
-		return suggestObjects(root, "GAM")
-	}
-	if field == "Type" {
-		return suggestSignalTypes()
+		if list := suggestObjects(root, "DataSource"); list != nil {
+			items = append(items, list.Items...)
+		}
+	} else if field == "Functions" {
+		if list := suggestObjects(root, "GAM"); list != nil {
+			items = append(items, list.Items...)
+		}
+	} else if field == "Type" {
+		if list := suggestSignalTypes(); list != nil {
+			items = append(items, list.Items...)
+		}
+	} else {
+		if list := suggestCUEEnums(container, field); list != nil {
+			items = append(items, list.Items...)
+		}
 	}
 
-	if list := suggestCUEEnums(container, field); list != nil {
-		return list
+	// Add variables
+	vars := suggestVariables(container)
+	if vars != nil {
+		for _, item := range vars.Items {
+			// Create copy to modify label
+			newItem := item
+			newItem.Label = "@" + newItem.Label
+			newItem.InsertText = "@" + item.Label
+			items = append(items, newItem)
+		}
 	}
 
+	if len(items) > 0 {
+		return &CompletionList{Items: items}
+	}
 	return nil
 }
 
@@ -1517,4 +1552,32 @@ func respond(id any, result any) {
 func send(msg any) {
 	body, _ := json.Marshal(msg)
 	fmt.Fprintf(Output, "Content-Length: %d\r\n\r\n%s", len(body), body)
+}
+
+func suggestVariables(container *index.ProjectNode) *CompletionList {
+	items := []CompletionItem{}
+	seen := make(map[string]bool)
+
+	curr := container
+	for curr != nil {
+		for name, info := range curr.Variables {
+			if !seen[name] {
+				seen[name] = true
+
+				doc := ""
+				if info.Def.DefaultValue != nil {
+					doc = fmt.Sprintf("Default: %s", valueToString(info.Def.DefaultValue))
+				}
+
+				items = append(items, CompletionItem{
+					Label:         name,
+					Kind:          6, // Variable
+					Detail:        fmt.Sprintf("Variable (%s)", info.Def.TypeExpr),
+					Documentation: doc,
+				})
+			}
+		}
+		curr = curr.Parent
+	}
+	return &CompletionList{Items: items}
 }
