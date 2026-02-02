@@ -236,6 +236,108 @@ func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) i
 			arr = append(arr, v.valueToInterface(e, ctx))
 		}
 		return arr
+	case *parser.BinaryExpression:
+		left := v.valueToInterface(t.Left, ctx)
+		right := v.valueToInterface(t.Right, ctx)
+		return v.evaluateBinary(left, t.Operator.Type, right)
+	case *parser.UnaryExpression:
+		val := v.valueToInterface(t.Right, ctx)
+		return v.evaluateUnary(t.Operator.Type, val)
+	}
+	return nil
+}
+
+func (v *Validator) evaluateBinary(left interface{}, op parser.TokenType, right interface{}) interface{} {
+	if left == nil || right == nil {
+		return nil
+	}
+
+	if op == parser.TokenConcat {
+		return fmt.Sprintf("%v%v", left, right)
+	}
+
+	toInt := func(val interface{}) (int64, bool) {
+		switch v := val.(type) {
+		case int64:
+			return v, true
+		case int:
+			return int64(v), true
+		}
+		return 0, false
+	}
+
+	toFloat := func(val interface{}) (float64, bool) {
+		switch v := val.(type) {
+		case float64:
+			return v, true
+		case int64:
+			return float64(v), true
+		case int:
+			return float64(v), true
+		}
+		return 0, false
+	}
+
+	if l, ok := toInt(left); ok {
+		if r, ok := toInt(right); ok {
+			switch op {
+			case parser.TokenPlus:
+				return l + r
+			case parser.TokenMinus:
+				return l - r
+			case parser.TokenStar:
+				return l * r
+			case parser.TokenSlash:
+				if r != 0 {
+					return l / r
+				}
+			case parser.TokenPercent:
+				if r != 0 {
+					return l % r
+				}
+			}
+		}
+	}
+
+	if l, ok := toFloat(left); ok {
+		if r, ok := toFloat(right); ok {
+			switch op {
+			case parser.TokenPlus:
+				return l + r
+			case parser.TokenMinus:
+				return l - r
+			case parser.TokenStar:
+				return l * r
+			case parser.TokenSlash:
+				if r != 0 {
+					return l / r
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (v *Validator) evaluateUnary(op parser.TokenType, val interface{}) interface{} {
+	if val == nil {
+		return nil
+	}
+
+	switch op {
+	case parser.TokenMinus:
+		switch v := val.(type) {
+		case int64:
+			return -v
+		case float64:
+			return -v
+		}
+	case parser.TokenSymbol: // ! is Symbol?
+		// Parser uses TokenSymbol for ! ?
+		// Lexer: '!' -> Symbol.
+		if b, ok := val.(bool); ok {
+			return !b
+		}
 	}
 	return nil
 }

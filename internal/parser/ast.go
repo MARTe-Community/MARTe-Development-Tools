@@ -153,3 +153,12 @@ type BinaryExpression struct {
 
 func (b *BinaryExpression) Pos() Position { return b.Position }
 func (b *BinaryExpression) isValue()      {}
+
+type UnaryExpression struct {
+	Position Position
+	Operator Token
+	Right    Value
+}
+
+func (u *UnaryExpression) Pos() Position { return u.Position }
+func (u *UnaryExpression) isValue()      {}

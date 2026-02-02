@@ -147,18 +147,12 @@ func (l *Lexer) NextToken() Token {
 		case ']':
 			return l.emit(TokenRBracket)
 		case '+':
-			if unicode.IsSpace(l.peek()) {
+			if unicode.IsSpace(l.peek()) || unicode.IsDigit(l.peek()) {
 				return l.emit(TokenPlus)
 			}
 			return l.lexObjectIdentifier()
 		case '-':
-			if unicode.IsDigit(l.peek()) {
-				return l.lexNumber()
-			}
-			if unicode.IsSpace(l.peek()) {
-				return l.emit(TokenMinus)
-			}
-			return l.lexIdentifier()
+			return l.emit(TokenMinus)
 		case '*':
 			return l.emit(TokenStar)
 		case '/':
@@ -242,13 +236,28 @@ func (l *Lexer) lexString() Token {
 }
 
 func (l *Lexer) lexNumber() Token {
-	for {
-		r := l.next()
-		if unicode.IsDigit(r) || unicode.IsLetter(r) || r == '.' || r == '-' || r == '+' {
-			continue
+	// Consume initial digits (already started)
+	l.lexDigits()
+
+	if l.peek() == '.' {
+		l.next()
+		l.lexDigits()
+	}
+
+	if r := l.peek(); r == 'e' || r == 'E' {
+		l.next()
+		if p := l.peek(); p == '+' || p == '-' {
+			l.next()
 		}
-		l.backup()
-		return l.emit(TokenNumber)
+		l.lexDigits()
+	}
+
+	return l.emit(TokenNumber)
+}
+
+func (l *Lexer) lexDigits() {
+	for unicode.IsDigit(l.peek()) {
+		l.next()
 	}
 }
 
@@ -318,7 +327,7 @@ func (l *Lexer) lexHashIdentifier() Token {
 func (l *Lexer) lexVariableReference() Token {
 	for {
 		r := l.next()
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
 			continue
 		}
 		l.backup()

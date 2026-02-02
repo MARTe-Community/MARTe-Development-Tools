@@ -299,8 +299,27 @@ func (p *Parser) parseAtom() (Value, bool) {
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
 	case TokenVariableReference:
 		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
+	case TokenMinus:
+		val, ok := p.parseAtom()
+		if !ok {
+			return nil, false
+		}
+		return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
 	case TokenObjectIdentifier:
 		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
+	case TokenSymbol:
+		if tok.Value == "(" {
+			val, ok := p.parseExpression(0)
+			if !ok {
+				return nil, false
+			}
+			if next := p.next(); next.Type != TokenSymbol || next.Value != ")" {
+				p.addError(next.Position, "expected )")
+				return nil, false
+			}
+			return val, true
+		}
+		fallthrough
 	case TokenLBrace:
 		arr := &ArrayValue{Position: tok.Position}
 		for {
