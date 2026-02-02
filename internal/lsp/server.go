@@ -973,37 +973,41 @@ func suggestFieldValues(container *index.ProjectNode, field string, path string)
 	}
 
 	var items []CompletionItem
-
-	if field == "DataSource" {
+	ok := false
+	switch field {
+	case "DataSource":
 		if list := suggestObjects(root, "DataSource"); list != nil {
 			items = append(items, list.Items...)
 		}
-	} else if field == "Functions" {
+		ok = true
+	case "Functions":
 		if list := suggestObjects(root, "GAM"); list != nil {
 			items = append(items, list.Items...)
 		}
-	} else if field == "Type" {
+		ok = true
+	case "Type":
 		if list := suggestSignalTypes(); list != nil {
 			items = append(items, list.Items...)
 		}
-	} else {
+		ok = true
+	default:
 		if list := suggestCUEEnums(container, field); list != nil {
 			items = append(items, list.Items...)
 		}
 	}
-
-	// Add variables
-	vars := suggestVariables(container)
-	if vars != nil {
-		for _, item := range vars.Items {
-			// Create copy to modify label
-			newItem := item
-			newItem.Label = "@" + newItem.Label
-			newItem.InsertText = "@" + item.Label
-			items = append(items, newItem)
+	if !ok {
+		// Add variables
+		vars := suggestVariables(container)
+		if vars != nil {
+			for _, item := range vars.Items {
+				// Create copy to modify label
+				newItem := item
+				newItem.Label = "@" + newItem.Label
+				newItem.InsertText = "@" + item.Label
+				items = append(items, newItem)
+			}
 		}
 	}
-
 	if len(items) > 0 {
 		return &CompletionList{Items: items}
 	}
