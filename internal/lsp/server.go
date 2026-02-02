@@ -716,9 +716,16 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	return nil
 }
 
-func suggestGAMSignals(_ *index.ProjectNode, direction string) *CompletionList {
+func suggestGAMSignals(container *index.ProjectNode, direction string) *CompletionList {
 	var items []CompletionItem
 
+	// Find scope root
+	root := container
+	for root.Parent != nil {
+		root = root.Parent
+	}
+
+	var walk func(*index.ProjectNode)
 	processNode := func(node *index.ProjectNode) {
 		if !isDataSource(node) {
 			return
@@ -776,7 +783,13 @@ func suggestGAMSignals(_ *index.ProjectNode, direction string) *CompletionList {
 		}
 	}
 
-	Tree.Walk(processNode)
+	walk = func(n *index.ProjectNode) {
+		processNode(n)
+		for _, child := range n.Children {
+			walk(child)
+		}
+	}
+	walk(root)
 
 	if len(items) > 0 {
 		return &CompletionList{Items: items}

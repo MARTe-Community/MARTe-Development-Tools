@@ -182,7 +182,13 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	}
 
 	if config.Package == nil {
-		pt.populateNode(pt.Root, file, config)
+		node := &ProjectNode{
+			Children:  make(map[string]*ProjectNode),
+			Metadata:  make(map[string]string),
+			Variables: make(map[string]VariableInfo),
+		}
+		pt.IsolatedFiles[file] = node
+		pt.populateNode(node, file, config)
 		return
 	}
 

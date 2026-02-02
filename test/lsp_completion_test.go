@@ -193,8 +193,8 @@ $App = {
 				}
 			}
 		}
-		if !foundProjectDS {
-			t.Error("Expected ProjectDS in isolated file suggestions (now shared root)")
+		if foundProjectDS {
+			t.Error("Did not expect ProjectDS in isolated file suggestions (isolation)")
 		}
 
 		// Completion in a project file
