@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestLSPIncrementalSync(t *testing.T) {
@@ -106,5 +108,84 @@ func TestLSPMalformedParams(t *testing.T) {
 	// Should respond with nil result
 	if !strings.Contains(output, `"result":null`) {
 		t.Errorf("Expected nil result for malformed params, got: %s", output)
+	}
+}
+
+func TestLSPDispatch(t *testing.T) {
+	var buf bytes.Buffer
+	lsp.Output = &buf
+
+	// Initialize
+	msgInit := &lsp.JsonRpcMessage{Method: "initialize", ID: 1, Params: json.RawMessage(`{}`)}
+	lsp.HandleMessage(msgInit)
+
+	// DidOpen
+	msgOpen := &lsp.JsonRpcMessage{Method: "textDocument/didOpen", Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte","text":""}}`)}
+	lsp.HandleMessage(msgOpen)
+
+	// DidChange
+	msgChange := &lsp.JsonRpcMessage{Method: "textDocument/didChange", Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte","version":2},"contentChanges":[{"text":"A"}]}`)}
+	lsp.HandleMessage(msgChange)
+
+	// Hover
+	msgHover := &lsp.JsonRpcMessage{Method: "textDocument/hover", ID: 2, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"position":{"line":0,"character":0}}`)}
+	lsp.HandleMessage(msgHover)
+
+	// Definition
+	msgDef := &lsp.JsonRpcMessage{Method: "textDocument/definition", ID: 3, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"position":{"line":0,"character":0}}`)}
+	lsp.HandleMessage(msgDef)
+
+	// References
+	msgRef := &lsp.JsonRpcMessage{Method: "textDocument/references", ID: 4, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"position":{"line":0,"character":0},"context":{"includeDeclaration":true}}`)}
+	lsp.HandleMessage(msgRef)
+
+	// Completion
+	msgComp := &lsp.JsonRpcMessage{Method: "textDocument/completion", ID: 5, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"position":{"line":0,"character":0}}`)}
+	lsp.HandleMessage(msgComp)
+
+	// Formatting
+	msgFmt := &lsp.JsonRpcMessage{Method: "textDocument/formatting", ID: 6, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"options":{"tabSize":4,"insertSpaces":true}}`)}
+	lsp.HandleMessage(msgFmt)
+
+	// Rename
+	msgRename := &lsp.JsonRpcMessage{Method: "textDocument/rename", ID: 7, Params: json.RawMessage(`{"textDocument":{"uri":"file://d.marte"},"position":{"line":0,"character":0},"newName":"B"}`)}
+	lsp.HandleMessage(msgRename)
+}
+
+func TestLSPVariableDefinition(t *testing.T) {
+	lsp.Tree = index.NewProjectTree()
+	lsp.Documents = make(map[string]string)
+	
+	content := `
+#var MyVar: int = 10
++Obj = {
+    Field = @MyVar
+}
+`
+	uri := "file://var_def.marte"
+	lsp.Documents[uri] = content
+	
+	p := parser.NewParser(content)
+	cfg, _ := p.Parse()
+	lsp.Tree.AddFile("var_def.marte", cfg)
+	lsp.Tree.ResolveReferences()
+	
+	params := lsp.DefinitionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+		Position:     lsp.Position{Line: 3, Character: 13},
+	}
+	
+	res := lsp.HandleDefinition(params)
+	if res == nil {
+		t.Fatal("Definition not found for variable")
+	}
+	
+	locs, ok := res.([]lsp.Location)
+	if !ok || len(locs) == 0 {
+		t.Fatal("Expected location list")
+	}
+	
+	if locs[0].Range.Start.Line != 1 {
+		t.Errorf("Expected line 1, got %d", locs[0].Range.Start.Line)
 	}
 }

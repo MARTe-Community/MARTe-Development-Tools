@@ -10,6 +10,9 @@ import (
 )
 
 func TestLoggerPrint(t *testing.T) {
+	// Direct call for coverage
+	logger.Println("Coverage check")
+
 	if os.Getenv("TEST_LOGGER_PRINT") == "1" {
 		logger.Printf("Test Printf %d", 123)
 		logger.Println("Test Println")

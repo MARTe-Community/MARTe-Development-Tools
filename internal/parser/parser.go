@@ -319,6 +319,13 @@ func (p *Parser) parseAtom() (Value, bool) {
 			}
 			return val, true
 		}
+		if tok.Value == "!" {
+			val, ok := p.parseAtom()
+			if !ok {
+				return nil, false
+			}
+			return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
+		}
 		fallthrough
 	case TokenLBrace:
 		arr := &ArrayValue{Position: tok.Position}

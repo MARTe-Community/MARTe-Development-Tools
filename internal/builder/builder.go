@@ -255,24 +255,7 @@ func (b *Builder) compute(left parser.Value, op parser.Token, right parser.Value
 		return &parser.StringValue{Value: s1 + s2, Quoted: true}
 	}
 
-	lF, lIsF := b.valToFloat(left)
-	rF, rIsF := b.valToFloat(right)
-
-	if lIsF || rIsF {
-		res := 0.0
-		switch op.Type {
-		case parser.TokenPlus:
-			res = lF + rF
-		case parser.TokenMinus:
-			res = lF - rF
-		case parser.TokenStar:
-			res = lF * rF
-		case parser.TokenSlash:
-			res = lF / rF
-		}
-		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
-	}
-
+	// Try Integer arithmetic first
 	lI, lIsI := b.valToInt(left)
 	rI, rIsI := b.valToInt(right)
 
@@ -301,6 +284,25 @@ func (b *Builder) compute(left parser.Value, op parser.Token, right parser.Value
 			res = lI ^ rI
 		}
 		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
+	}
+
+	// Fallback to Float arithmetic
+	lF, lIsF := b.valToFloat(left)
+	rF, rIsF := b.valToFloat(right)
+
+	if lIsF || rIsF {
+		res := 0.0
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lF + rF
+		case parser.TokenMinus:
+			res = lF - rF
+		case parser.TokenStar:
+			res = lF * rF
+		case parser.TokenSlash:
+			res = lF / rF
+		}
+		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
 	}
 
 	return left
