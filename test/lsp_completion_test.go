@@ -352,12 +352,12 @@ package schema
 			t.Error("Expected @MyVar in suggestions for =")
 		}
 
-		// 2. Triggered by $
-		// "Field = $"
+		// 2. Triggered by @
+		// "Field = @"
 		lsp.Documents[uri] = `
 #var MyVar: uint = 10
 +App = {
-    Field = $
+    Field = @
 }
 `
 		params2 := lsp.CompletionParams{
@@ -366,7 +366,7 @@ package schema
 		}
 		list2 := lsp.HandleCompletion(params2)
 		if list2 == nil {
-			t.Fatal("Expected suggestions for $")
+			t.Fatal("Expected suggestions for @")
 		}
 		found = false
 		for _, item := range list2.Items {
@@ -376,7 +376,7 @@ package schema
 			}
 		}
 		if !found {
-			t.Error("Expected MyVar in suggestions for $")
+			t.Error("Expected MyVar in suggestions for @")
 		}
 	})
 }

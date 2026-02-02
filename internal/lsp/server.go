@@ -679,7 +679,7 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	prefix := lineStr[:col]
 
 	// Case 3: Variable completion
-	varRegex := regexp.MustCompile(`([@$])([a-zA-Z0-9_]*)$`)
+	varRegex := regexp.MustCompile(`([@])([a-zA-Z0-9_]*)$`)
 	if matches := varRegex.FindStringSubmatch(prefix); matches != nil {
 		container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 		if container == nil {
@@ -1785,7 +1785,7 @@ func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
 func evaluate(val parser.Value, ctx *index.ProjectNode) parser.Value {
 	switch v := val.(type) {
 	case *parser.VariableReferenceValue:
-		name := strings.TrimLeft(v.Name, "@$")
+		name := strings.TrimLeft(v.Name, "@")
 		if info := Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return evaluate(info.Def.DefaultValue, ctx)
@@ -1805,8 +1805,14 @@ func evaluate(val parser.Value, ctx *index.ProjectNode) parser.Value {
 
 func compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
 	if op.Type == parser.TokenConcat {
-		s1 := valueToString(left, nil)
-		s2 := valueToString(right, nil)
+		getRaw := func(v parser.Value) string {
+			if s, ok := v.(*parser.StringValue); ok {
+				return s.Value
+			}
+			return valueToString(v, nil)
+		}
+		s1 := getRaw(left)
+		s2 := getRaw(right)
 		return &parser.StringValue{Value: s1 + s2, Quoted: true}
 	}
 
