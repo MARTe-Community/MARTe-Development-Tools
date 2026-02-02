@@ -576,6 +576,8 @@ func HandleHover(params HoverParams) *Hover {
 		return nil
 	}
 
+	container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+
 	var content string
 
 	if res.Node != nil {
@@ -589,7 +591,7 @@ func HandleHover(params HoverParams) *Hover {
 	} else if res.Variable != nil {
 		content = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", res.Variable.Name, res.Variable.TypeExpr)
 		if res.Variable.DefaultValue != nil {
-			content += fmt.Sprintf("\nDefault: `%s`", valueToString(res.Variable.DefaultValue))
+			content += fmt.Sprintf("\nDefault: `%s`", valueToString(res.Variable.DefaultValue, container))
 		}
 	} else if res.Reference != nil {
 		targetName := "Unresolved"
@@ -605,7 +607,7 @@ func HandleHover(params HoverParams) *Hover {
 			targetName = v.Name
 			fullInfo = fmt.Sprintf("**Variable**: `@%s`\nType: `%s`", v.Name, v.TypeExpr)
 			if v.DefaultValue != nil {
-				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue))
+				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue, container))
 			}
 		}
 
@@ -629,7 +631,8 @@ func HandleHover(params HoverParams) *Hover {
 	}
 }
 
-func valueToString(val parser.Value) string {
+func valueToString(val parser.Value, ctx *index.ProjectNode) string {
+	val = evaluate(val, ctx)
 	switch v := val.(type) {
 	case *parser.StringValue:
 		if v.Quoted {
@@ -649,7 +652,7 @@ func valueToString(val parser.Value) string {
 	case *parser.ArrayValue:
 		elements := []string{}
 		for _, e := range v.Elements {
-			elements = append(elements, valueToString(e))
+			elements = append(elements, valueToString(e, ctx))
 		}
 		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
 	default:
@@ -1292,6 +1295,55 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		info += fmt.Sprintf("\n\n%s", node.Doc)
 	}
 
+	// Check if Implicit Signal peers exist
+	if ds, _ := getSignalInfo(node); ds != nil {
+		peers := findSignalPeers(node)
+
+		// 1. Explicit Definition Fields
+		var defNode *index.ProjectNode
+		for _, p := range peers {
+			if p.Parent != nil && p.Parent.Name == "Signals" {
+				defNode = p
+				break
+			}
+		}
+
+		if defNode != nil {
+			for _, frag := range defNode.Fragments {
+				for _, def := range frag.Definitions {
+					if f, ok := def.(*parser.Field); ok {
+						key := f.Name
+						if key != "Type" && key != "NumberOfElements" && key != "NumberOfDimensions" && key != "Class" {
+							val := valueToString(f.Value, defNode)
+							info += fmt.Sprintf("\n**%s**: `%s`", key, val)
+						}
+					}
+				}
+			}
+		}
+
+		extraInfo := ""
+		for _, p := range peers {
+			if (p.Parent.Name == "InputSignals" || p.Parent.Name == "OutputSignals") && isGAM(p.Parent.Parent) {
+				gamName := p.Parent.Parent.RealName
+				for _, frag := range p.Fragments {
+					for _, def := range frag.Definitions {
+						if f, ok := def.(*parser.Field); ok {
+							key := f.Name
+							if key != "DataSource" && key != "Alias" && key != "Type" && key != "Class" && key != "NumberOfElements" && key != "NumberOfDimensions" {
+								val := valueToString(f.Value, p)
+								extraInfo += fmt.Sprintf("\n- **%s** (%s): `%s`", key, gamName, val)
+							}
+						}
+					}
+				}
+			}
+		}
+		if extraInfo != "" {
+			info += "\n\n**Usage Details**:" + extraInfo
+		}
+	}
+
 	// Find references
 	var refs []string
 	for _, ref := range Tree.References {
@@ -1440,6 +1492,81 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 	}
 
 	if targetNode != nil {
+		// Special handling for Signals (Implicit/Explicit)
+		if ds, _ := getSignalInfo(targetNode); ds != nil {
+			peers := findSignalPeers(targetNode)
+			seenPeers := make(map[*index.ProjectNode]bool)
+
+			for _, peer := range peers {
+				if seenPeers[peer] {
+					continue
+				}
+				seenPeers[peer] = true
+
+				// Rename Peer Definition
+				prefix := ""
+				if len(peer.RealName) > 0 {
+					first := peer.RealName[0]
+					if first == '+' || first == '$' {
+						prefix = string(first)
+					}
+				}
+				normNewName := strings.TrimLeft(params.NewName, "+$")
+				finalDefName := prefix + normNewName
+
+				hasAlias := false
+				for _, frag := range peer.Fragments {
+					for _, def := range frag.Definitions {
+						if f, ok := def.(*parser.Field); ok && f.Name == "Alias" {
+							hasAlias = true
+						}
+					}
+				}
+
+				if !hasAlias {
+					for _, frag := range peer.Fragments {
+						if frag.IsObject {
+							rng := Range{
+								Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+								End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(peer.RealName)},
+							}
+							addEdit(frag.File, rng, finalDefName)
+						}
+					}
+				}
+
+				// Rename References to this Peer
+				for _, ref := range Tree.References {
+					if ref.Target == peer {
+						// Handle qualified names
+						if strings.Contains(ref.Name, ".") {
+							if strings.HasSuffix(ref.Name, "."+peer.Name) {
+								prefixLen := len(ref.Name) - len(peer.Name)
+								rng := Range{
+									Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + prefixLen},
+									End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+								}
+								addEdit(ref.File, rng, normNewName)
+							} else if ref.Name == peer.Name {
+								rng := Range{
+									Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+									End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+								}
+								addEdit(ref.File, rng, normNewName)
+							}
+						} else {
+							rng := Range{
+								Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+								End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+							}
+							addEdit(ref.File, rng, normNewName)
+						}
+					}
+				}
+			}
+			return &WorkspaceEdit{Changes: changes}
+		}
+
 		// 1. Rename Definitions
 		prefix := ""
 		if len(targetNode.RealName) > 0 {
@@ -1566,7 +1693,7 @@ func suggestVariables(container *index.ProjectNode) *CompletionList {
 
 				doc := ""
 				if info.Def.DefaultValue != nil {
-					doc = fmt.Sprintf("Default: %s", valueToString(info.Def.DefaultValue))
+					doc = fmt.Sprintf("Default: %s", valueToString(info.Def.DefaultValue, container))
 				}
 
 				items = append(items, CompletionItem{
@@ -1580,4 +1707,191 @@ func suggestVariables(container *index.ProjectNode) *CompletionList {
 		curr = curr.Parent
 	}
 	return &CompletionList{Items: items}
+}
+
+func getSignalInfo(node *index.ProjectNode) (*index.ProjectNode, string) {
+	if node.Parent == nil {
+		return nil, ""
+	}
+
+	// Case 1: Definition
+	if node.Parent.Name == "Signals" && isDataSource(node.Parent.Parent) {
+		return node.Parent.Parent, node.RealName
+	}
+
+	// Case 2: Usage
+	if (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") && isGAM(node.Parent.Parent) {
+		dsName := ""
+		sigName := node.RealName
+
+		// Scan fields
+		for _, frag := range node.Fragments {
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok {
+					if f.Name == "DataSource" {
+						if v, ok := f.Value.(*parser.StringValue); ok {
+							dsName = v.Value
+						}
+						if v, ok := f.Value.(*parser.ReferenceValue); ok {
+							dsName = v.Value
+						}
+					}
+					if f.Name == "Alias" {
+						if v, ok := f.Value.(*parser.StringValue); ok {
+							sigName = v.Value
+						}
+						if v, ok := f.Value.(*parser.ReferenceValue); ok {
+							sigName = v.Value
+						}
+					}
+				}
+			}
+		}
+
+		if dsName != "" {
+			dsNode := Tree.ResolveName(node, dsName, isDataSource)
+			return dsNode, sigName
+		}
+	}
+	return nil, ""
+}
+
+func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
+	dsNode, sigName := getSignalInfo(target)
+	if dsNode == nil || sigName == "" {
+		return nil
+	}
+
+	var peers []*index.ProjectNode
+
+	// Add definition if exists (and not already target)
+	if signals, ok := dsNode.Children["Signals"]; ok {
+		if def, ok := signals.Children[index.NormalizeName(sigName)]; ok {
+			peers = append(peers, def)
+		}
+	}
+
+	// Find usages
+	Tree.Walk(func(n *index.ProjectNode) {
+		d, s := getSignalInfo(n)
+		if d == dsNode && s == sigName {
+			peers = append(peers, n)
+		}
+	})
+
+	return peers
+}
+
+func evaluate(val parser.Value, ctx *index.ProjectNode) parser.Value {
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimLeft(v.Name, "@$")
+		if info := Tree.ResolveVariable(ctx, name); info != nil {
+			if info.Def.DefaultValue != nil {
+				return evaluate(info.Def.DefaultValue, ctx)
+			}
+		}
+		return v
+	case *parser.BinaryExpression:
+		left := evaluate(v.Left, ctx)
+		right := evaluate(v.Right, ctx)
+		return compute(left, v.Operator, right)
+	case *parser.UnaryExpression:
+		right := evaluate(v.Right, ctx)
+		return computeUnary(v.Operator, right)
+	}
+	return val
+}
+
+func compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
+	if op.Type == parser.TokenConcat {
+		s1 := valueToString(left, nil)
+		s2 := valueToString(right, nil)
+		return &parser.StringValue{Value: s1 + s2, Quoted: true}
+	}
+
+	toInt := func(v parser.Value) (int64, bool) {
+		if idx, ok := v.(*parser.IntValue); ok {
+			return idx.Value, true
+		}
+		return 0, false
+	}
+	toFloat := func(v parser.Value) (float64, bool) {
+		if f, ok := v.(*parser.FloatValue); ok {
+			return f.Value, true
+		}
+		if idx, ok := v.(*parser.IntValue); ok {
+			return float64(idx.Value), true
+		}
+		return 0, false
+	}
+
+	lI, lIsI := toInt(left)
+	rI, rIsI := toInt(right)
+
+	if lIsI && rIsI {
+		var res int64
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lI + rI
+		case parser.TokenMinus:
+			res = lI - rI
+		case parser.TokenStar:
+			res = lI * rI
+		case parser.TokenSlash:
+			if rI != 0 {
+				res = lI / rI
+			}
+		case parser.TokenPercent:
+			if rI != 0 {
+				res = lI % rI
+			}
+		case parser.TokenAmpersand:
+			res = lI & rI
+		case parser.TokenPipe:
+			res = lI | rI
+		case parser.TokenCaret:
+			res = lI ^ rI
+		}
+		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
+	}
+
+	lF, lIsF := toFloat(left)
+	rF, rIsF := toFloat(right)
+
+	if lIsF || rIsF {
+		var res float64
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lF + rF
+		case parser.TokenMinus:
+			res = lF - rF
+		case parser.TokenStar:
+			res = lF * rF
+		case parser.TokenSlash:
+			res = lF / rF
+		}
+		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
+	}
+
+	return left
+}
+
+func computeUnary(op parser.Token, val parser.Value) parser.Value {
+	switch op.Type {
+	case parser.TokenMinus:
+		if i, ok := val.(*parser.IntValue); ok {
+			return &parser.IntValue{Value: -i.Value, Raw: fmt.Sprintf("%d", -i.Value)}
+		}
+		if f, ok := val.(*parser.FloatValue); ok {
+			return &parser.FloatValue{Value: -f.Value, Raw: fmt.Sprintf("%g", -f.Value)}
+		}
+	case parser.TokenSymbol:
+		if op.Value == "!" {
+			if b, ok := val.(*parser.BoolValue); ok {
+				return &parser.BoolValue{Value: !b.Value}
+			}
+		}
+	}
+	return val
 }

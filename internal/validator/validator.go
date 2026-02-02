@@ -56,6 +56,7 @@ func (v *Validator) ValidateProject() {
 	v.CheckUnused()
 	v.CheckDataSourceThreading()
 	v.CheckINOUTOrdering()
+	v.CheckSignalConsistency()
 	v.CheckVariables()
 	v.CheckUnresolvedVariables()
 }
@@ -1231,6 +1232,93 @@ func (v *Validator) getDataSourceDirection(ds *index.ProjectNode) string {
 		return s
 	}
 	return ""
+}
+
+func (v *Validator) CheckSignalConsistency() {
+	// Map: DataSourceNode -> SignalName -> List of Signals
+	signals := make(map[*index.ProjectNode]map[string][]*index.ProjectNode)
+
+	// Helper to collect signals
+	collect := func(node *index.ProjectNode) {
+		if !isGAM(node) {
+			return
+		}
+		// Check Input and Output
+		for _, dir := range []string{"InputSignals", "OutputSignals"} {
+			if container, ok := node.Children[dir]; ok {
+				for _, sig := range container.Children {
+					fields := v.getFields(sig)
+					var dsNode *index.ProjectNode
+					var sigName string
+
+					// Resolve DS
+					if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+						dsName := v.getFieldValue(dsFields[0], sig)
+						if dsName != "" {
+							dsNode = v.resolveReference(dsName, sig, isDataSource)
+						}
+					}
+
+					// Resolve Name (Alias or RealName)
+					if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
+						sigName = v.getFieldValue(aliasFields[0], sig)
+					} else {
+						sigName = sig.RealName
+					}
+
+					if dsNode != nil && sigName != "" {
+						sigName = index.NormalizeName(sigName)
+						if signals[dsNode] == nil {
+							signals[dsNode] = make(map[string][]*index.ProjectNode)
+						}
+						signals[dsNode][sigName] = append(signals[dsNode][sigName], sig)
+					}
+				}
+			}
+		}
+	}
+
+	v.Tree.Walk(collect)
+
+	// Check Consistency
+	for ds, sigMap := range signals {
+		for sigName, usages := range sigMap {
+			if len(usages) <= 1 {
+				continue
+			}
+
+			// Check Type consistency
+			var firstType string
+			var firstNode *index.ProjectNode
+
+			for _, u := range usages {
+				// Get Type
+				typeVal := ""
+				fields := v.getFields(u)
+				if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
+					typeVal = v.getFieldValue(typeFields[0], u)
+				}
+
+				if typeVal == "" {
+					continue
+				}
+
+				if firstNode == nil {
+					firstType = typeVal
+					firstNode = u
+				} else {
+					if typeVal != firstType {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:   LevelError,
+							Message: fmt.Sprintf("Signal Type Mismatch: Signal '%s' (in DS '%s') is defined as '%s' in '%s' but as '%s' in '%s'", sigName, ds.RealName, firstType, firstNode.Parent.Parent.RealName, typeVal, u.Parent.Parent.RealName),
+							Position: v.getNodePosition(u),
+							File:     v.getNodeFile(u),
+						})
+					}
+				}
+			}
+		}
+	}
 }
 
 func (v *Validator) CheckVariables() {
