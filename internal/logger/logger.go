@@ -10,6 +10,10 @@ var (
 	std = log.New(os.Stderr, "[mdt] ", log.LstdFlags)
 )
 
+func SetOutput(output *os.File) {
+	std.SetOutput(output)
+}
+
 func Printf(format string, v ...interface{}) {
 	std.Printf(format, v...)
 }

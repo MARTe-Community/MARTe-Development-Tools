@@ -60,6 +60,7 @@ func runBuild(args []string) {
 		} else if arg == "-o" {
 			if i+1 < len(args) {
 				outputFile = args[i+1]
+				logger.SetOutput(os.Stdout)
 				i++
 			}
 		} else {
@@ -137,6 +138,7 @@ func runCheck(args []string) {
 		os.Exit(1)
 	}
 
+	logger.SetOutput(os.Stdout)
 	tree := index.NewProjectTree()
 	syntaxErrors := 0
 
