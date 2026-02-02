@@ -99,6 +99,8 @@ func (p *Parser) Parse() (*Configuration, error) {
 func (p *Parser) parseDefinition() (Definition, bool) {
 	tok := p.next()
 	switch tok.Type {
+	case TokenLet:
+		return p.parseLet(tok)
 	case TokenIdentifier:
 		name := tok.Value
 		if name == "#var" {
@@ -286,7 +288,11 @@ func (p *Parser) parseAtom() (Value, bool) {
 		}, true
 
 	case TokenNumber:
-		if strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") {
+		isFloat := (strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") || strings.Contains(tok.Value, "E")) &&
+			!strings.HasPrefix(tok.Value, "0x") && !strings.HasPrefix(tok.Value, "0X") &&
+			!strings.HasPrefix(tok.Value, "0b") && !strings.HasPrefix(tok.Value, "0B")
+
+		if isFloat {
 			f, _ := strconv.ParseFloat(tok.Value, 64)
 			return &FloatValue{Position: tok.Position, Value: f, Raw: tok.Value}, true
 		}
@@ -406,6 +412,58 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 		Name:         nameTok.Value,
 		TypeExpr:     strings.TrimSpace(typeExpr),
 		DefaultValue: defVal,
+	}, true
+}
+
+func (p *Parser) parseLet(startTok Token) (Definition, bool) {
+	nameTok := p.next()
+	if nameTok.Type != TokenIdentifier {
+		p.addError(nameTok.Position, "expected constant name")
+		return nil, false
+	}
+
+	if p.next().Type != TokenColon {
+		p.addError(nameTok.Position, "expected :")
+		return nil, false
+	}
+
+	var typeTokens []Token
+	startLine := nameTok.Position.Line
+
+	for {
+		t := p.peek()
+		if t.Position.Line > startLine || t.Type == TokenEOF {
+			break
+		}
+		if t.Type == TokenEqual {
+			break
+		}
+		typeTokens = append(typeTokens, p.next())
+	}
+
+	typeExpr := ""
+	for _, t := range typeTokens {
+		typeExpr += t.Value + " "
+	}
+
+	var defVal Value
+	if p.next().Type != TokenEqual {
+		p.addError(nameTok.Position, "expected =")
+		return nil, false
+	}
+	val, ok := p.parseValue()
+	if ok {
+		defVal = val
+	} else {
+		return nil, false
+	}
+
+	return &VariableDefinition{
+		Position:     startTok.Position,
+		Name:         nameTok.Value,
+		TypeExpr:     strings.TrimSpace(typeExpr),
+		DefaultValue: defVal,
+		IsConst:      true,
 	}, true
 }
 

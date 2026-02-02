@@ -131,6 +131,7 @@ type VariableDefinition struct {
 	Name         string
 	TypeExpr     string
 	DefaultValue Value
+	IsConst      bool
 }
 
 func (v *VariableDefinition) Pos() Position { return v.Position }

@@ -90,6 +90,58 @@ Common classes (`RealTimeApplication`, `StateMachine`, `IOGAM`, etc.) are built-
 ### Custom Schemas
 You can extend the schema by creating a `.marte_schema.cue` file in your project root.
 
+## 4. Variables and Constants
+
+You can define variables to parameterize your configuration.
+
+### Variables (`#var`)
+Variables can be defined at any level and can be overridden externally (e.g., via CLI).
+
+```marte
+//# Default timeout
+#var Timeout: uint32 = 100
+
++MyObject = {
+    Class = Timer
+    Timeout = @Timeout
+}
+```
+
+### Constants (`#let`)
+Constants are like variables but **cannot** be overridden externally. They are ideal for internal calculations or fixed parameters.
+
+```marte
+//# Sampling period
+#let Ts: float64 = 0.001
+
++Clock = {
+    Class = HighResClock
+    Period = @Ts
+}
+```
+
+### Expressions
+Variables and constants can be used in expressions:
+- Arithmetic: `+`, `-`, `*`, `/`, `%`
+- Bitwise: `&`, `|`, `^`
+- String Concatenation: `..`
+
+```marte
+#var BasePath: string = "/tmp"
+#let LogFile: string = @BasePath .. "/app.log"
+```
+
+### Docstrings
+Docstrings (`//#`) work for variables and constants and are displayed in the LSP hover information.
+
+## 5. Pragmas
+Macros can be controlled via pragmas:
+- `//! allow(implicit)`: Suppress warnings for implicitly defined signals.
+- `//! allow(unused)`: Suppress warnings for unused signals/GAMs.
+- `//! ignore(not_consumed)`: Suppress ordering warnings for specific signals.
+
+Pragmas can be global (top-level) or local to a node.
+
 **Example: Adding a custom GAM**
 
 ```cue

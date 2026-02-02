@@ -589,9 +589,18 @@ func HandleHover(params HoverParams) *Hover {
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
 	} else if res.Variable != nil {
-		content = fmt.Sprintf("**Variable**: `%s`\nType: `%s`", res.Variable.Name, res.Variable.TypeExpr)
+		kind := "Variable"
+		if res.Variable.IsConst {
+			kind = "Constant"
+		}
+		content = fmt.Sprintf("**%s**: `%s`\nType: `%s`", kind, res.Variable.Name, res.Variable.TypeExpr)
 		if res.Variable.DefaultValue != nil {
 			content += fmt.Sprintf("\nDefault: `%s`", valueToString(res.Variable.DefaultValue, container))
+		}
+		if info := Tree.ResolveVariable(container, res.Variable.Name); info != nil {
+			if info.Doc != "" {
+				content += "\n\n" + info.Doc
+			}
 		}
 	} else if res.Reference != nil {
 		targetName := "Unresolved"
@@ -605,9 +614,18 @@ func HandleHover(params HoverParams) *Hover {
 		} else if res.Reference.TargetVariable != nil {
 			v := res.Reference.TargetVariable
 			targetName = v.Name
-			fullInfo = fmt.Sprintf("**Variable**: `@%s`\nType: `%s`", v.Name, v.TypeExpr)
+			kind := "Variable"
+			if v.IsConst {
+				kind = "Constant"
+			}
+			fullInfo = fmt.Sprintf("**%s**: `@%s`\nType: `%s`", kind, v.Name, v.TypeExpr)
 			if v.DefaultValue != nil {
 				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue, container))
+			}
+			if info := Tree.ResolveVariable(container, res.Reference.Name); info != nil {
+				if info.Doc != "" {
+					fullInfo += "\n\n" + info.Doc
+				}
 			}
 		}
 
@@ -677,6 +695,17 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	col := min(params.Position.Character, len(lineStr))
 
 	prefix := lineStr[:col]
+
+	// Case 4: Top-level keywords/macros
+	if strings.HasPrefix(prefix, "#") && !strings.Contains(prefix, " ") {
+		return &CompletionList{
+			Items: []CompletionItem{
+				{Label: "#package", Kind: 14, InsertText: "#package ${1:Project.URI}", InsertTextFormat: 2, Detail: "Project namespace definition"},
+				{Label: "#var", Kind: 14, InsertText: "#var ${1:Name}: ${2:Type} = ${3:DefaultValue}", InsertTextFormat: 2, Detail: "Variable definition"},
+				{Label: "#let", Kind: 14, InsertText: "#let ${1:Name}: ${2:Type} = ${3:Value}", InsertTextFormat: 2, Detail: "Constant variable definition"},
+			},
+		}
+	}
 
 	// Case 3: Variable completion
 	varRegex := regexp.MustCompile(`([@])([a-zA-Z0-9_]*)$`)
@@ -1254,6 +1283,17 @@ func HandleReferences(params ReferenceParams) []Location {
 	return locations
 }
 
+func getEvaluatedMetadata(node *index.ProjectNode, key string) string {
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if f, ok := def.(*parser.Field); ok && f.Name == key {
+				return valueToString(f.Value, node)
+			}
+		}
+	}
+	return node.Metadata[key]
+}
+
 func formatNodeInfo(node *index.ProjectNode) string {
 	info := ""
 	if class := node.Metadata["Class"]; class != "" {
@@ -1262,8 +1302,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		info = fmt.Sprintf("`%s`\n\n", node.RealName)
 	}
 	// Check if it's a Signal (has Type or DataSource)
-	typ := node.Metadata["Type"]
-	ds := node.Metadata["DataSource"]
+	typ := getEvaluatedMetadata(node, "Type")
+	ds := getEvaluatedMetadata(node, "DataSource")
 
 	if ds == "" {
 		if node.Parent != nil && node.Parent.Name == "Signals" {
@@ -1283,8 +1323,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 
 		// Size
-		dims := node.Metadata["NumberOfDimensions"]
-		elems := node.Metadata["NumberOfElements"]
+		dims := getEvaluatedMetadata(node, "NumberOfDimensions")
+		elems := getEvaluatedMetadata(node, "NumberOfElements")
 		if dims != "" || elems != "" {
 			sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
 		}
@@ -1696,10 +1736,15 @@ func suggestVariables(container *index.ProjectNode) *CompletionList {
 					doc = fmt.Sprintf("Default: %s", valueToString(info.Def.DefaultValue, container))
 				}
 
+				kind := "Variable"
+				if info.Def.IsConst {
+					kind = "Constant"
+				}
+
 				items = append(items, CompletionItem{
 					Label:         name,
 					Kind:          6, // Variable
-					Detail:        fmt.Sprintf("Variable (%s)", info.Def.TypeExpr),
+					Detail:        fmt.Sprintf("%s (%s)", kind, info.Def.TypeExpr),
 					Documentation: doc,
 				})
 			}

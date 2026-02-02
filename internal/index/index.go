@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 type VariableInfo struct {
 	Def  *parser.VariableDefinition
 	File string
+	Doc  string
 }
 
 type ProjectTree struct {
@@ -27,13 +29,14 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 			return err
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".marte") {
+			logger.Printf("indexing: %s [%s]\n", info.Name(), path)
 			content, err := os.ReadFile(path)
 			if err != nil {
 				return err // Or log and continue
 			}
 			p := parser.NewParser(string(content))
-			config, err := p.Parse()
-			if err == nil {
+			config, _ := p.Parse()
+			if config != nil {
 				pt.AddFile(path, config)
 			}
 		}
@@ -232,7 +235,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.indexValue(file, d.Value)
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
-			node.Variables[d.Name] = VariableInfo{Def: d, File: file}
+			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			norm := NormalizeName(d.Name)
@@ -291,7 +294,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.extractFieldMetadata(node, d)
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
-			node.Variables[d.Name] = VariableInfo{Def: d, File: file}
+			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: subDoc}
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			norm := NormalizeName(d.Name)

@@ -213,17 +213,21 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 			for _, def := range frag.Definitions {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if valStr, ok := b.Overrides[vdef.Name]; ok {
-						p := parser.NewParser("Temp = " + valStr)
-						cfg, _ := p.Parse()
-						if len(cfg.Definitions) > 0 {
-							if f, ok := cfg.Definitions[0].(*parser.Field); ok {
-								b.variables[vdef.Name] = f.Value
-								continue
+						if !vdef.IsConst {
+							p := parser.NewParser("Temp = " + valStr)
+							cfg, _ := p.Parse()
+							if len(cfg.Definitions) > 0 {
+								if f, ok := cfg.Definitions[0].(*parser.Field); ok {
+									b.variables[vdef.Name] = f.Value
+									continue
+								}
 							}
 						}
 					}
 					if vdef.DefaultValue != nil {
-						b.variables[vdef.Name] = vdef.DefaultValue
+						if _, ok := b.variables[vdef.Name]; !ok || vdef.IsConst {
+							b.variables[vdef.Name] = vdef.DefaultValue
+						}
 					}
 				}
 			}

@@ -20,6 +20,7 @@ const (
 	TokenBool
 	TokenPackage
 	TokenPragma
+	TokenLet
 	TokenComment
 	TokenDocstring
 	TokenComma
@@ -236,7 +237,21 @@ func (l *Lexer) lexString() Token {
 }
 
 func (l *Lexer) lexNumber() Token {
-	// Consume initial digits (already started)
+	// Check for hex or binary prefix if we started with '0'
+	if l.input[l.start:l.pos] == "0" {
+		switch l.peek() {
+		case 'x', 'X':
+			l.next()
+			l.lexHexDigits()
+			return l.emit(TokenNumber)
+		case 'b', 'B':
+			l.next()
+			l.lexBinaryDigits()
+			return l.emit(TokenNumber)
+		}
+	}
+
+	// Consume remaining digits
 	l.lexDigits()
 
 	if l.peek() == '.' {
@@ -253,6 +268,28 @@ func (l *Lexer) lexNumber() Token {
 	}
 
 	return l.emit(TokenNumber)
+}
+
+func (l *Lexer) lexHexDigits() {
+	for {
+		r := l.peek()
+		if unicode.IsDigit(r) || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			l.next()
+		} else {
+			break
+		}
+	}
+}
+
+func (l *Lexer) lexBinaryDigits() {
+	for {
+		r := l.peek()
+		if r == '0' || r == '1' {
+			l.next()
+		} else {
+			break
+		}
+	}
 }
 
 func (l *Lexer) lexDigits() {
@@ -320,6 +357,9 @@ func (l *Lexer) lexHashIdentifier() Token {
 	val := l.input[l.start:l.pos]
 	if val == "#package" {
 		return l.lexUntilNewline(TokenPackage)
+	}
+	if val == "#let" {
+		return l.emit(TokenLet)
 	}
 	return l.emit(TokenIdentifier)
 }

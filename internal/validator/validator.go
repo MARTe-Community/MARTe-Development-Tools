@@ -577,9 +577,20 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 }
 
+func (v *Validator) getEvaluatedMetadata(node *index.ProjectNode, key string) string {
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if f, ok := def.(*parser.Field); ok && f.Name == key {
+				return v.getFieldValue(f, node)
+			}
+		}
+	}
+	return node.Metadata[key]
+}
+
 func (v *Validator) checkSignalProperty(gamSig, dsSig *index.ProjectNode, prop string) {
-	gamVal := gamSig.Metadata[prop]
-	dsVal := dsSig.Metadata[prop]
+	gamVal := v.getEvaluatedMetadata(gamSig, prop)
+	dsVal := v.getEvaluatedMetadata(dsSig, prop)
 
 	if gamVal == "" {
 		return
@@ -646,26 +657,11 @@ func (v *Validator) getFields(node *index.ProjectNode) map[string][]*parser.Fiel
 }
 
 func (v *Validator) getFieldValue(f *parser.Field, ctx *index.ProjectNode) string {
-	switch val := f.Value.(type) {
-	case *parser.StringValue:
-		return val.Value
-	case *parser.ReferenceValue:
-		return val.Value
-	case *parser.IntValue:
-		return val.Raw
-	case *parser.FloatValue:
-		return val.Raw
-	case *parser.BoolValue:
-		return strconv.FormatBool(val.Value)
-	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(val.Name, "@")
-		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
-			if info.Def.DefaultValue != nil {
-				return v.getFieldValue(&parser.Field{Value: info.Def.DefaultValue}, ctx)
-			}
-		}
+	res := v.valueToInterface(f.Value, ctx)
+	if res == nil {
+		return ""
 	}
-	return ""
+	return fmt.Sprintf("%v", res)
 }
 
 func (v *Validator) resolveReference(name string, ctx *index.ProjectNode, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
@@ -1328,34 +1324,57 @@ func (v *Validator) CheckVariables() {
 	ctx := v.Schema.Context
 
 	checkNodeVars := func(node *index.ProjectNode) {
-		for _, info := range node.Variables {
-			def := info.Def
+		seen := make(map[string]parser.Position)
+		for _, frag := range node.Fragments {
+			for _, def := range frag.Definitions {
+				if vdef, ok := def.(*parser.VariableDefinition); ok {
+					if prevPos, exists := seen[vdef.Name]; exists {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:    LevelError,
+							Message:  fmt.Sprintf("Duplicate variable definition: '%s' was already defined at %d:%d", vdef.Name, prevPos.Line, prevPos.Column),
+							Position: vdef.Position,
+							File:     frag.File,
+						})
+					}
+					seen[vdef.Name] = vdef.Position
 
-			// Compile Type
-			typeVal := ctx.CompileString(def.TypeExpr)
-			if typeVal.Err() != nil {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", def.Name, typeVal.Err()),
-					Position: def.Position,
-					File:     info.File,
-				})
-				continue
-			}
+					if vdef.IsConst && vdef.DefaultValue == nil {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:    LevelError,
+							Message:  fmt.Sprintf("Constant variable '%s' must have an initial value", vdef.Name),
+							Position: vdef.Position,
+							File:     frag.File,
+						})
+						continue
+					}
 
-			if def.DefaultValue != nil {
-				valInterface := v.valueToInterface(def.DefaultValue, node)
-				valVal := ctx.Encode(valInterface)
+					// Compile Type
+					typeVal := ctx.CompileString(vdef.TypeExpr)
+					if typeVal.Err() != nil {
+						v.Diagnostics = append(v.Diagnostics, Diagnostic{
+							Level:    LevelError,
+							Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", vdef.Name, typeVal.Err()),
+							Position: vdef.Position,
+							File:     frag.File,
+						})
+						continue
+					}
 
-				// Unify
-				res := typeVal.Unify(valVal)
-				if err := res.Validate(cue.Concrete(true)); err != nil {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", def.Name, err),
-						Position: def.Position,
-						File:     info.File,
-					})
+					if vdef.DefaultValue != nil {
+						valInterface := v.valueToInterface(vdef.DefaultValue, node)
+						valVal := ctx.Encode(valInterface)
+
+						// Unify
+						res := typeVal.Unify(valVal)
+						if err := res.Validate(cue.Concrete(true)); err != nil {
+							v.Diagnostics = append(v.Diagnostics, Diagnostic{
+								Level:    LevelError,
+								Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", vdef.Name, err),
+								Position: vdef.Position,
+								File:     frag.File,
+							})
+						}
+					}
 				}
 			}
 		}
