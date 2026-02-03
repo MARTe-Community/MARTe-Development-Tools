@@ -50,11 +50,15 @@ func runBuild(args []string) {
 	overrides := make(map[string]string)
 	outputFile := ""
 	root_path := ""
+	projectFilter := ""
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "-P" && i+1 < len(args) {
 			root_path = args[i+1]
+			i++
+		} else if arg == "-p" && i+1 < len(args) {
+			projectFilter = args[i+1]
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -77,7 +81,6 @@ func runBuild(args []string) {
 			}
 			if !d.IsDir() && strings.HasSuffix(path, ".marte") {
 				files = append(files, path)
-				logger.Printf("append: %s\n", path)
 			}
 			return nil
 		})
@@ -85,13 +88,17 @@ func runBuild(args []string) {
 			logger.Printf("Error while exploring project dir: %v", err)
 			os.Exit(1)
 		}
-	} else if len(files) < 1 {
-		logger.Println("Usage: mdt build [-o output] [-vVAR=VAL] <input_files...>")
+	}
+
+	if len(files) < 1 {
+		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-o output] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
 	// 1. Run Validation
 	tree := index.NewProjectTree()
+	filteredFiles := []string{}
+
 	for _, file := range files {
 		content, err := os.ReadFile(file)
 		if err != nil {
@@ -106,7 +113,28 @@ func runBuild(args []string) {
 			os.Exit(1)
 		}
 
+		if projectFilter != "" {
+			fileProj := ""
+			if config.Package != nil {
+				parts := strings.Split(config.Package.URI, ".")
+				fileProj = strings.TrimSpace(parts[0])
+			}
+			if fileProj != projectFilter {
+				continue
+			}
+		}
+
+		filteredFiles = append(filteredFiles, file)
 		tree.AddFile(file, config)
+	}
+
+	if len(filteredFiles) == 0 {
+		if projectFilter != "" {
+			logger.Printf("No files found for project '%s'\n", projectFilter)
+		} else {
+			logger.Println("No input files to process.")
+		}
+		os.Exit(0)
 	}
 
 	v := validator.NewValidator(tree, ".", overrides)
@@ -129,7 +157,7 @@ func runBuild(args []string) {
 	}
 
 	// 2. Perform Build
-	b := builder.NewBuilder(files, overrides)
+	b := builder.NewBuilder(filteredFiles, overrides)
 
 	var out *os.File = os.Stdout
 	if outputFile != "" {
@@ -153,11 +181,15 @@ func runCheck(args []string) {
 	files := []string{}
 	overrides := make(map[string]string)
 	root_path := ""
+	projectFilter := ""
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "-P" && i+1 < len(args) {
 			root_path = args[i+1]
+			i++
+		} else if arg == "-p" && i+1 < len(args) {
+			projectFilter = args[i+1]
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -187,13 +219,14 @@ func runCheck(args []string) {
 	}
 
 	if len(files) < 1 {
-		logger.Println("Usage: mdt check [-P folder_path] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt check [-P folder_path] [-p project_name] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
 	logger.SetOutput(os.Stdout)
 	tree := index.NewProjectTree()
 	syntaxErrors := 0
+	foundFiles := 0
 
 	for _, file := range files {
 		content, err := os.ReadFile(file)
@@ -204,6 +237,19 @@ func runCheck(args []string) {
 
 		p := parser.NewParser(string(content))
 		config, _ := p.Parse()
+
+		if projectFilter != "" {
+			fileProj := ""
+			if config != nil && config.Package != nil {
+				parts := strings.Split(config.Package.URI, ".")
+				fileProj = strings.TrimSpace(parts[0])
+			}
+			if fileProj != projectFilter {
+				continue
+			}
+		}
+		foundFiles++
+
 		if len(p.Errors()) > 0 {
 			syntaxErrors += len(p.Errors())
 			for _, e := range p.Errors() {
@@ -214,6 +260,11 @@ func runCheck(args []string) {
 		if config != nil {
 			tree.AddFile(file, config)
 		}
+	}
+
+	if foundFiles == 0 && projectFilter != "" {
+		logger.Printf("No files found for project '%s'\n", projectFilter)
+		return
 	}
 
 	v := validator.NewValidator(tree, ".", overrides)

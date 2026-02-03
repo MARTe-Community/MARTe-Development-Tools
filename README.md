@@ -55,11 +55,11 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   ```
 - **Check**: Run validation on a file or project.
   ```bash
-  mdt check [-P folder_path] [-vVAR=VAL] <input_files...>
+  mdt check [-P folder_path] [-p project_name] [-vVAR=VAL] <input_files...>
   ```
 - **Build**: Merge project files into a single output.
   ```bash
-  mdt build [-P folder_path] [-o output.marte] [-vVAR=VAL] <input_files...>
+  mdt build [-P folder_path] [-p project_name] [-o output.marte] [-vVAR=VAL] <input_files...>
   ```
 - **Format**: Format configuration files.
   ```bash
