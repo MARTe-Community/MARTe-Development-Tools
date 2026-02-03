@@ -107,6 +107,19 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		}
 	}
 
+	// NEW: Strict Field Validation
+	for name, defs := range fields {
+		for _, f := range defs {
+			if name == "Class" {
+				v.validateClassField(f, node)
+			} else if name == "Type" {
+				v.validateTypeField(f, node)
+			} else {
+				v.validateGenericField(f, node)
+			}
+		}
+	}
+
 	// 2. Check for mandatory Class if it's an object node (+/$)
 	className := ""
 	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
@@ -154,6 +167,125 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	for _, child := range node.Children {
 		v.validateNode(child)
 	}
+}
+
+func (v *Validator) validateClassField(f *parser.Field, node *index.ProjectNode) {
+	// Class field should always have a value Class (string quoted or not)
+	var className string
+	switch val := f.Value.(type) {
+	case *parser.StringValue:
+		className = val.Value
+	case *parser.ReferenceValue:
+		// Treated as string literal for Class field
+		className = val.Value
+	default:
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
+			Position: f.Position,
+			File:     v.getFileForField(f, node),
+		})
+		return
+	}
+
+	// Check if class exists in schema
+	if v.Schema != nil && className != "" {
+		// Use cue LookupPath to check existence in #Classes
+		path := cue.ParsePath(fmt.Sprintf("#Classes.%s", className))
+		if v.Schema.Value.LookupPath(path).Err() != nil {
+			// Unknown Class
+			if !v.isSuppressed("unknown_class", node) {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelWarning,
+					Message:  fmt.Sprintf("Unknown Class '%s'", className),
+					Position: f.Position,
+					File:     v.getFileForField(f, node),
+				})
+			}
+		}
+	}
+}
+
+func (v *Validator) validateTypeField(f *parser.Field, node *index.ProjectNode) {
+	// Type field should always have a type as value (uint etc)
+	var typeName string
+	switch val := f.Value.(type) {
+	case *parser.StringValue:
+		typeName = val.Value
+	case *parser.ReferenceValue:
+		typeName = val.Value
+	default:
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
+			Position: f.Position,
+			File:     v.getFileForField(f, node),
+		})
+		return
+	}
+
+	if !isValidType(typeName) {
+		v.Diagnostics = append(v.Diagnostics, Diagnostic{
+			Level:    LevelError,
+			Message:  fmt.Sprintf("Invalid Type '%s'", typeName),
+			Position: f.Position,
+			File:     v.getFileForField(f, node),
+		})
+	}
+}
+
+func (v *Validator) validateGenericField(f *parser.Field, node *index.ProjectNode) {
+	switch val := f.Value.(type) {
+	case *parser.ReferenceValue:
+		// Non-quoted string: a reference -> Must resolve
+		// Unless it is a special field?
+		// "if a non quoted string: a reference (an error should be produced for non valid references)"
+		target := v.resolveReference(val.Value, node, nil)
+		if target == nil {
+			v.Diagnostics = append(v.Diagnostics, Diagnostic{
+				Level:    LevelError,
+				Message:  fmt.Sprintf("Unknown reference '%s'", val.Value),
+				Position: val.Position,
+				File:     v.getFileForField(f, node),
+			})
+		} else {
+			// Link reference
+			v.updateReferenceTarget(v.getFileForField(f, node), val.Position, target)
+		}
+	case *parser.StringValue:
+		if !val.Quoted {
+			// Should be handled as ReferenceValue by Parser for identifiers.
+			// But if parser produces StringValue(Quoted=false), treat as ref?
+			// Current parser produces ReferenceValue for identifiers.
+			// So StringValue is likely Quoted=true.
+		}
+	case *parser.BinaryExpression:
+		// Evaluate if possible
+		// valueToInterface does evaluation.
+		// If it relies on unresolved vars, it returns nil.
+		res := v.valueToInterface(val, node)
+		if res == nil {
+			// Could warn if expression is malformed?
+			// But nil is valid if vars are missing (already checked by checkVariables?)
+		}
+	}
+}
+
+func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bool {
+	file := v.getNodeFile(node)
+	if v.isGloballyAllowed(warningType, file) {
+		return true
+	}
+	// Check local pragmas on the node
+	prefix1 := fmt.Sprintf("allow(%s)", warningType)
+	prefix2 := fmt.Sprintf("ignore(%s)", warningType)
+	for _, p := range node.Pragmas {
+		normalized := strings.ReplaceAll(p, " ", "")
+		if strings.HasPrefix(normalized, prefix1) || strings.HasPrefix(normalized, prefix2) {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {

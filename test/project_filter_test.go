@@ -18,12 +18,12 @@ func TestProjectFilter(t *testing.T) {
 
 	// File 1: Project A
 	file1 := filepath.Join(tmpDir, "a.marte")
-	content1 := "#package ProjectA\n+ObjA = { Class = MyClass }"
+	content1 := "#package ProjectA\n//! allow(unknown_class)\n+ObjA = { Class = MyClass }"
 	os.WriteFile(file1, []byte(content1), 0644)
 
 	// File 2: Project B
 	file2 := filepath.Join(tmpDir, "b.marte")
-	content2 := "#package ProjectB\n+ObjB = { Class = MyClass }"
+	content2 := "#package ProjectB\n//! allow(unknown_class)\n+ObjB = { Class = MyClass }"
 	os.WriteFile(file2, []byte(content2), 0644)
 
 	// Build mdt

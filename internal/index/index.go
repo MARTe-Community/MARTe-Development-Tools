@@ -448,7 +448,7 @@ func (pt *ProjectTree) ResolveReferences() {
 	}
 }
 
-func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
+func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
 	if pt.NodeMap == nil {
 		pt.RebuildIndex()
 	}
@@ -458,10 +458,17 @@ func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*
 		rootName := parts[0]
 
 		candidates := pt.NodeMap[rootName]
+		var bestMatch *ProjectNode
 
 		for _, cand := range candidates {
-			if !pt.isDescendant(cand, root) {
-				continue
+			if strict {
+				if cand.Parent != root {
+					continue
+				}
+			} else {
+				if !pt.isDescendant(cand, root) {
+					continue
+				}
 			}
 
 			curr := cand
@@ -478,17 +485,24 @@ func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*
 			}
 			if valid {
 				if predicate == nil || predicate(curr) {
+					bestMatch = curr
 					return curr
 				}
 			}
 		}
-		return nil
+		return bestMatch
 	}
 
 	candidates := pt.NodeMap[name]
 	for _, cand := range candidates {
-		if !pt.isDescendant(cand, root) {
-			continue
+		if strict {
+			if cand.Parent != root {
+				continue
+			}
+		} else {
+			if !pt.isDescendant(cand, root) {
+				continue
+			}
 		}
 		if predicate == nil || predicate(cand) {
 			return cand
@@ -628,16 +642,24 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 
 func (pt *ProjectTree) ResolveName(ctx *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
 	if ctx == nil {
-		return pt.FindNode(pt.Root, name, predicate)
+		return pt.FindNode(pt.Root, name, predicate, true)
 	}
 
 	curr := ctx
 	for curr != nil {
-		if found := pt.FindNode(curr, name, predicate); found != nil {
+		if found := pt.FindNode(curr, name, predicate, false); found != nil {
 			return found
 		}
 		curr = curr.Parent
 	}
+
+	// Fallback to global root if not found in local scope chain (Strict search)
+	if pt.Root != nil {
+		if found := pt.FindNode(pt.Root, name, predicate, true); found != nil {
+			return found
+		}
+	}
+
 	return nil
 }
 

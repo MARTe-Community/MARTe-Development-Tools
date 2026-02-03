@@ -24,25 +24,25 @@ func TestNodeMap(t *testing.T) {
 	pt.RebuildIndex()
 
 	// Find by Name
-	found := pt.FindNode(root, "C", nil)
+	found := pt.FindNode(root, "C", nil, false)
 	if found != nodeC {
 		t.Errorf("FindNode(C) failed. Got %v, want %v", found, nodeC)
 	}
 
 	// Find by RealName
-	found = pt.FindNode(root, "+C", nil)
+	found = pt.FindNode(root, "+C", nil, false)
 	if found != nodeC {
 		t.Errorf("FindNode(+C) failed. Got %v, want %v", found, nodeC)
 	}
 
 	// Find by Path
-	found = pt.FindNode(root, "A.B.C", nil)
+	found = pt.FindNode(root, "A.B.C", nil, false)
 	if found != nodeC {
 		t.Errorf("FindNode(A.B.C) failed. Got %v, want %v", found, nodeC)
 	}
 
 	// Find by Path with RealName
-	found = pt.FindNode(root, "+A.+B.+C", nil)
+	found = pt.FindNode(root, "+A.+B.+C", nil, false)
 	if found != nodeC {
 		t.Errorf("FindNode(+A.+B.+C) failed. Got %v, want %v", found, nodeC)
 	}
