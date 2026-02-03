@@ -186,25 +186,70 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		f.formatValue(v.Right, indent)
 		return v.Position.Line
 	case *parser.ArrayValue:
-		fmt.Fprint(f.writer, "{ ")
-		for i, e := range v.Elements {
-			if i > 0 {
-				fmt.Fprint(f.writer, " ")
-			}
-			f.formatValue(e, indent)
+		return f.formatArray(v, indent)
+	default:
+		return 0
+	}
+}
+
+func (f *Formatter) formatArray(v *parser.ArrayValue, indent int) int {
+	// Heuristic: if array spans multiple lines in source, preserve multiline structure
+	// Or if formatted inline length > 120 chars
+	multiline := false
+	if v.EndPosition.Line > v.Position.Line {
+		multiline = true
+	}
+
+	if !multiline {
+		// Try formatting inline to check length
+		// We need a dummy writer to measure length
+		// But recursive formatValue writes to f.writer.
+		// We can use a temporary buffer.
+		// But f.writer is io.Writer. We can swap it.
+		originalWriter := f.writer
+		var buf strings.Builder
+		f.writer = &buf
+		f.formatArrayInline(v, indent)
+		f.writer = originalWriter
+
+		if buf.Len() > 120 { // Simplified check, assumes start of line is handled elsewhere or is negligible for long arrays
+			multiline = true
+		} else {
+			fmt.Fprint(f.writer, buf.String())
+			return v.Position.Line
 		}
-		fmt.Fprint(f.writer, " }")
+	}
+
+	if multiline {
+		fmt.Fprintln(f.writer, "{")
+		indentStr := strings.Repeat("  ", indent+1)
+		for _, e := range v.Elements {
+			fmt.Fprint(f.writer, indentStr)
+			f.formatValue(e, indent+1)
+			fmt.Fprintln(f.writer)
+		}
+		fmt.Fprintf(f.writer, "%s}", strings.Repeat("  ", indent))
 		if v.EndPosition.Line > 0 {
 			return v.EndPosition.Line
 		}
-		// Fallback if EndPosition not set (shouldn't happen with new parser)
 		if len(v.Elements) > 0 {
 			return v.Elements[len(v.Elements)-1].Pos().Line
 		}
 		return v.Position.Line
-	default:
-		return 0
 	}
+
+	return v.Position.Line
+}
+
+func (f *Formatter) formatArrayInline(v *parser.ArrayValue, indent int) {
+	fmt.Fprint(f.writer, "{ ")
+	for i, e := range v.Elements {
+		if i > 0 {
+			fmt.Fprint(f.writer, " ")
+		}
+		f.formatValue(e, indent)
+	}
+	fmt.Fprint(f.writer, " }")
 }
 
 func (f *Formatter) flushCommentsBefore(pos parser.Position, indent int, stick bool) {
