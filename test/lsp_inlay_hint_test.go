@@ -62,7 +62,6 @@ func TestLSPInlayHint(t *testing.T) {
 	foundDSClassHint := false
 	foundGeneralRefHint := false
 	foundExprHint := false
-	foundVarRefHint := false
 	foundLetHint := false
 
 	for _, hint := range res {
@@ -78,9 +77,6 @@ func TestLSPInlayHint(t *testing.T) {
 		}
 		if hint.Label == " => 30" {
 			foundExprHint = true
-		}
-		if hint.Label == "(=> 15)" {
-			foundVarRefHint = true
 		}
 		if hint.Label == " => 15" && hint.Position.Line == 1 { // #let N line
 			foundLetHint = true
@@ -98,9 +94,6 @@ func TestLSPInlayHint(t *testing.T) {
 	}
 	if !foundExprHint {
 		t.Error("Did not find expression evaluation hint")
-	}
-	if !foundVarRefHint {
-		t.Error("Did not find variable reference evaluation hint")
 	}
 	if !foundLetHint {
 		t.Error("Did not find #let expression evaluation hint")

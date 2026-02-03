@@ -2117,19 +2117,19 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 					Kind:     1, // Parameter
 				})
 			}
-		} else if ref.IsVariable {
-			// Variable reference evaluation hint: @VAR(=> VALUE)
-			container := Tree.GetNodeContaining(ref.File, ref.Position)
-			if info := Tree.ResolveVariable(container, ref.Name); info != nil && info.Def.DefaultValue != nil {
-				val := valueToString(info.Def.DefaultValue, container)
-				if val != "" {
-					addHint(InlayHint{
-						Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name) + 1},
-						Label:    "(=> " + val + ")",
-						Kind:     2,
-					})
-				}
-			}
+			// } else if ref.IsVariable {
+			// 	// Variable reference evaluation hint: @VAR(=> VALUE)
+			// 	container := Tree.GetNodeContaining(ref.File, ref.Position)
+			// 	if info := Tree.ResolveVariable(container, ref.Name); info != nil && info.Def.DefaultValue != nil {
+			// 		val := valueToString(info.Def.DefaultValue, container)
+			// 		if val != "" {
+			// 			addHint(InlayHint{
+			// 				Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name) + 1},
+			// 				Label:    "(=> " + val + ")",
+			// 				Kind:     2,
+			// 			})
+			// 		}
+			// 	}
 		}
 	}
 
