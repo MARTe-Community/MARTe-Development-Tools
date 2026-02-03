@@ -67,7 +67,7 @@ func TestLSPInlayHint(t *testing.T) {
 
 	for _, hint := range res {
 		t.Logf("Hint: '%s' at Line %d, Col %d", hint.Label, hint.Position.Line, hint.Position.Character)
-		if hint.Label == "::uint32[10x1]" {
+		if hint.Label == "::uint32[1x10]" {
 			foundTypeHint = true
 		}
 		if hint.Label == "FileReader::" && hint.Position.Line == 12 { // Sig1 line (DS)

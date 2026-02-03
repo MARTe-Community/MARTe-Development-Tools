@@ -1349,7 +1349,13 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		dims := getEvaluatedMetadata(node, "NumberOfDimensions")
 		elems := getEvaluatedMetadata(node, "NumberOfElements")
 		if dims != "" || elems != "" {
-			sigInfo += fmt.Sprintf("**Size**: `[%s]`, `%s` dims ", elems, dims)
+			if dims == "" {
+				dims = "1"
+			}
+			if elems == "" {
+				elems = "1"
+			}
+			sigInfo += fmt.Sprintf("**Size**: %sx%s ", dims, elems)
 		}
 		info += sigInfo
 	}
@@ -2019,7 +2025,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 					if dims == "" {
 						dims = "1"
 					}
-					label := fmt.Sprintf("::%s[%sx%s]", typ, elems, dims)
+					label := fmt.Sprintf("::%s[%sx%s]", typ, dims, elems)
 
 					pos := frag.ObjectPos
 					addHint(InlayHint{
