@@ -39,7 +39,7 @@ func TestGlobalPragmaDebug(t *testing.T) {
 	}
 	t.Logf("Global Pragma stored: %s", pragmas[0])
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 	v.CheckUnused() // Must call this for unused check!
 

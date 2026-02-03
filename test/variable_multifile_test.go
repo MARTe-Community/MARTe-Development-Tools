@@ -50,7 +50,7 @@ func TestMultiFileVariableResolution(t *testing.T) {
 
 	t.Logf("Root Variables keys: %v", getKeys(pt.Root.Variables))
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.CheckUnresolvedVariables()
 
 	for _, d := range v.Diagnostics {

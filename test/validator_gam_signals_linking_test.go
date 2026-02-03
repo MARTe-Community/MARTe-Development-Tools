@@ -47,7 +47,7 @@ func TestGAMSignalLinking(t *testing.T) {
 	idx.AddFile("gam_signals_linking.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	if len(v.Diagnostics) > 0 {

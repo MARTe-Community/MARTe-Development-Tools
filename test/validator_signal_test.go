@@ -49,7 +49,7 @@ func TestSignalValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("signal_test.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundMissing := false

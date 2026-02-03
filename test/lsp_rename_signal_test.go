@@ -42,7 +42,7 @@ func TestRenameSignalInGAM(t *testing.T) {
 	lsp.Tree.ResolveReferences()
 
 	// Run validator to populate Targets
-	v := validator.NewValidator(lsp.Tree, ".")
+	v := validator.NewValidator(lsp.Tree, ".", nil)
 	v.ValidateProject()
 
 	// Rename DS.Sig1 to NewSig

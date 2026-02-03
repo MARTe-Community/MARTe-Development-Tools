@@ -40,7 +40,7 @@ func TestFunctionsArrayValidation(t *testing.T) {
 	idx.AddFile("funcs.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundInvalid := false

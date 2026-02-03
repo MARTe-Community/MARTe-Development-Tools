@@ -99,7 +99,7 @@ func TestDataSourceThreadingValidation(t *testing.T) {
 	// but CheckDataSourceThreading relies on parsing logic, not CUE schema unification.
 	// So it should work.
 
-	v := validator.NewValidator(pt, "")
+	v := validator.NewValidator(pt, "", nil)
 	v.ValidateProject()
 
 	foundError := false

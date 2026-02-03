@@ -27,7 +27,7 @@ func TestRegexVariable(t *testing.T) {
 	}
 	pt.AddFile("regex.marte", cfg)
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.CheckVariables()
 
 	foundError := false

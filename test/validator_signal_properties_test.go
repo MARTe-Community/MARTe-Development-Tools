@@ -71,7 +71,7 @@ func TestSignalProperties(t *testing.T) {
 	idx.AddFile("signal_props.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundBadType := false

@@ -57,7 +57,7 @@ func TestINOUTValueInitialization(t *testing.T) {
 	}
 	pt.AddFile("main.marte", cfg)
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.ValidateProject()
 
 	for _, d := range v.Diagnostics {
@@ -86,7 +86,7 @@ func TestINOUTValueTypeMismatch(t *testing.T) {
 	}
 	pt.AddFile("fail.marte", cfg)
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.ValidateProject()
 
 	found := false

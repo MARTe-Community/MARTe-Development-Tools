@@ -33,7 +33,7 @@ func TestGlobalPragmaUpdate(t *testing.T) {
 	// Helper to validate
 	check := func() bool {
 		idx.ResolveReferences()
-		v := validator.NewValidator(idx, ".")
+		v := validator.NewValidator(idx, ".", nil)
 		v.ValidateProject()
 		v.CheckUnused()
 		for _, d := range v.Diagnostics {

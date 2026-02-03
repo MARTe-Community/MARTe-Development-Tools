@@ -84,7 +84,7 @@ func TestLetMacroFull(t *testing.T) {
 		// If parser didn't fail (maybe it was partial), validator should catch it
 		tree2 := index.NewProjectTree()
 		tree2.AddFile("err.marte", cfg2)
-		v := validator.NewValidator(tree2, ".")
+		v := validator.NewValidator(tree2, ".", nil)
 		v.ValidateProject()
 
 		found := false
@@ -109,7 +109,7 @@ func TestLetMacroFull(t *testing.T) {
 	cfg3, _ := p3.Parse()
 	tree3 := index.NewProjectTree()
 	tree3.AddFile("dup.marte", cfg3)
-	v3 := validator.NewValidator(tree3, ".")
+	v3 := validator.NewValidator(tree3, ".", nil)
 	v3.ValidateProject()
 
 	foundDup := false

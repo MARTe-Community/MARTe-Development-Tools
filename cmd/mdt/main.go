@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,27 +49,43 @@ func runBuild(args []string) {
 	files := []string{}
 	overrides := make(map[string]string)
 	outputFile := ""
+	root_path := ""
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if strings.HasPrefix(arg, "-v") {
+		if arg == "-P" && i+1 < len(args) {
+			root_path = args[i+1]
+			i++
+		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
 			parts := strings.SplitN(pair, "=", 2)
 			if len(parts) == 2 {
 				overrides[parts[0]] = parts[1]
 			}
-		} else if arg == "-o" {
-			if i+1 < len(args) {
-				outputFile = args[i+1]
-				logger.SetOutput(os.Stdout)
-				i++
-			}
+		} else if arg == "-o" && i+1 < len(args) {
+			outputFile = args[i+1]
+			logger.SetOutput(os.Stdout)
+			i++
 		} else {
 			files = append(files, arg)
 		}
 	}
-
-	if len(files) < 1 {
+	if root_path != "" {
+		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && strings.HasSuffix(path, ".marte") {
+				files = append(files, path)
+				logger.Printf("append: %s\n", path)
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Printf("Error while exploring project dir: %v", err)
+			os.Exit(1)
+		}
+	} else if len(files) < 1 {
 		logger.Println("Usage: mdt build [-o output] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
@@ -92,7 +109,7 @@ func runBuild(args []string) {
 		tree.AddFile(file, config)
 	}
 
-	v := validator.NewValidator(tree, ".")
+	v := validator.NewValidator(tree, ".", overrides)
 	v.ValidateProject()
 
 	hasErrors := false
@@ -133,8 +150,44 @@ func runBuild(args []string) {
 }
 
 func runCheck(args []string) {
-	if len(args) < 1 {
-		logger.Println("Usage: mdt check <input_files...>")
+	files := []string{}
+	overrides := make(map[string]string)
+	root_path := ""
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "-P" && i+1 < len(args) {
+			root_path = args[i+1]
+			i++
+		} else if strings.HasPrefix(arg, "-v") {
+			pair := arg[2:]
+			parts := strings.SplitN(pair, "=", 2)
+			if len(parts) == 2 {
+				overrides[parts[0]] = parts[1]
+			}
+		} else {
+			files = append(files, arg)
+		}
+	}
+
+	if root_path != "" {
+		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && strings.HasSuffix(path, ".marte") {
+				files = append(files, path)
+			}
+			return nil
+		})
+		if err != nil {
+			logger.Printf("Error while exploring project dir: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	if len(files) < 1 {
+		logger.Println("Usage: mdt check [-P folder_path] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
@@ -142,7 +195,7 @@ func runCheck(args []string) {
 	tree := index.NewProjectTree()
 	syntaxErrors := 0
 
-	for _, file := range args {
+	for _, file := range files {
 		content, err := os.ReadFile(file)
 		if err != nil {
 			logger.Printf("Error reading %s: %v\n", file, err)
@@ -163,7 +216,7 @@ func runCheck(args []string) {
 		}
 	}
 
-	v := validator.NewValidator(tree, ".")
+	v := validator.NewValidator(tree, ".", overrides)
 	v.ValidateProject()
 
 	for _, diag := range v.Diagnostics {

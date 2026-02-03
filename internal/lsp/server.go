@@ -371,6 +371,8 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	text, ok := Documents[uri]
 	if !ok {
 		// If not found, rely on full sync being first or error
+		logger.Printf("[ERROR] document %s not found\n", uri)
+		return
 	}
 
 	for _, change := range params.ContentChanges {
@@ -467,7 +469,7 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 }
 
 func runValidation(_ string) {
-	v := validator.NewValidator(Tree, ProjectRoot)
+	v := validator.NewValidator(Tree, ProjectRoot, nil)
 	v.ValidateProject()
 
 	// Group diagnostics by file

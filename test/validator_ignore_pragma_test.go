@@ -44,7 +44,7 @@ func TestIgnorePragma(t *testing.T) {
 	idx.AddFile("ignore.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 	v.CheckUnused()
 

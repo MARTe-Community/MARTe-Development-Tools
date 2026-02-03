@@ -23,7 +23,7 @@ func TestVariableValidation(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	pt.AddFile("def.marte", cfg)
 	
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.CheckVariables()
 	
 	foundError := false
@@ -55,7 +55,7 @@ func TestVariableValidation(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	pt2.AddFile("usage.marte", cfg2)
 	
-	v2 := validator.NewValidator(pt2, ".")
+	v2 := validator.NewValidator(pt2, ".", nil)
 	v2.ValidateProject() // Should run CUE validation on nodes
 	
 	foundUsageError := false
@@ -90,7 +90,7 @@ func TestVariableValidation(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	pt3.AddFile("valid.marte", cfg3)
 	
-	v3 := validator.NewValidator(pt3, ".")
+	v3 := validator.NewValidator(pt3, ".", nil)
 	v3.ValidateProject()
 	
 	for _, d := range v3.Diagnostics {

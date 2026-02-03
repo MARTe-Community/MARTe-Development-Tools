@@ -27,7 +27,7 @@ func TestSchemaValidationType(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("test.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false
@@ -61,7 +61,7 @@ func TestSchemaValidationOrder(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("test.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false
@@ -94,7 +94,7 @@ func TestSchemaValidationMandatoryNode(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("test.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	for _, d := range v.Diagnostics {

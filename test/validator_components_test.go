@@ -28,7 +28,7 @@ func TestPIDGAMValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("pid.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundKi := false
@@ -68,7 +68,7 @@ func TestFileDataSourceValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("file.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false

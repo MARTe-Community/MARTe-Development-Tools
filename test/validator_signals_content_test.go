@@ -35,7 +35,7 @@ func TestSignalsContentValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("signals_content.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundBadField := false

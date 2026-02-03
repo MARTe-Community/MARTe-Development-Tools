@@ -31,7 +31,7 @@ func TestSchemaMetaValidation(t *testing.T) {
 	}
 	pt.AddFile("valid.marte", cfg)
 	
-	v := validator.NewValidator(pt, "") 
+	v := validator.NewValidator(pt, "", nil) 
 	v.ValidateProject()
 	
 	if len(v.Diagnostics) > 0 {
@@ -59,7 +59,7 @@ func TestSchemaMetaValidation(t *testing.T) {
 	cfg2, _ := p2.Parse()
 	pt2.AddFile("invalid.marte", cfg2)
 	
-	v2 := validator.NewValidator(pt2, "")
+	v2 := validator.NewValidator(pt2, "", nil)
 	v2.ValidateProject()
 	
 	foundError := false

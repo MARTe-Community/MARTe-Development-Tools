@@ -27,7 +27,7 @@ func TestSDNSubscriberValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("sdn.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false
@@ -60,7 +60,7 @@ func TestFileWriterValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("writer.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false

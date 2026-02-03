@@ -40,7 +40,7 @@ func TestRenameImplicitToDefinition(t *testing.T) {
 	lsp.Tree.ResolveReferences()
 
 	// Run validator to link targets
-	v := validator.NewValidator(lsp.Tree, ".")
+	v := validator.NewValidator(lsp.Tree, ".", nil)
 	v.ValidateProject()
 
 	// Rename Implicit Sig1 (Line 11, 0-based 11)

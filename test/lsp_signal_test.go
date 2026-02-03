@@ -41,7 +41,7 @@ func TestLSPSignalReferences(t *testing.T) {
 	idx.AddFile("signal_refs.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	// Find definition of MySig in MyDS

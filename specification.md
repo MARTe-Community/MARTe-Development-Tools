@@ -12,9 +12,9 @@
 The executable should support the following subcommands:
 
 - `lsp`: Starts the Language Server Protocol server.
-- `build`: Merges files with the same base namespace into a single output.
-- `check`: Runs diagnostics and validations on the configuration files.
-- `fmt`: Formats the configuration files.
+- `build`: Merges files with the same base namespace into a single output. Supports variable overrides (`-vVAR=VAL`) and recursive folder scanning (`-P folder_path`).
+- `check`: Runs diagnostics and validations on configuration files. Supports variable overrides (`-vVAR=VAL`) and recursive folder scanning (`-P folder_path`).
+- `fmt`: Formats configuration files. Preserves single empty lines before node definitions or docstrings while collapsing multiple empty lines to one.
 
 ## LSP Features
 

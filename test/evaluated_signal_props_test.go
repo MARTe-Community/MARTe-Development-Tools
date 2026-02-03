@@ -36,7 +36,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 	tree.AddFile("test.marte", cfg)
 	tree.ResolveReferences()
 
-	v := validator.NewValidator(tree, ".")
+	v := validator.NewValidator(tree, ".", nil)
 	v.ValidateProject()
 
 	// There should be no errors because @N evaluates to 10
@@ -69,7 +69,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 	tree2.AddFile("test_err.marte", cfg2)
 	tree2.ResolveReferences()
 
-	v2 := validator.NewValidator(tree2, ".")
+	v2 := validator.NewValidator(tree2, ".", nil)
 	v2.ValidateProject()
 
 	found := false

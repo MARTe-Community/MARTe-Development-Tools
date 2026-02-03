@@ -28,7 +28,7 @@ func TestRealTimeApplicationValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("app.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	missingData := false
@@ -74,7 +74,7 @@ func TestGAMSchedulerValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("scheduler.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false

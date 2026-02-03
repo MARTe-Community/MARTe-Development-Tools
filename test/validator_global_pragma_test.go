@@ -42,7 +42,7 @@ func TestGlobalPragma(t *testing.T) {
 	idx.AddFile("global_pragma.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 	v.CheckUnused()
 

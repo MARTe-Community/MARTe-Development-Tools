@@ -62,7 +62,7 @@ func TestINOUTOrdering(t *testing.T) {
 
 	// Use validator with default schema (embedded)
 	// We pass "." but it shouldn't matter if no .marte_schema.cue exists
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.ValidateProject()
 
 	foundError := false

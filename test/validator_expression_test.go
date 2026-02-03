@@ -65,7 +65,7 @@ func TestValidatorExpressionCoverage(t *testing.T) {
 	pt.AddFile("expr.marte", cfg)
 	pt.ResolveReferences()
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	// Use NewSchema to ensure basic types
 	v.Schema = schema.NewSchema()
 

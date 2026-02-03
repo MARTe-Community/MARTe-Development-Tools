@@ -49,7 +49,7 @@ $App = {
 	idx.AddFile("dir.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	// Check ValidGAM has NO directionality errors

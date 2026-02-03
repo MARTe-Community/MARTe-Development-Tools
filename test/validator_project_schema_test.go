@@ -53,7 +53,7 @@ package schema
 	idx.AddFile("project.marte", config)
 
 	// Pass tmpDir as projectRoot
-	v := validator.NewValidator(idx, tmpDir)
+	v := validator.NewValidator(idx, tmpDir, nil)
 	v.ValidateProject()
 
 	found := false

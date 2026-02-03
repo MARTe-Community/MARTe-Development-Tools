@@ -73,6 +73,16 @@ func (f *Formatter) formatConfig(config *parser.Configuration) {
 	}
 
 	for _, def := range config.Definitions {
+		pos := def.Pos()
+		peek := f.peekPosition()
+		if peek.Line > 0 && peek.Line < pos.Line {
+			pos = peek
+		}
+
+		if lastLine > 0 && pos.Line > lastLine+1 {
+			fmt.Fprintln(f.writer)
+		}
+
 		f.flushCommentsBefore(def.Pos(), 0, true) // Stick to definition
 		lastLine = f.formatDefinition(def, 0)
 		if f.hasTrailingComment(lastLine) {
@@ -119,9 +129,20 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 }
 
 func (f *Formatter) formatSubnode(sub parser.Subnode, indent int) {
+	lastLine := sub.Position.Line
 	for _, def := range sub.Definitions {
+		pos := def.Pos()
+		peek := f.peekPosition()
+		if peek.Line > 0 && peek.Line < pos.Line && peek.Line > lastLine {
+			pos = peek
+		}
+
+		if lastLine > 0 && pos.Line > lastLine+1 {
+			fmt.Fprintln(f.writer)
+		}
+
 		f.flushCommentsBefore(def.Pos(), indent, true) // Stick to definition
-		lastLine := f.formatDefinition(def, indent)
+		lastLine = f.formatDefinition(def, indent)
 		if f.hasTrailingComment(lastLine) {
 			fmt.Fprintf(f.writer, " %s", f.popComment())
 		}
@@ -230,4 +251,11 @@ func (f *Formatter) popComment() string {
 	c := f.insertables[f.cursor]
 	f.cursor++
 	return c.Text
+}
+
+func (f *Formatter) peekPosition() parser.Position {
+	if f.cursor < len(f.insertables) {
+		return f.insertables[f.cursor].Position
+	}
+	return parser.Position{}
 }

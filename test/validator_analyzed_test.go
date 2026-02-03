@@ -33,7 +33,7 @@ func TestMDSWriterValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("mdswriter.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false
@@ -66,7 +66,7 @@ func TestMathExpressionGAMValidation(t *testing.T) {
 	idx := index.NewProjectTree()
 	idx.AddFile("math.marte", config)
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	found := false

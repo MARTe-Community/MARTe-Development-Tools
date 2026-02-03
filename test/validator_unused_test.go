@@ -41,7 +41,7 @@ $App = {
 	idx.AddFile("test.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.CheckUnused()
 
 	foundUnused := false
@@ -87,7 +87,7 @@ $App = {
 	idx.AddFile("test.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.CheckUnused()
 
 	foundUnusedSig2 := false

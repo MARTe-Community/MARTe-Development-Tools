@@ -31,13 +31,27 @@ type Validator struct {
 	Diagnostics []Diagnostic
 	Tree        *index.ProjectTree
 	Schema      *schema.Schema
+	Overrides   map[string]parser.Value
 }
 
-func NewValidator(tree *index.ProjectTree, projectRoot string) *Validator {
-	return &Validator{
-		Tree:   tree,
-		Schema: schema.LoadFullSchema(projectRoot),
+func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[string]string) *Validator {
+	v := &Validator{
+		Tree:      tree,
+		Schema:    schema.LoadFullSchema(projectRoot),
+		Overrides: make(map[string]parser.Value),
 	}
+
+	for name, valStr := range overrides {
+		p := parser.NewParser("Temp = " + valStr)
+		cfg, _ := p.Parse()
+		if len(cfg.Definitions) > 0 {
+			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
+				v.Overrides[name] = f.Value
+			}
+		}
+	}
+
+	return v
 }
 
 func (v *Validator) ValidateProject() {
@@ -224,7 +238,10 @@ func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) i
 	case *parser.ReferenceValue:
 		return t.Value
 	case *parser.VariableReferenceValue:
-		name := strings.TrimPrefix(t.Name, "@")
+		name := strings.TrimLeft(t.Name, "@$")
+		if ov, ok := v.Overrides[name]; ok {
+			return v.valueToInterface(ov, ctx)
+		}
 		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return v.valueToInterface(info.Def.DefaultValue, ctx)

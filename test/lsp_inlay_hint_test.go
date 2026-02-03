@@ -42,7 +42,7 @@ func TestLSPInlayHint(t *testing.T) {
 	lsp.Tree.AddFile("inlay.marte", cfg)
 	lsp.Tree.ResolveReferences()
 
-	v := validator.NewValidator(lsp.Tree, ".")
+	v := validator.NewValidator(lsp.Tree, ".", nil)
 	v.ValidateProject()
 
 	params := lsp.InlayHintParams{

@@ -71,7 +71,7 @@ func TestGAMSignalValidation(t *testing.T) {
 	idx.AddFile("gam_signals.marte", config)
 	idx.ResolveReferences()
 
-	v := validator.NewValidator(idx, ".")
+	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject()
 
 	foundBadInput := false

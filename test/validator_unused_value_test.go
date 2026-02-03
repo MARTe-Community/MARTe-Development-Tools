@@ -31,7 +31,7 @@ func TestUnusedGAMValueValidation(t *testing.T) {
 	}
 	pt.AddFile("unused.marte", cfg)
 
-	v := validator.NewValidator(pt, ".")
+	v := validator.NewValidator(pt, ".", nil)
 	v.ValidateProject()
 
 	found := false
