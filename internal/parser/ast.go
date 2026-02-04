@@ -2,6 +2,7 @@ package parser
 
 type Node interface {
 	Pos() Position
+	End() Position
 }
 
 type Position struct {
@@ -28,6 +29,7 @@ type Field struct {
 }
 
 func (f *Field) Pos() Position { return f.Position }
+func (f *Field) End() Position { return f.Value.End() }
 func (f *Field) isDefinition() {}
 
 type ObjectNode struct {
@@ -37,6 +39,7 @@ type ObjectNode struct {
 }
 
 func (o *ObjectNode) Pos() Position { return o.Position }
+func (o *ObjectNode) End() Position { return o.Subnode.End() }
 func (o *ObjectNode) isDefinition() {}
 
 type Subnode struct {
@@ -46,6 +49,7 @@ type Subnode struct {
 }
 
 func (s *Subnode) Pos() Position { return s.Position }
+func (s *Subnode) End() Position { return s.EndPosition }
 
 type Value interface {
 	Node
@@ -59,7 +63,14 @@ type StringValue struct {
 }
 
 func (v *StringValue) Pos() Position { return v.Position }
-func (v *StringValue) isValue()      {}
+func (v *StringValue) End() Position {
+	col := v.Position.Column + len(v.Value)
+	if v.Quoted {
+		col += 2
+	}
+	return Position{Line: v.Position.Line, Column: col}
+}
+func (v *StringValue) isValue() {}
 
 type IntValue struct {
 	Position Position
@@ -68,7 +79,10 @@ type IntValue struct {
 }
 
 func (v *IntValue) Pos() Position { return v.Position }
-func (v *IntValue) isValue()      {}
+func (v *IntValue) End() Position {
+	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Raw)}
+}
+func (v *IntValue) isValue() {}
 
 type FloatValue struct {
 	Position Position
@@ -77,7 +91,10 @@ type FloatValue struct {
 }
 
 func (v *FloatValue) Pos() Position { return v.Position }
-func (v *FloatValue) isValue()      {}
+func (v *FloatValue) End() Position {
+	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Raw)}
+}
+func (v *FloatValue) isValue() {}
 
 type BoolValue struct {
 	Position Position
@@ -85,7 +102,14 @@ type BoolValue struct {
 }
 
 func (v *BoolValue) Pos() Position { return v.Position }
-func (v *BoolValue) isValue()      {}
+func (v *BoolValue) End() Position {
+	length := 4 // true
+	if !v.Value {
+		length = 5 // false
+	}
+	return Position{Line: v.Position.Line, Column: v.Position.Column + length}
+}
+func (v *BoolValue) isValue() {}
 
 type ReferenceValue struct {
 	Position Position
@@ -93,7 +117,10 @@ type ReferenceValue struct {
 }
 
 func (v *ReferenceValue) Pos() Position { return v.Position }
-func (v *ReferenceValue) isValue()      {}
+func (v *ReferenceValue) End() Position {
+	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Value)}
+}
+func (v *ReferenceValue) isValue() {}
 
 type ArrayValue struct {
 	Position    Position
@@ -102,6 +129,7 @@ type ArrayValue struct {
 }
 
 func (v *ArrayValue) Pos() Position { return v.Position }
+func (v *ArrayValue) End() Position { return v.EndPosition }
 func (v *ArrayValue) isValue()      {}
 
 type Package struct {
@@ -110,6 +138,9 @@ type Package struct {
 }
 
 func (p *Package) Pos() Position { return p.Position }
+func (p *Package) End() Position {
+	return Position{Line: p.Position.Line, Column: p.Position.Column + 8 + 1 + len(p.URI)}
+}
 
 type Comment struct {
 	Position Position
@@ -118,6 +149,9 @@ type Comment struct {
 }
 
 func (c *Comment) Pos() Position { return c.Position }
+func (c *Comment) End() Position {
+	return Position{Line: c.Position.Line, Column: c.Position.Column + len(c.Text)}
+}
 
 type Pragma struct {
 	Position Position
@@ -125,6 +159,9 @@ type Pragma struct {
 }
 
 func (p *Pragma) Pos() Position { return p.Position }
+func (p *Pragma) End() Position {
+	return Position{Line: p.Position.Line, Column: p.Position.Column + len(p.Text)}
+}
 
 type VariableDefinition struct {
 	Position     Position
@@ -135,6 +172,12 @@ type VariableDefinition struct {
 }
 
 func (v *VariableDefinition) Pos() Position { return v.Position }
+func (v *VariableDefinition) End() Position {
+	if v.DefaultValue != nil {
+		return v.DefaultValue.End()
+	}
+	return Position{Line: v.Position.Line, Column: v.Position.Column + 4 + 1 + len(v.Name) + 2 + len(v.TypeExpr)}
+}
 func (v *VariableDefinition) isDefinition() {}
 
 type VariableReferenceValue struct {
@@ -143,7 +186,10 @@ type VariableReferenceValue struct {
 }
 
 func (v *VariableReferenceValue) Pos() Position { return v.Position }
-func (v *VariableReferenceValue) isValue()      {}
+func (v *VariableReferenceValue) End() Position {
+	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Name)}
+}
+func (v *VariableReferenceValue) isValue() {}
 
 type BinaryExpression struct {
 	Position Position
@@ -153,6 +199,7 @@ type BinaryExpression struct {
 }
 
 func (b *BinaryExpression) Pos() Position { return b.Position }
+func (b *BinaryExpression) End() Position { return b.Right.End() }
 func (b *BinaryExpression) isValue()      {}
 
 type UnaryExpression struct {
@@ -162,4 +209,5 @@ type UnaryExpression struct {
 }
 
 func (u *UnaryExpression) Pos() Position { return u.Position }
+func (u *UnaryExpression) End() Position { return u.Right.End() }
 func (u *UnaryExpression) isValue()      {}

@@ -2061,66 +2061,48 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 					if isComplexValue(f.Value) {
 						res := valueToString(f.Value, node)
 						if res != "" {
-							uri := params.TextDocument.URI
-							text, ok := Documents[uri]
-							if ok {
-								lines := strings.Split(text, "\n")
-								lineIdx := f.Position.Line - 1
-								if lineIdx >= 0 && lineIdx < len(lines) {
-									line := lines[lineIdx]
-									addHint(InlayHint{
-										Position: Position{Line: lineIdx, Character: len(line)},
-										Label:    " => " + res,
-										Kind:     2, // Type/Value
-									})
-								}
-							}
+							end := f.Value.End()
+							addHint(InlayHint{
+								Position: Position{Line: end.Line - 1, Character: end.Column - 1},
+								Label:    " => " + res,
+								Kind:     2, // Type/Value
+							})
 						}
 					}
 
 					// Array Element Evaluation Hint
 					if arr, ok := f.Value.(*parser.ArrayValue); ok {
-						for _, elem := range arr.Elements {
-							if isComplexValue(elem) {
-								res := valueToString(elem, node)
-								if res != "" {
-									uri := params.TextDocument.URI
-									text, ok := Documents[uri]
-									if ok {
-										lines := strings.Split(text, "\n")
-										lineIdx := elem.Pos().Line - 1
-										if lineIdx >= 0 && lineIdx < len(lines) {
-											line := lines[lineIdx]
-											addHint(InlayHint{
-												Position: Position{Line: lineIdx, Character: len(line)},
-												Label:    " => " + res,
-												Kind:     2, // Type/Value
-											})
-										}
+						var processArray func(*parser.ArrayValue)
+						processArray = func(a *parser.ArrayValue) {
+							for _, elem := range a.Elements {
+								if subArr, ok := elem.(*parser.ArrayValue); ok {
+									processArray(subArr)
+								} else if isComplexValue(elem) {
+									res := valueToString(elem, node)
+									if res != "" {
+										end := elem.End()
+										addHint(InlayHint{
+											Position: Position{Line: end.Line - 1, Character: end.Column - 1},
+											Label:    " => " + res,
+											Kind:     2, // Type/Value
+										})
 									}
 								}
 							}
 						}
+						processArray(arr)
 					}
 				} else if v, ok := def.(*parser.VariableDefinition); ok {
 					// Expression Evaluation Hint for #let/#var
 					if v.DefaultValue != nil && isComplexValue(v.DefaultValue) {
 						res := valueToString(v.DefaultValue, node)
 						if res != "" {
-							uri := params.TextDocument.URI
-							text, ok := Documents[uri]
-							if ok {
-								lines := strings.Split(text, "\n")
-								lineIdx := v.Position.Line - 1
-								if lineIdx >= 0 && lineIdx < len(lines) {
-									line := lines[lineIdx]
-									addHint(InlayHint{
-										Position: Position{Line: lineIdx, Character: len(line)},
-										Label:    " => " + res,
-										Kind:     2,
-									})
-								}
-							}
+							end := v.DefaultValue.End()
+							addHint(InlayHint{
+								Position: Position{Line: end.Line - 1, Character: end.Column - 1},
+								Label:    " => " + res,
+								Kind:     2,
+							})
 						}
 					}
 				}
