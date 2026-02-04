@@ -2077,6 +2077,31 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 							}
 						}
 					}
+
+					// Array Element Evaluation Hint
+					if arr, ok := f.Value.(*parser.ArrayValue); ok {
+						for _, elem := range arr.Elements {
+							if isComplexValue(elem) {
+								res := valueToString(elem, node)
+								if res != "" {
+									uri := params.TextDocument.URI
+									text, ok := Documents[uri]
+									if ok {
+										lines := strings.Split(text, "\n")
+										lineIdx := elem.Pos().Line - 1
+										if lineIdx >= 0 && lineIdx < len(lines) {
+											line := lines[lineIdx]
+											addHint(InlayHint{
+												Position: Position{Line: lineIdx, Character: len(line)},
+												Label:    " => " + res,
+												Kind:     2, // Type/Value
+											})
+										}
+									}
+								}
+							}
+						}
+					}
 				} else if v, ok := def.(*parser.VariableDefinition); ok {
 					// Expression Evaluation Hint for #let/#var
 					if v.DefaultValue != nil && isComplexValue(v.DefaultValue) {
@@ -2108,6 +2133,33 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 		if ref.File != path {
 			continue
 		}
+
+		// Check if reference is value of a Class field
+		isClass := false
+		container := Tree.GetNodeContaining(ref.File, ref.Position)
+		if container != nil {
+			for _, frag := range container.Fragments {
+				if frag.File != ref.File {
+					continue
+				}
+				for _, def := range frag.Definitions {
+					if f, ok := def.(*parser.Field); ok && f.Name == "Class" {
+						// Check if the reference matches the field value position
+						if f.Value.Pos() == ref.Position {
+							isClass = true
+							break
+						}
+					}
+				}
+				if isClass {
+					break
+				}
+			}
+		}
+		if isClass {
+			continue
+		}
+
 		if ref.Target != nil {
 			cls := ref.Target.Metadata["Class"]
 			if cls != "" {

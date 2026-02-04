@@ -235,39 +235,42 @@ func (v *Validator) validateTypeField(f *parser.Field, node *index.ProjectNode) 
 }
 
 func (v *Validator) validateGenericField(f *parser.Field, node *index.ProjectNode) {
-	switch val := f.Value.(type) {
+	file := v.getFileForField(f, node)
+	v.validateValue(f.Value, node, file)
+}
+
+func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, file string) {
+	switch t := val.(type) {
 	case *parser.ReferenceValue:
 		// Non-quoted string: a reference -> Must resolve
-		// Unless it is a special field?
-		// "if a non quoted string: a reference (an error should be produced for non valid references)"
-		target := v.resolveReference(val.Value, node, nil)
+		target := v.resolveReference(t.Value, node, nil)
 		if target == nil {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
-				Message:  fmt.Sprintf("Unknown reference '%s'", val.Value),
-				Position: val.Position,
-				File:     v.getFileForField(f, node),
+				Message:  fmt.Sprintf("Unknown reference '%s'", t.Value),
+				Position: t.Position,
+				File:     file,
 			})
 		} else {
 			// Link reference
-			v.updateReferenceTarget(v.getFileForField(f, node), val.Position, target)
+			v.updateReferenceTarget(file, t.Position, target)
 		}
 	case *parser.StringValue:
-		if !val.Quoted {
+		if !t.Quoted {
 			// Should be handled as ReferenceValue by Parser for identifiers.
 			// But if parser produces StringValue(Quoted=false), treat as ref?
 			// Current parser produces ReferenceValue for identifiers.
 			// So StringValue is likely Quoted=true.
 		}
-	case *parser.BinaryExpression:
-		// Evaluate if possible
-		// valueToInterface does evaluation.
-		// If it relies on unresolved vars, it returns nil.
-		res := v.valueToInterface(val, node)
-		if res == nil {
-			// Could warn if expression is malformed?
-			// But nil is valid if vars are missing (already checked by checkVariables?)
+	case *parser.ArrayValue:
+		for _, elem := range t.Elements {
+			v.validateValue(elem, node, file)
 		}
+	case *parser.BinaryExpression:
+		v.validateValue(t.Left, node, file)
+		v.validateValue(t.Right, node, file)
+	case *parser.UnaryExpression:
+		v.validateValue(t.Right, node, file)
 	}
 }
 
