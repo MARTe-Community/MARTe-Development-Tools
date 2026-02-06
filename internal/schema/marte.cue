@@ -73,8 +73,8 @@ package schema
 		...
 	}
 	IOGAM: {
-		InputSignals?: {...} // type: node
-		OutputSignals?: {...} // type: node
+		InputSignals: {...} // type: node
+		OutputSignals: {...} // type: node
 		#meta: type: "gam"
 		...
 	}
@@ -89,6 +89,9 @@ package schema
 		Kp: float | int // type: float (allow int as it promotes)
 		Ki: float | int
 		Kd: float | int
+		SamplingTime?: float | int
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -155,6 +158,7 @@ package schema
 		Address:    string
 		Port:       int
 		Interface?: string
+		Topic?:     string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
 		#meta: type:          "datasource"
@@ -203,6 +207,8 @@ package schema
 		...
 	}
 	ConversionGAM: {
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -214,8 +220,8 @@ package schema
 		Num: [...]
 		Den: [...]
 		ResetInEachState?: _
-		InputSignals?: {...}
-		OutputSignals?: {...}
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -237,8 +243,8 @@ package schema
 	}
 	MathExpressionGAM: {
 		Expression: string
-		InputSignals?: {...}
-		OutputSignals?: {...}
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -247,10 +253,16 @@ package schema
 		...
 	}
 	MuxGAM: {
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
 	SimulinkWrapperGAM: {
+		Library: string
+		Symbol?: string
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -259,6 +271,8 @@ package schema
 		...
 	}
 	StatisticsGAM: {
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -267,11 +281,15 @@ package schema
 		...
 	}
 	TriggeredIOGAM: {
-
+		InputSignals: {...}
+		OutputSignals: {...}
 		#meta: type: "gam"
 		...
 	}
 	WaveformGAM: {
+		InputSignals: {...}
+		OutputSignals: {...}
+		Triggers?: {...}
 		#meta: type: "gam"
 		...
 	}
@@ -282,7 +300,7 @@ package schema
 	}
 	LinuxTimer: {
 		ExecutionMode?:   string
-		SleepNature?:     string
+		SleepNature?:     "Default" | "Busy"
 		SleepPercentage?: _
 		Phase?:           int
 		CPUMask?:         int
@@ -302,7 +320,7 @@ package schema
 	MDSReader: {
 		TreeName:   string
 		ShotNumber: int
-		Frequency:  float | int
+		Frequency?:  float | int
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
@@ -315,9 +333,9 @@ package schema
 		StackSize:             int
 		TreeName:              string
 		PulseNumber?:          int
-		StoreOnTrigger:        int
-		EventName:             string
-		TimeRefresh:           float | int
+		StoreOnTrigger:        0 | 1
+		EventName?:             string
+		TimeRefresh?:           float | int
 		NumberOfPreTriggers?:  int
 		NumberOfPostTriggers?: int
 		Signals: {...}

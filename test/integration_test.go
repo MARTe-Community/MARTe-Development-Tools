@@ -131,8 +131,8 @@ func TestFmtCommand(t *testing.T) {
 		t.Error("Expected sticky comment to be immediately followed by field")
 	}
 
-	if !strings.Contains(output, "Array = { 1 2 3 }") {
-		t.Errorf("Expected formatted array '{ 1 2 3 }', got: %s", output)
+	if !strings.Contains(output, "Array = { 1, 2, 3 }") {
+		t.Errorf("Expected formatted array '{ 1, 2, 3 }', got: %s", output)
 	}
 
 	// Check for inline comments
