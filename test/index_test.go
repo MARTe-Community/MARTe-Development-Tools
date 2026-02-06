@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestNodeMap(t *testing.T) {
@@ -55,12 +56,17 @@ func TestResolveReferencesWithMap(t *testing.T) {
 	nodeA := &index.ProjectNode{Name: "A", RealName: "+A", Children: make(map[string]*index.ProjectNode), Parent: root}
 	root.Children["A"] = nodeA
 
-	ref := index.Reference{Name: "A", File: "test.marte"}
-	pt.References = append(pt.References, ref)
+	// Use IndexValue to populate FileReferences
+	pt.IndexValue("test.marte", &parser.ReferenceValue{Value: "A"})
 
 	pt.ResolveReferences()
 
-	if pt.References[0].Target != nodeA {
+	// Check resolution in FileReferences
+	refs := pt.FileReferences["test.marte"]
+	if len(refs) == 0 {
+		t.Fatal("No references found")
+	}
+	if refs[0].Target != nodeA {
 		t.Error("ResolveReferences failed to resolve A")
 	}
 }

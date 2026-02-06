@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/errors"
@@ -32,6 +33,7 @@ type Validator struct {
 	Tree        *index.ProjectTree
 	Schema      *schema.Schema
 	Overrides   map[string]parser.Value
+	mu          sync.Mutex
 }
 
 func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[string]string) *Validator {
@@ -61,12 +63,29 @@ func (v *Validator) ValidateProject() {
 	// Ensure references are resolved (if not already done by builder/lsp)
 	v.Tree.ResolveReferences()
 
+	var wg sync.WaitGroup
+
 	if v.Tree.Root != nil {
-		v.validateNode(v.Tree.Root)
+		// Validate root itself (usually empty container for packages)
+		// But children (Packages) can be validated in parallel
+		for _, child := range v.Tree.Root.Children {
+			wg.Add(1)
+			go func(n *index.ProjectNode) {
+				defer wg.Done()
+				v.validateNode(n)
+			}(child)
+		}
 	}
 	for _, node := range v.Tree.IsolatedFiles {
-		v.validateNode(node)
+		wg.Add(1)
+		go func(n *index.ProjectNode) {
+			defer wg.Done()
+			v.validateNode(n)
+		}(node)
 	}
+
+	wg.Wait()
+
 	v.CheckUnused()
 	v.CheckDataSourceThreading()
 	v.CheckINOUTOrdering()
@@ -81,12 +100,14 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		for _, frag := range node.Fragments {
 			for _, def := range frag.Definitions {
 				if f, ok := def.(*parser.Field); ok {
+					v.mu.Lock()
 					v.Diagnostics = append(v.Diagnostics, Diagnostic{
 						Level:    LevelError,
 						Message:  fmt.Sprintf("Invalid content in Signals container: Field '%s' is not allowed. Only Signal objects are allowed.", f.Name),
 						Position: f.Position,
 						File:     frag.File,
 					})
+					v.mu.Unlock()
 				}
 			}
 		}
@@ -98,12 +119,14 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	for name, defs := range fields {
 		if len(defs) > 1 {
 			firstFile := v.getFileForField(defs[0], node)
+			v.mu.Lock()
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
 				Position: defs[1].Position,
 				File:     v.getFileForField(defs[1], node),
 			})
+			v.mu.Unlock()
 		}
 	}
 
@@ -135,12 +158,14 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		if className == "" && !hasType {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
+			v.mu.Lock()
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Node %s is an object and must contain a 'Class' field (or be a Signal with 'Type')", node.RealName),
 				Position: pos,
 				File:     file,
 			})
+			v.mu.Unlock()
 		}
 
 		if className == "RealTimeThread" {
@@ -190,8 +215,14 @@ func (v *Validator) validateClassField(f *parser.Field, node *index.ProjectNode)
 
 	// Check if class exists in schema
 	if v.Schema != nil && className != "" {
+		// Strip namespace if present (e.g. SDN::SDNSubscriber -> SDNSubscriber)
+		lookupName := className
+		if idx := strings.LastIndex(className, "::"); idx != -1 {
+			lookupName = className[idx+2:]
+		}
+
 		// Use cue LookupPath to check existence in #Classes
-		path := cue.ParsePath(fmt.Sprintf("#Classes.%s", className))
+		path := cue.ParsePath(fmt.Sprintf("#Classes.%s", lookupName))
 		if v.Schema.Value.LookupPath(path).Err() != nil {
 			// Unknown Class
 			if !v.isSuppressed("unknown_class", node) {
@@ -292,8 +323,14 @@ func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bo
 }
 
 func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
+	// Strip namespace if present
+	lookupName := className
+	if idx := strings.LastIndex(className, "::"); idx != -1 {
+		lookupName = className[idx+2:]
+	}
+
 	// Check if class exists in schema
-	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", className))
+	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", lookupName))
 	if v.Schema.Value.LookupPath(classPath).Err() != nil {
 		return // Unknown class, skip validation
 	}
@@ -785,11 +822,18 @@ func (v *Validator) checkCastPragma(node *index.ProjectNode, defType, curType st
 }
 
 func (v *Validator) updateReferenceTarget(file string, pos parser.Position, target *index.ProjectNode) {
-	for i := range v.Tree.References {
-		ref := &v.Tree.References[i]
-		if ref.File == file && ref.Position == pos {
-			ref.Target = target
-			return
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if refs, ok := v.Tree.FileReferences[file]; ok {
+		for i := range refs {
+			if refs[i].Position == pos {
+				refs[i].Target = target
+				// Also update legacy slice if necessary, but FileReferences is primary now
+				// pt.References will be rebuilt by ResolveReferences anyway?
+				// But we are in middle of validation.
+				// For now, update map entry.
+				return
+			}
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
@@ -16,32 +17,66 @@ type VariableInfo struct {
 }
 
 type ProjectTree struct {
-	Root          *ProjectNode
-	References    []Reference
-	IsolatedFiles map[string]*ProjectNode
-	GlobalPragmas map[string][]string
-	NodeMap       map[string][]*ProjectNode
+	Root           *ProjectNode
+	References     []Reference // Deprecated: Use FileReferences for lookup
+	FileReferences map[string][]Reference
+	IsolatedFiles  map[string]*ProjectNode
+	GlobalPragmas  map[string][]string
+	NodeMap        map[string][]*ProjectNode
+	mu             sync.RWMutex
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
-	return filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	var files []string
+	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".marte") {
-			logger.Printf("indexing: %s [%s]\n", info.Name(), path)
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err // Or log and continue
-			}
-			p := parser.NewParser(string(content))
-			config, _ := p.Parse()
-			if config != nil {
-				pt.AddFile(path, config)
-			}
+			files = append(files, path)
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	type result struct {
+		path   string
+		config *parser.Configuration
+	}
+	results := make(chan result, len(files))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8) // Limit concurrency
+
+	for _, f := range files {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			logger.Printf("indexing: %s [%s]\n", filepath.Base(path), path)
+			content, err := os.ReadFile(path)
+			if err == nil {
+				p := parser.NewParser(string(content))
+				config, _ := p.Parse()
+				if config != nil {
+					results <- result{path, config}
+				}
+			}
+		}(f)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for res := range results {
+		pt.AddFile(res.path, res.config)
+	}
+	return nil
 }
 
 type Reference struct {
@@ -82,8 +117,10 @@ func NewProjectTree() *ProjectTree {
 			Metadata:  make(map[string]string),
 			Variables: make(map[string]VariableInfo),
 		},
-		IsolatedFiles: make(map[string]*ProjectNode),
-		GlobalPragmas: make(map[string][]string),
+		IsolatedFiles:  make(map[string]*ProjectNode),
+		GlobalPragmas:  make(map[string][]string),
+		NodeMap:        make(map[string][]*ProjectNode),
+		FileReferences: make(map[string][]Reference),
 	}
 }
 
@@ -95,17 +132,56 @@ func NormalizeName(name string) string {
 }
 
 func (pt *ProjectTree) RemoveFile(file string) {
-	newRefs := []Reference{}
-	for _, ref := range pt.References {
-		if ref.File != file {
-			newRefs = append(newRefs, ref)
-		}
-	}
-	pt.References = newRefs
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	// Remove references for this file
+	delete(pt.FileReferences, file)
 
-	delete(pt.IsolatedFiles, file)
+	// Rebuild legacy References slice (if needed, or deprecate usage)
+	pt.rebuildLegacyReferences()
+
+	if iso, ok := pt.IsolatedFiles[file]; ok {
+		pt.removeNodeTreeFromMap(iso)
+		delete(pt.IsolatedFiles, file)
+	}
 	delete(pt.GlobalPragmas, file)
 	pt.removeFileFromNode(pt.Root, file)
+}
+
+func (pt *ProjectTree) removeNodeTreeFromMap(node *ProjectNode) {
+	pt.removeFromNodeMap(node)
+	for _, child := range node.Children {
+		pt.removeNodeTreeFromMap(child)
+	}
+}
+
+func (pt *ProjectTree) removeFromNodeMap(node *ProjectNode) {
+	removeFromList := func(name string) {
+		if list, ok := pt.NodeMap[name]; ok {
+			newList := []*ProjectNode{}
+			for _, n := range list {
+				if n != node {
+					newList = append(newList, n)
+				}
+			}
+			if len(newList) == 0 {
+				delete(pt.NodeMap, name)
+			} else {
+				pt.NodeMap[name] = newList
+			}
+		}
+	}
+	removeFromList(node.Name)
+	if node.RealName != node.Name {
+		removeFromList(node.RealName)
+	}
+}
+
+func (pt *ProjectTree) rebuildLegacyReferences() {
+	pt.References = nil
+	for _, refs := range pt.FileReferences {
+		pt.References = append(pt.References, refs...)
+	}
 }
 
 func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
@@ -136,6 +212,7 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 		pt.removeFileFromNode(child, file)
 		if len(child.Fragments) == 0 && len(child.Children) == 0 {
 			delete(node.Children, name)
+			pt.removeFromNodeMap(child)
 		}
 	}
 }
@@ -173,7 +250,24 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 }
 
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
-	pt.RemoveFile(file)
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	
+	// We call internal removeFile (without lock, as we hold it)
+	// But RemoveFile is public and locks.
+	// We should split RemoveFile into internal/external.
+	// Refactoring to avoid double lock or code dup.
+	// For now, let's copy body of RemoveFile logic or use a helper.
+	
+	// RE-IMPLEMENTATION of RemoveFile logic inline to avoid deadlock
+	delete(pt.FileReferences, file)
+	pt.rebuildLegacyReferences()
+	if iso, ok := pt.IsolatedFiles[file]; ok {
+		pt.removeNodeTreeFromMap(iso)
+		delete(pt.IsolatedFiles, file)
+	}
+	delete(pt.GlobalPragmas, file)
+	pt.removeFileFromNode(pt.Root, file)
 
 	// Collect global pragmas
 	for _, p := range config.Pragmas {
@@ -192,6 +286,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		}
 		pt.IsolatedFiles[file] = node
 		pt.populateNode(node, file, config)
+		pt.addToNodeMap(node)
 		return
 	}
 
@@ -212,11 +307,29 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 				Metadata:  make(map[string]string),
 				Variables: make(map[string]VariableInfo),
 			}
+			pt.addToNodeMap(node.Children[part])
 		}
 		node = node.Children[part]
 	}
 
 	pt.populateNode(node, file, config)
+}
+
+func (pt *ProjectTree) addToNodeMap(n *ProjectNode) {
+	add := func(name string) {
+		if name == "" {
+			return
+		}
+		list := pt.NodeMap[name]
+		for _, existing := range list {
+			if existing == n {
+				return
+			}
+		}
+		pt.NodeMap[name] = append(list, n)
+	}
+	add(n.Name)
+	add(n.RealName)
 }
 
 func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *parser.Configuration) {
@@ -232,7 +345,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		switch d := def.(type) {
 		case *parser.Field:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
-			pt.indexValue(file, d.Value)
+			pt.IndexValue(file, d.Value)
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
@@ -253,6 +366,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			if child.RealName == norm && d.Name != norm {
 				child.RealName = d.Name
 			}
+			pt.addToNodeMap(child)
 
 			if doc != "" {
 				if child.Doc != "" {
@@ -290,7 +404,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		switch d := def.(type) {
 		case *parser.Field:
 			frag.Definitions = append(frag.Definitions, d)
-			pt.indexValue(file, d.Value)
+			pt.IndexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
@@ -312,6 +426,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			if child.RealName == norm && d.Name != norm {
 				child.RealName = d.Name
 			}
+			pt.addToNodeMap(child)
 
 			if subDoc != "" {
 				if child.Doc != "" {
@@ -393,62 +508,146 @@ func (pt *ProjectTree) findPragmas(pragmas []parser.Pragma, pos parser.Position)
 	return found
 }
 
-func (pt *ProjectTree) indexValue(file string, val parser.Value) {
+func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 	switch v := val.(type) {
 	case *parser.ReferenceValue:
-		pt.References = append(pt.References, Reference{
+		ref := Reference{
 			Name:     v.Value,
 			Position: v.Position,
 			File:     file,
-		})
+		}
+		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
+		// Maintain legacy slice for now
+		pt.References = append(pt.References, ref)
 	case *parser.VariableReferenceValue:
 		name := strings.TrimPrefix(v.Name, "@")
-		pt.References = append(pt.References, Reference{
+		ref := Reference{
 			Name:       name,
 			Position:   v.Position,
 			File:       file,
 			IsVariable: true,
-		})
+		}
+		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
+		pt.References = append(pt.References, ref)
 	case *parser.BinaryExpression:
-		pt.indexValue(file, v.Left)
-		pt.indexValue(file, v.Right)
+		pt.IndexValue(file, v.Left)
+		pt.IndexValue(file, v.Right)
 	case *parser.UnaryExpression:
-		pt.indexValue(file, v.Right)
+		pt.IndexValue(file, v.Right)
 	case *parser.ArrayValue:
 		for _, elem := range v.Elements {
-			pt.indexValue(file, elem)
+			pt.IndexValue(file, elem)
 		}
 	}
 }
 
 func (pt *ProjectTree) RebuildIndex() {
-	pt.NodeMap = make(map[string][]*ProjectNode)
-	visitor := func(n *ProjectNode) {
-		pt.NodeMap[n.Name] = append(pt.NodeMap[n.Name], n)
-		if n.RealName != n.Name {
-			pt.NodeMap[n.RealName] = append(pt.NodeMap[n.RealName], n)
-		}
-	}
-	pt.Walk(visitor)
-}
+	// Deprecated or optimized away?
+	// ResolveReferences calls this.
+	// If we maintain NodeMap incrementally, we don't need this.
+	// But let's check if we trust incremental updates.
+	// For now, let's just ensure NodeMap is populated.
+	if len(pt.NodeMap) == 0 {
+		pt.NodeMap = make(map[string][]*ProjectNode)
+		visitor := func(n *ProjectNode) {
+			pt.NodeMap[n.Name] = append(pt.NodeMap[n.Name], n)
+			if n.RealName != n.Name {
+				pt.NodeMap[n.RealName] = append(pt.NodeMap[n.RealName], n)
+					}
+				}
+				pt.walk(visitor)
+			}}
 
 func (pt *ProjectTree) ResolveReferences() {
-	pt.RebuildIndex()
-	for i := range pt.References {
-		ref := &pt.References[i]
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
 
-		container := pt.GetNodeContaining(ref.File, ref.Position)
+	if len(pt.NodeMap) == 0 {
+		pt.RebuildIndex()
+	}
+	
+	// We need to resolve ALL references?
+	// Or only those that are unresolved or might have changed?
+	// For simplicity, resolve all, but avoid tree walking if possible.
+	
+	// Iterate map
+	pt.References = nil // Clear legacy slice to rebuild it consistent with map
+	
+	for _, refs := range pt.FileReferences {
+		for i := range refs {
+			ref := &refs[i]
+			container := pt.getNodeContaining(ref.File, ref.Position)
 
-		if v := pt.ResolveVariable(container, ref.Name); v != nil {
-			ref.TargetVariable = v.Def
-			continue
+			if v := pt.resolveVariable(container, ref.Name); v != nil {
+				ref.TargetVariable = v.Def
+			} else {
+				ref.Target = pt.resolveName(container, ref.Name, nil)
+			}
+			pt.References = append(pt.References, *ref) // Keep legacy slice updated
 		}
-
-		ref.Target = pt.ResolveName(container, ref.Name, nil)
+		// Update map? No, ref is pointer to slice elem?
+		// No, &refs[i] points to slice backing array.
+		// So map is updated.
 	}
 }
 
 func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
+	// Internal usage might already hold lock.
+	// But FindNode is public.
+	// We need to be careful about recursive locking.
+	// ResolveName calls FindNode.
+	// ResolveName is public.
+	// If ResolveReferences (Lock) calls ResolveName (Lock) -> Deadlock.
+	
+	// STRATEGY: Public methods Lock. Private methods don't.
+	// Rename internal implementation to findNodeInternal.
+	// Public FindNode calls Lock + findNodeInternal.
+	
+	// But FindNode is used by ResolveName.
+	// ResolveName is used by ResolveReferences.
+	// ResolveReferences holds Lock.
+	
+	// I should make FindNode assume NO lock? No, that's unsafe for public usage.
+	// I should make FindNode acquire RLock.
+	// But if called from ResolveReferences (holding Lock), RLock might block?
+	// RWMutex: If Lock is held, RLock blocks.
+	
+	// So I MUST separate internal/external.
+	// Or pass a context?
+	
+	// Quick fix: Since I control the code, I will rename `FindNode` to `findNode` (private)
+	// and make `FindNode` (public) wrap it with RLock.
+	// And update internal callers (`ResolveName`) to use `findNode`?
+	// `ResolveName` is public too.
+	
+	// Let's defer adding lock to FindNode inside index.go for a moment and check callers.
+	// `ResolveName` calls `FindNode`.
+	// `ResolveReferences` calls `ResolveName`.
+	
+	// If I modify `ResolveReferences` to call `resolveNameInternal`?
+	// It seems deep refactoring is needed to do proper locking.
+	
+	// Alternative: `ResolveReferences` releases lock during resolution?
+	// No, `NodeMap` might change.
+	
+	// Let's implement `findNode` (unlocked) and `FindNode` (locked).
+	// Same for `ResolveName`.
+	
+	// Implementation below replaces FindNode signature to be the Locked version wrapper
+	// and renames body to findNode.
+	// Wait, Replace tool cannot rename body easily without moving code.
+	
+	// I will just add RLock to FindNode.
+	// AND I will change ResolveReferences to NOT call public ResolveName/FindNode?
+	// `ResolveReferences` calls `pt.ResolveName`.
+	// I will change `ResolveReferences` to use `pt.resolveName` (unlocked).
+	
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.findNode(root, name, predicate, strict)
+}
+
+func (pt *ProjectTree) findNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
 	if pt.NodeMap == nil {
 		pt.RebuildIndex()
 	}
@@ -536,9 +735,12 @@ type QueryResult struct {
 }
 
 func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
-	for i := range pt.References {
-		ref := &pt.References[i]
-		if ref.File == file {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	// Search in FileReferences instead of global slice
+	if refs, ok := pt.FileReferences[file]; ok {
+		for i := range refs {
+			ref := &refs[i]
 			if line == ref.Position.Line && col >= ref.Position.Column && col < ref.Position.Column+len(ref.Name) {
 				return &QueryResult{Reference: ref}
 			}
@@ -553,6 +755,12 @@ func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
 }
 
 func (pt *ProjectTree) Walk(visitor func(*ProjectNode)) {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	pt.walk(visitor)
+}
+
+func (pt *ProjectTree) walk(visitor func(*ProjectNode)) {
 	if pt.Root != nil {
 		pt.walkRecursive(pt.Root, visitor)
 	}
@@ -600,6 +808,12 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 }
 
 func (pt *ProjectTree) GetNodeContaining(file string, pos parser.Position) *ProjectNode {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.getNodeContaining(file, pos)
+}
+
+func (pt *ProjectTree) getNodeContaining(file string, pos parser.Position) *ProjectNode {
 	if isoNode, ok := pt.IsolatedFiles[file]; ok {
 		if found := pt.findNodeContaining(isoNode, file, pos); found != nil {
 			return found
@@ -641,13 +855,19 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 }
 
 func (pt *ProjectTree) ResolveName(ctx *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.resolveName(ctx, name, predicate)
+}
+
+func (pt *ProjectTree) resolveName(ctx *ProjectNode, name string, predicate func(*ProjectNode) bool) *ProjectNode {
 	if ctx == nil {
-		return pt.FindNode(pt.Root, name, predicate, true)
+		return pt.findNode(pt.Root, name, predicate, true)
 	}
 
 	curr := ctx
 	for curr != nil {
-		if found := pt.FindNode(curr, name, predicate, false); found != nil {
+		if found := pt.findNode(curr, name, predicate, false); found != nil {
 			return found
 		}
 		curr = curr.Parent
@@ -655,7 +875,7 @@ func (pt *ProjectTree) ResolveName(ctx *ProjectNode, name string, predicate func
 
 	// Fallback to global root if not found in local scope chain (Strict search)
 	if pt.Root != nil {
-		if found := pt.FindNode(pt.Root, name, predicate, true); found != nil {
+		if found := pt.findNode(pt.Root, name, predicate, true); found != nil {
 			return found
 		}
 	}
@@ -664,6 +884,12 @@ func (pt *ProjectTree) ResolveName(ctx *ProjectNode, name string, predicate func
 }
 
 func (pt *ProjectTree) ResolveVariable(ctx *ProjectNode, name string) *VariableInfo {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.resolveVariable(ctx, name)
+}
+
+func (pt *ProjectTree) resolveVariable(ctx *ProjectNode, name string) *VariableInfo {
 	curr := ctx
 	for curr != nil {
 		if v, ok := curr.Variables[name]; ok {

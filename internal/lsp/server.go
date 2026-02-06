@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -195,7 +196,29 @@ type TextEdit struct {
 	NewText string `json:"newText"`
 }
 
+var validationChan = make(chan string, 10)
+var SynchronousValidation = true // Default to true for tests
+
+func init() {
+	// Start validation debouncer
+	go func() {
+		var timer *time.Timer
+		var pendingURI string
+
+		for uri := range validationChan {
+			if timer != nil {
+				timer.Stop()
+			}
+			pendingURI = uri
+			timer = time.AfterFunc(200*time.Millisecond, func() {
+				runValidation(pendingURI)
+			})
+		}
+	}()
+}
+
 func RunServer() {
+	SynchronousValidation = false // Disable sync for production
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		msg, err := readMessage(reader)
@@ -361,8 +384,11 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 
 	if config != nil {
 		Tree.AddFile(path, config)
-		Tree.ResolveReferences()
-		runValidation(params.TextDocument.URI)
+		if SynchronousValidation {
+			runValidation(params.TextDocument.URI)
+		} else {
+			validationChan <- params.TextDocument.URI
+		}
 	}
 }
 
@@ -392,8 +418,11 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 
 	if config != nil {
 		Tree.AddFile(path, config)
-		Tree.ResolveReferences()
-		runValidation(uri)
+		if SynchronousValidation {
+			runValidation(uri)
+		} else {
+			validationChan <- uri
+		}
 	}
 }
 
@@ -469,8 +498,11 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 }
 
 func runValidation(_ string) {
+	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
 	v := validator.NewValidator(Tree, ProjectRoot, nil)
 	v.ValidateProject()
+
+	logger.Printf("Validation complete. Diagnostics: %d", len(v.Diagnostics))
 
 	// Group diagnostics by file
 	fileDiags := make(map[string][]LSPDiagnostic)

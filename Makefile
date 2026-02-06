@@ -7,7 +7,7 @@ all: vet test build
 
 build:
 	mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/mdt
+	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/mdt
 
 test:
 	go test -v ./test/...
