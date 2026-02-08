@@ -10,44 +10,108 @@ import (
 )
 
 func TestNamespaceClassValidation(t *testing.T) {
-	content := `
+	tests := []struct {
+		name          string
+		content       string
+		expectWarning bool
+		warningText   string
+	}{
+		{
+			name: "Valid Namespace Class",
+			content: `
 +Obj = {
     Class = "SDN::SDNSubscriber"
 	Topic = "MyTopic"
 	Interface = "eth0"
 }
-`
-	// SDNSubscriber is defined in internal/schema/marte.cue so it should be valid if we strip SDN::
-	// If we don't strip, it will be "Unknown Class".
-
-	p := parser.NewParser(content)
-	config, err := p.Parse()
-	if err != nil {
-		t.Fatal(err)
+`,
+			expectWarning: false,
+		},
+		{
+			name: "Valid Unquoted Namespace Class",
+			content: `
++Obj = {
+    Class = SDN::SDNSubscriber
+	Topic = "MyTopic"
+	Interface = "eth0"
+}
+`,
+			expectWarning: false,
+		},
+		{
+			name: "Valid Class No Namespace",
+			content: `
++Obj = {
+    Class = "SDNSubscriber"
+	Topic = "MyTopic"
+	Interface = "eth0"
+}
+`,
+			expectWarning: false,
+		},
+		{
+			name: "Unknown Class with Namespace",
+			content: `
++Obj = {
+    Class = "SDN::UnknownClass"
+}
+`,
+			expectWarning: true,
+			warningText:   "Unknown Class",
+		},
+		{
+			name: "Unknown Class No Namespace",
+			content: `
++Obj = {
+    Class = "UnknownClass"
+}
+`,
+			expectWarning: true,
+			warningText:   "Unknown Class",
+		},
+		{
+			name: "Arbitrary Namespace Ignored",
+			content: `
++Obj = {
+    Class = "MyLib::SDNSubscriber"
+	Topic = "MyTopic"
+	Interface = "eth0"
+}
+`,
+			expectWarning: false,
+		},
 	}
 
-	idx := index.NewProjectTree()
-	idx.AddFile("namespace.marte", config)
-
-	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
-
-	for _, d := range v.Diagnostics {
-		if d.Level == validator.LevelWarning && strings.Contains(d.Message, "Unknown Class") {
-			t.Errorf("Unexpected Unknown Class warning: %s", d.Message)
-		}
-		// We might get other errors if SDNSubscriber validation fails due to missing fields, 
-		// but here we provided mandatory ones (Topic, Interface).
-		// Actually Address/Port are optional/mandatory depending on definition.
-		// In marte.cue:
-		/*
-			SDNSubscriber: {
-				Topic!:              string
-				Address?:            string
-				Interface!:          string
-                ...
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := parser.NewParser(tt.content)
+			config, err := p.Parse()
+			if err != nil {
+				t.Fatal(err)
 			}
-		*/
-		// So it should pass CUE validation too.
+
+			idx := index.NewProjectTree()
+			idx.AddFile("test.marte", config)
+
+			v := validator.NewValidator(idx, ".", nil)
+			v.ValidateProject()
+
+			found := false
+			for _, d := range v.Diagnostics {
+				if d.Level == validator.LevelWarning && tt.warningText != "" && strings.Contains(d.Message, tt.warningText) {
+					found = true
+				}
+				if !tt.expectWarning && d.Level == validator.LevelError {
+					t.Errorf("Unexpected error: %s", d.Message)
+				}
+			}
+
+			if tt.expectWarning && !found {
+				t.Errorf("Expected warning '%s' but got none", tt.warningText)
+			}
+			if !tt.expectWarning && found {
+				t.Errorf("Unexpected warning '%s'", tt.warningText)
+			}
+		})
 	}
 }

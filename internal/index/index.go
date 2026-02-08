@@ -245,6 +245,11 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 
 	// Capture relevant fields
 	if key == "Class" || key == "Type" || key == "NumberOfElements" || key == "NumberOfDimensions" || key == "DataSource" {
+		if key == "Class" {
+			if idx := strings.LastIndex(val, "::"); idx != -1 {
+				val = val[idx+2:]
+			}
+		}
 		node.Metadata[key] = val
 	}
 }

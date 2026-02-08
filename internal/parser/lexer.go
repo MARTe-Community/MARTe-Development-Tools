@@ -204,6 +204,12 @@ func (l *Lexer) lexIdentifier() Token {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' || r == '.' {
 			continue
 		}
+		if r == ':' {
+			if l.peek() == ':' {
+				l.next() // consume second :
+				continue
+			}
+		}
 		l.backup()
 		val := l.input[l.start:l.pos]
 		if val == "true" || val == "false" {

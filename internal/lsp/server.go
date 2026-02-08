@@ -1133,10 +1133,14 @@ func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
 		}
 
 		if match {
+			cls := node.Metadata["Class"]
+			if idx := strings.LastIndex(cls, "::"); idx != -1 {
+				cls = cls[idx+2:]
+			}
 			items = append(items, CompletionItem{
 				Label:  node.Name,
 				Kind:   6, // Variable
-				Detail: node.Metadata["Class"],
+				Detail: cls,
 			})
 		}
 
@@ -1354,6 +1358,9 @@ func getEvaluatedMetadata(node *index.ProjectNode, key string) string {
 func formatNodeInfo(node *index.ProjectNode) string {
 	info := ""
 	if class := node.Metadata["Class"]; class != "" {
+		if idx := strings.LastIndex(class, "::"); idx != -1 {
+			class = class[idx+2:]
+		}
 		info = fmt.Sprintf("`%s:%s`\n\n", class, node.RealName[1:])
 	} else {
 		info = fmt.Sprintf("`%s`\n\n", node.RealName)
@@ -2075,11 +2082,23 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 				if f, ok := def.(*parser.Field); ok {
 					// DataSource Class Hint
 					if f.Name == "DataSource" && (node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals")) {
-						dsName := valueToString(f.Value, node)
+						var dsName string
+						switch v := f.Value.(type) {
+						case *parser.StringValue:
+							dsName = v.Value
+						case *parser.ReferenceValue:
+							dsName = v.Value
+						default:
+							dsName = valueToString(f.Value, node)
+						}
+
 						dsNode := Tree.ResolveName(node, dsName, isDataSource)
 						if dsNode != nil {
 							cls := dsNode.Metadata["Class"]
 							if cls != "" {
+								if idx := strings.LastIndex(cls, "::"); idx != -1 {
+									cls = cls[idx+2:]
+								}
 								addHint(InlayHint{
 									Position: Position{Line: f.Position.Line - 1, Character: f.Position.Column - 1 + len(f.Name) + 3}, // "DataSource = "
 									Label:    cls + "::",
@@ -2177,6 +2196,9 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 		if ref.Target != nil {
 			cls := ref.Target.Metadata["Class"]
 			if cls != "" {
+				if idx := strings.LastIndex(cls, "::"); idx != -1 {
+					cls = cls[idx+2:]
+				}
 				addHint(InlayHint{
 					Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
 					Label:    cls + "::",

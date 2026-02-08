@@ -376,7 +376,16 @@ func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
 	for name, defs := range fields {
 		if len(defs) > 0 {
 			// Use the last definition (duplicates checked elsewhere)
-			m[name] = v.valueToInterface(defs[len(defs)-1].Value, node)
+			val := v.valueToInterface(defs[len(defs)-1].Value, node)
+			// Strip namespace from Class field value for schema validation
+			if name == "Class" {
+				if s, ok := val.(string); ok {
+					if idx := strings.LastIndex(s, "::"); idx != -1 {
+						val = s[idx+2:]
+					}
+				}
+			}
+			m[name] = val
 		}
 	}
 
@@ -866,6 +875,10 @@ func (v *Validator) resolveReference(name string, ctx *index.ProjectNode, predic
 
 func (v *Validator) getNodeClass(node *index.ProjectNode) string {
 	if cls, ok := node.Metadata["Class"]; ok {
+		// Strip namespace if present
+		if idx := strings.LastIndex(cls, "::"); idx != -1 {
+			return cls[idx+2:]
+		}
 		return cls
 	}
 	return ""
