@@ -20,7 +20,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
     }
 }
 +GAM = {
-    Class = IOGAM
+    Class = ConversionGAM
     InputSignals = {
         Sig1 = { DataSource = DS Type = uint32 NumberOfElements = 10 }
     }
@@ -57,7 +57,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
     }
 }
 +GAM = {
-    Class = IOGAM
+    Class = ConversionGAM
     InputSignals = {
         Sig1 = { DataSource = DS Type = uint32 NumberOfElements = 10 }
     }

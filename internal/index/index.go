@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,15 +29,56 @@ type ProjectTree struct {
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 	var files []string
-	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	visited := make(map[string]struct{})
+
+	var walk func(string) error
+	walk = func(path string) error {
+		info, err := os.Lstat(path)
 		if err != nil {
-			return err
+			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".marte") {
-			files = append(files, path)
+
+		// Handle symlinks
+		if info.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil
+			}
+			absResolved, _ := filepath.Abs(resolved)
+			if _, ok := visited[absResolved]; ok {
+				return nil
+			}
+			// For symlinked folders, we check the target info
+			info, err = os.Stat(path)
+			if err != nil {
+				return nil
+			}
+			// Note: we don't mark visited yet, the recursive call or file logic will do it
+		}
+
+		absPath, _ := filepath.Abs(path)
+		if _, ok := visited[absPath]; ok {
+			return nil
+		}
+		visited[absPath] = struct{}{}
+
+		if info.IsDir() {
+			entries, err := os.ReadDir(path)
+			if err != nil {
+				return nil
+			}
+			for _, e := range entries {
+				walk(filepath.Join(path, e.Name()))
+			}
+		} else {
+			if strings.HasSuffix(info.Name(), ".marte") {
+				files = append(files, path)
+			}
 		}
 		return nil
-	})
+	}
+
+	err := walk(rootPath)
 	if err != nil {
 		return err
 	}
@@ -99,15 +141,23 @@ type ProjectNode struct {
 	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
 	Pragmas   []string
 	Variables map[string]VariableInfo
+	Fields    map[string][]EvaluatedField
+}
+
+type EvaluatedField struct {
+	Raw   *parser.Field
+	Value parser.Value
 }
 
 type Fragment struct {
-	File        string
-	Definitions []parser.Definition
-	IsObject    bool
-	ObjectPos   parser.Position
-	EndPos      parser.Position
-	Doc         string // Documentation for this fragment (if object)
+	File           string
+	Definitions    []parser.Definition
+	IsObject       bool
+	ObjectPos      parser.Position
+	EndPos         parser.Position
+	Doc            string // Documentation for this fragment (if object)
+	Pragmas        []string
+	DefinitionDocs map[parser.Definition]string
 }
 
 func NewProjectTree() *ProjectTree {
@@ -116,6 +166,7 @@ func NewProjectTree() *ProjectTree {
 			Children:  make(map[string]*ProjectNode),
 			Metadata:  make(map[string]string),
 			Variables: make(map[string]VariableInfo),
+			Fields:    make(map[string][]EvaluatedField),
 		},
 		IsolatedFiles:  make(map[string]*ProjectNode),
 		GlobalPragmas:  make(map[string][]string),
@@ -193,8 +244,13 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 	}
 	node.Fragments = newFragments
 
-	// Re-aggregate documentation
+	// Re-aggregate EVERYTHING from fragments
 	node.Doc = ""
+	node.Metadata = make(map[string]string)
+	node.Fields = make(map[string][]EvaluatedField)
+	node.Variables = make(map[string]VariableInfo)
+	node.Pragmas = nil
+
 	for _, frag := range node.Fragments {
 		if frag.Doc != "" {
 			if node.Doc != "" {
@@ -202,11 +258,21 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 			}
 			node.Doc += frag.Doc
 		}
+		node.Pragmas = append(node.Pragmas, frag.Pragmas...)
+		for _, def := range frag.Definitions {
+			switch d := def.(type) {
+			case *parser.Field:
+				pt.extractFieldMetadata(node, d)
+				node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
+			case *parser.VariableDefinition:
+				node.Variables[d.Name] = VariableInfo{
+					Def:  d,
+					File: frag.File,
+					Doc:  frag.DefinitionDocs[d],
+				}
+			}
+		}
 	}
-
-	// Re-aggregate metadata
-	node.Metadata = make(map[string]string)
-	pt.rebuildMetadata(node)
 
 	for name, child := range node.Children {
 		pt.removeFileFromNode(child, file)
@@ -218,6 +284,7 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 }
 
 func (pt *ProjectTree) rebuildMetadata(node *ProjectNode) {
+	// Logic integrated into removeFileFromNode, but keeping for compatibility if used elsewhere
 	for _, frag := range node.Fragments {
 		for _, def := range frag.Definitions {
 			if f, ok := def.(*parser.Field); ok {
@@ -266,7 +333,6 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	
 	// RE-IMPLEMENTATION of RemoveFile logic inline to avoid deadlock
 	delete(pt.FileReferences, file)
-	pt.rebuildLegacyReferences()
 	if iso, ok := pt.IsolatedFiles[file]; ok {
 		pt.removeNodeTreeFromMap(iso)
 		delete(pt.IsolatedFiles, file)
@@ -288,6 +354,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 			Children:  make(map[string]*ProjectNode),
 			Metadata:  make(map[string]string),
 			Variables: make(map[string]VariableInfo),
+			Fields:    make(map[string][]EvaluatedField),
 		}
 		pt.IsolatedFiles[file] = node
 		pt.populateNode(node, file, config)
@@ -311,6 +378,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 				Parent:    node,
 				Metadata:  make(map[string]string),
 				Variables: make(map[string]VariableInfo),
+				Fields:    make(map[string][]EvaluatedField),
 			}
 			pt.addToNodeMap(node.Children[part])
 		}
@@ -339,8 +407,9 @@ func (pt *ProjectTree) addToNodeMap(n *ProjectNode) {
 
 func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *parser.Configuration) {
 	fileFragment := &Fragment{
-		File:     file,
-		IsObject: false,
+		File:           file,
+		IsObject:       false,
+		DefinitionDocs: make(map[parser.Definition]string),
 	}
 
 	for _, def := range config.Definitions {
@@ -350,12 +419,16 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		switch d := def.(type) {
 		case *parser.Field:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			fileFragment.DefinitionDocs[d] = doc
 			pt.IndexValue(file, d.Value)
+			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			fileFragment.DefinitionDocs[d] = doc
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			fileFragment.DefinitionDocs[d] = doc
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -365,6 +438,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 					Parent:    node,
 					Metadata:  make(map[string]string),
 					Variables: make(map[string]VariableInfo),
+					Fields:    make(map[string][]EvaluatedField),
 				}
 			}
 			child := node.Children[norm]
@@ -394,12 +468,15 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 }
 
 func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment, pragmas []parser.Pragma) {
+	selfPragmas := pt.findPragmas(pragmas, obj.Position)
 	frag := &Fragment{
-		File:      file,
-		IsObject:  true,
-		ObjectPos: obj.Position,
-		EndPos:    obj.Subnode.EndPosition,
-		Doc:       doc,
+		File:           file,
+		IsObject:       true,
+		ObjectPos:      obj.Position,
+		EndPos:         obj.Subnode.EndPosition,
+		Doc:            doc,
+		Pragmas:        selfPragmas,
+		DefinitionDocs: make(map[parser.Definition]string),
 	}
 
 	for _, def := range obj.Subnode.Definitions {
@@ -409,13 +486,17 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		switch d := def.(type) {
 		case *parser.Field:
 			frag.Definitions = append(frag.Definitions, d)
+			frag.DefinitionDocs[d] = subDoc
 			pt.IndexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
+			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
+			frag.DefinitionDocs[d] = subDoc
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: subDoc}
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
+			frag.DefinitionDocs[d] = subDoc
 			norm := NormalizeName(d.Name)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -425,6 +506,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 					Parent:    node,
 					Metadata:  make(map[string]string),
 					Variables: make(map[string]VariableInfo),
+					Fields:    make(map[string][]EvaluatedField),
 				}
 			}
 			child := node.Children[norm]
@@ -908,4 +990,190 @@ func (pt *ProjectTree) resolveVariable(ctx *ProjectNode, name string) *VariableI
 		}
 	}
 	return nil
+}
+
+func (pt *ProjectTree) Evaluate(val parser.Value, ctx *ProjectNode) parser.Value {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.evaluate(val, ctx)
+}
+
+func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value {
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimLeft(v.Name, "@")
+		if info := pt.resolveVariable(ctx, name); info != nil {
+			if info.Def.DefaultValue != nil {
+				return pt.evaluate(info.Def.DefaultValue, ctx)
+			}
+		}
+		return v
+	case *parser.BinaryExpression:
+		left := pt.evaluate(v.Left, ctx)
+		right := pt.evaluate(v.Right, ctx)
+		if res := pt.compute(left, v.Operator, right); res != nil {
+			return res
+		}
+		return &parser.BinaryExpression{
+			Position: v.Position,
+			Left:     left,
+			Operator: v.Operator,
+			Right:    right,
+		}
+	case *parser.UnaryExpression:
+		right := pt.evaluate(v.Right, ctx)
+		if res := pt.computeUnary(v.Operator, right); res != nil {
+			return res
+		}
+		return &parser.UnaryExpression{
+			Position: v.Position,
+			Operator: v.Operator,
+			Right:    right,
+		}
+	case *parser.ArrayValue:
+		newElems := make([]parser.Value, len(v.Elements))
+		for i, e := range v.Elements {
+			newElems[i] = pt.evaluate(e, ctx)
+		}
+		return &parser.ArrayValue{
+			Position:    v.Position,
+			EndPosition: v.EndPosition,
+			Elements:    newElems,
+		}
+	}
+	return val
+}
+
+func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
+	if op.Type == parser.TokenConcat {
+		s1 := pt.valueToString(left)
+		s2 := pt.valueToString(right)
+		return &parser.StringValue{Value: s1 + s2, Quoted: true}
+	}
+
+	toInt := func(v parser.Value) (int64, bool) {
+		if idx, ok := v.(*parser.IntValue); ok {
+			return idx.Value, true
+		}
+		return 0, false
+	}
+	toFloat := func(v parser.Value) (float64, bool) {
+		if f, ok := v.(*parser.FloatValue); ok {
+			return f.Value, true
+		}
+		if idx, ok := v.(*parser.IntValue); ok {
+			return float64(idx.Value), true
+		}
+		return 0, false
+	}
+
+	lI, lIsI := toInt(left)
+	rI, rIsI := toInt(right)
+
+	if lIsI && rIsI {
+		var res int64
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lI + rI
+		case parser.TokenMinus:
+			res = lI - rI
+		case parser.TokenStar:
+			res = lI * rI
+		case parser.TokenSlash:
+			if rI != 0 {
+				res = lI / rI
+			}
+		case parser.TokenPercent:
+			if rI != 0 {
+				res = lI % rI
+			}
+		case parser.TokenAmpersand:
+			res = lI & rI
+		case parser.TokenPipe:
+			res = lI | rI
+		case parser.TokenCaret:
+			res = lI ^ rI
+		}
+		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
+	}
+
+	lF, lIsF := toFloat(left)
+	rF, rIsF := toFloat(right)
+
+	if lIsF && rIsF {
+		var res float64
+		switch op.Type {
+		case parser.TokenPlus:
+			res = lF + rF
+		case parser.TokenMinus:
+			res = lF - rF
+		case parser.TokenStar:
+			res = lF * rF
+		case parser.TokenSlash:
+			res = lF / rF
+		}
+		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
+	}
+
+	return nil
+}
+
+func (pt *ProjectTree) computeUnary(op parser.Token, val parser.Value) parser.Value {
+	switch op.Type {
+	case parser.TokenMinus:
+		if i, ok := val.(*parser.IntValue); ok {
+			return &parser.IntValue{Value: -i.Value, Raw: fmt.Sprintf("%d", -i.Value)}
+		}
+		if f, ok := val.(*parser.FloatValue); ok {
+			return &parser.FloatValue{Value: -f.Value, Raw: fmt.Sprintf("%g", -f.Value)}
+		}
+	case parser.TokenSymbol:
+		if op.Value == "!" {
+			if b, ok := val.(*parser.BoolValue); ok {
+				return &parser.BoolValue{Value: !b.Value}
+			}
+		}
+	}
+	return nil
+}
+
+func (pt *ProjectTree) ValueToString(val parser.Value) string {
+	return pt.valueToString(val)
+}
+
+func (pt *ProjectTree) valueToString(val parser.Value) string {
+	switch v := val.(type) {
+	case *parser.StringValue:
+		return v.Value
+	case *parser.IntValue:
+		return v.Raw
+	case *parser.FloatValue:
+		return v.Raw
+	case *parser.BoolValue:
+		return fmt.Sprintf("%v", v.Value)
+	case *parser.ReferenceValue:
+		return v.Value
+	case *parser.VariableReferenceValue:
+		return v.Name
+	case *parser.ArrayValue:
+		elements := []string{}
+		for _, e := range v.Elements {
+			elements = append(elements, pt.valueToString(e))
+		}
+		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
+	default:
+		return ""
+	}
+}
+
+func (pt *ProjectTree) ResolveFields() {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	pt.walk(func(node *ProjectNode) {
+		for _, fields := range node.Fields {
+			for i := range fields {
+				fields[i].Value = pt.evaluate(fields[i].Raw.Value, node)
+			}
+		}
+	})
 }

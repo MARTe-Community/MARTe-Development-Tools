@@ -60,7 +60,8 @@ func (v *Validator) ValidateProject() {
 	if v.Tree == nil {
 		return
 	}
-	// Ensure references are resolved (if not already done by builder/lsp)
+	// Ensure references and fields are resolved (if not already done by builder/lsp)
+	v.Tree.ResolveFields()
 	v.Tree.ResolveReferences()
 
 	var wg sync.WaitGroup
@@ -118,13 +119,13 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 	// 1. Check for duplicate fields (Go logic)
 	for name, defs := range fields {
 		if len(defs) > 1 {
-			firstFile := v.getFileForField(defs[0], node)
+			firstFile := v.getFileForField(defs[0].Raw, node)
 			v.mu.Lock()
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
-				Position: defs[1].Position,
-				File:     v.getFileForField(defs[1], node),
+				Position: defs[1].Raw.Position,
+				File:     v.getFileForField(defs[1].Raw, node),
 			})
 			v.mu.Unlock()
 		}
@@ -173,11 +174,6 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		}
 	}
 
-	// 3. CUE Validation
-	if className != "" && v.Schema != nil {
-		v.validateWithCUE(node, className)
-	}
-
 	// 4. Signal Validation (for DataSource signals)
 	if isSignal(node) {
 		v.validateSignal(node, fields)
@@ -188,13 +184,23 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 		v.validateGAM(node)
 	}
 
+	// 6. DataSource Validation
+	if isDataSource(node) {
+		v.validateDataSource(node)
+	}
+
+	// 3. CUE Validation
+	if className != "" && v.Schema != nil {
+		v.validateWithCUE(node, className)
+	}
+
 	// Recursively validate children
 	for _, child := range node.Children {
 		v.validateNode(child)
 	}
 }
 
-func (v *Validator) validateClassField(f *parser.Field, node *index.ProjectNode) {
+func (v *Validator) validateClassField(f index.EvaluatedField, node *index.ProjectNode) {
 	// Class field should always have a value Class (string quoted or not)
 	var className string
 	switch val := f.Value.(type) {
@@ -207,8 +213,8 @@ func (v *Validator) validateClassField(f *parser.Field, node *index.ProjectNode)
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
-			Position: f.Position,
-			File:     v.getFileForField(f, node),
+			Position: f.Raw.Position,
+			File:     v.getFileForField(f.Raw, node),
 		})
 		return
 	}
@@ -229,15 +235,15 @@ func (v *Validator) validateClassField(f *parser.Field, node *index.ProjectNode)
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelWarning,
 					Message:  fmt.Sprintf("Unknown Class '%s'", className),
-					Position: f.Position,
-					File:     v.getFileForField(f, node),
+					Position: f.Raw.Position,
+					File:     v.getFileForField(f.Raw, node),
 				})
 			}
 		}
 	}
 }
 
-func (v *Validator) validateTypeField(f *parser.Field, node *index.ProjectNode) {
+func (v *Validator) validateTypeField(f index.EvaluatedField, node *index.ProjectNode) {
 	// Type field should always have a type as value (uint etc)
 	var typeName string
 	switch val := f.Value.(type) {
@@ -249,8 +255,8 @@ func (v *Validator) validateTypeField(f *parser.Field, node *index.ProjectNode) 
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
-			Position: f.Position,
-			File:     v.getFileForField(f, node),
+			Position: f.Raw.Position,
+			File:     v.getFileForField(f.Raw, node),
 		})
 		return
 	}
@@ -259,14 +265,14 @@ func (v *Validator) validateTypeField(f *parser.Field, node *index.ProjectNode) 
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Invalid Type '%s'", typeName),
-			Position: f.Position,
-			File:     v.getFileForField(f, node),
+			Position: f.Raw.Position,
+			File:     v.getFileForField(f.Raw, node),
 		})
 	}
 }
 
-func (v *Validator) validateGenericField(f *parser.Field, node *index.ProjectNode) {
-	file := v.getFileForField(f, node)
+func (v *Validator) validateGenericField(f index.EvaluatedField, node *index.ProjectNode) {
+	file := v.getFileForField(f.Raw, node)
 	v.validateValue(f.Value, node, file)
 }
 
@@ -387,6 +393,10 @@ func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
 			}
 			m[name] = val
 		}
+	}
+
+	if size := v.getSignalByteSize(node); size > 0 {
+		m["ByteSize"] = int(size)
 	}
 
 	// Children as nested maps?
@@ -541,7 +551,7 @@ func (v *Validator) evaluateUnary(op parser.TokenType, val interface{}) interfac
 	return nil
 }
 
-func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]*parser.Field) {
+func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]index.EvaluatedField) {
 	// ... (same as before)
 	if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
@@ -562,8 +572,8 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Field 'Type' in Signal '%s' must be a type name", node.RealName),
-				Position: typeFields[0].Position,
-				File:     v.getFileForField(typeFields[0], node),
+				Position: typeFields[0].Raw.Position,
+				File:     v.getFileForField(typeFields[0].Raw, node),
 			})
 			return
 		}
@@ -572,11 +582,13 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeStr, node.RealName),
-				Position: typeFields[0].Position,
-				File:     v.getFileForField(typeFields[0], node),
+				Position: typeFields[0].Raw.Position,
+				File:     v.getFileForField(typeFields[0].Raw, node),
 			})
 		}
 	}
+	
+	v.validateByteSize(node, fields)
 }
 
 func (v *Validator) validateGAM(node *index.ProjectNode) {
@@ -586,6 +598,13 @@ func (v *Validator) validateGAM(node *index.ProjectNode) {
 	if outputs, ok := node.Children["OutputSignals"]; ok {
 		v.validateGAMSignals(node, outputs, "Output")
 	}
+}
+
+
+
+func (v *Validator) validateDataSource(node *index.ProjectNode) {
+	// Hooks for DataSource specialized validation
+	// switch v.getNodeClass(node) { ... }
 }
 
 func (v *Validator) validateGAMSignals(gamNode, signalsContainer *index.ProjectNode, direction string) {
@@ -618,7 +637,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 
 	// Link DataSource reference
 	if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
-		if val, ok := dsFields[0].Value.(*parser.ReferenceValue); ok {
+		if val, ok := dsFields[0].Raw.Value.(*parser.ReferenceValue); ok {
 			v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, dsNode)
 		}
 	}
@@ -711,7 +730,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
 					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					Position: typeFields[0].Position,
+					Position: typeFields[0].Raw.Position,
 					File:     v.getNodeFile(signalNode),
 				})
 			}
@@ -720,15 +739,23 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		signalNode.Target = targetNode
 		// Link Alias reference
 		if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
-			if val, ok := aliasFields[0].Value.(*parser.ReferenceValue); ok {
+			if val, ok := aliasFields[0].Raw.Value.(*parser.ReferenceValue); ok {
 				v.updateReferenceTarget(v.getNodeFile(signalNode), val.Position, targetNode)
 			}
 		}
 
 		// Property checks
 		v.checkSignalProperty(signalNode, targetNode, "Type")
-		v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
-		v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+		
+		// If Ranges or Samples are present, NumberOfElements/Dimensions might differ legitimately (local override/modification)
+		hasModifiers := false
+		if r, ok := fields["Ranges"]; ok && len(r) > 0 { hasModifiers = true }
+		if s, ok := fields["Samples"]; ok && len(s) > 0 { hasModifiers = true }
+
+		if !hasModifiers {
+			v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
+			v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+		}
 
 		// Check Type validity if present
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
@@ -737,12 +764,15 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelError,
 					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					Position: typeFields[0].Position,
+					Position: typeFields[0].Raw.Position,
 					File:     v.getNodeFile(signalNode),
 				})
 			}
 		}
 	}
+
+	// Validate ByteSize
+	v.validateByteSize(signalNode, fields)
 
 	// Validate Value initialization
 	if valField, hasValue := fields["Value"]; hasValue && len(valField) > 0 {
@@ -750,7 +780,9 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
 			typeStr = v.getFieldValue(typeFields[0], signalNode)
 		} else if signalNode.Target != nil {
-			if t, ok := signalNode.Target.Metadata["Type"]; ok {
+			if tFields, ok := signalNode.Target.Fields["Type"]; ok && len(tFields) > 0 {
+				typeStr = v.getFieldValue(tFields[0], signalNode.Target)
+			} else if t, ok := signalNode.Target.Metadata["Type"]; ok {
 				typeStr = t
 			}
 		}
@@ -766,7 +798,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 					v.Diagnostics = append(v.Diagnostics, Diagnostic{
 						Level:    LevelError,
 						Message:  fmt.Sprintf("Value initialization mismatch for signal '%s': %v", signalNode.RealName, err),
-						Position: valField[0].Position,
+						Position: valField[0].Raw.Position,
 						File:     v.getNodeFile(signalNode),
 					})
 				}
@@ -776,14 +808,185 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 }
 
 func (v *Validator) getEvaluatedMetadata(node *index.ProjectNode, key string) string {
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if f, ok := def.(*parser.Field); ok && f.Name == key {
-				return v.getFieldValue(f, node)
+	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
+		return v.getFieldValue(fields[len(fields)-1], node)
+	}
+	return node.Metadata[key]
+}
+
+func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
+	fields := v.getFields(node)
+
+	// Get Type
+	typeStr := ""
+	if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
+		typeStr = v.getFieldValue(typeFields[0], node)
+	} else if node.Target != nil {
+		if tFields, ok := node.Target.Fields["Type"]; ok && len(tFields) > 0 {
+			typeStr = v.getFieldValue(tFields[0], node.Target)
+		} else if t, ok := node.Target.Metadata["Type"]; ok {
+			typeStr = t
+		}
+	}
+
+	if typeStr == "" {
+		return 0
+	}
+
+	typeSize := v.getTypeSize(typeStr)
+	if typeSize <= 0 {
+		return 0 // Variable size or unknown type
+	}
+
+	totalElements := int64(1)
+
+	// 1. Check for Ranges (Overrides base dimensions)
+	if rangeFields, ok := fields["Ranges"]; ok && len(rangeFields) > 0 {
+		if arr, ok := rangeFields[0].Value.(*parser.ArrayValue); ok {
+			totalElements = 1
+			for _, elem := range arr.Elements {
+				if inner, ok := elem.(*parser.ArrayValue); ok && len(inner.Elements) == 2 {
+					start := v.valueToInterface(inner.Elements[0], node)
+					stop := v.valueToInterface(inner.Elements[1], node)
+
+					var iStart, iStop int64
+					if s, ok := start.(int64); ok {
+						iStart = s
+					} else if s, ok := start.(int); ok {
+						iStart = int64(s)
+					}
+					if s, ok := stop.(int64); ok {
+						iStop = s
+					} else if s, ok := stop.(int); ok {
+						iStop = int64(s)
+					}
+
+					if iStop >= iStart {
+						totalElements *= (iStop - iStart + 1)
+					}
+				}
+			}
+		}
+	} else {
+		// Base elements calculation
+		numElements := int64(1)
+		if neFields, ok := fields["NumberOfElements"]; ok && len(neFields) > 0 {
+			val := v.valueToInterface(neFields[0].Value, node)
+			if i, ok := val.(int64); ok {
+				numElements = i
+			} else if i, ok := val.(int); ok {
+				numElements = int64(i)
+			}
+		} else if node.Target != nil {
+			if neFields, ok := node.Target.Fields["NumberOfElements"]; ok && len(neFields) > 0 {
+				val := v.valueToInterface(neFields[0].Value, node.Target)
+				if i, ok := val.(int64); ok {
+					numElements = i
+				} else if i, ok := val.(int); ok {
+					numElements = int64(i)
+				}
+			} else if ne, ok := node.Target.Metadata["NumberOfElements"]; ok {
+				if i, err := strconv.ParseInt(ne, 0, 64); err == nil {
+					numElements = i
+				}
+			}
+		}
+
+		numDimensions := int64(1)
+		if ndFields, ok := fields["NumberOfDimensions"]; ok && len(ndFields) > 0 {
+			val := v.valueToInterface(ndFields[0].Value, node)
+			if i, ok := val.(int64); ok {
+				numDimensions = i
+			} else if i, ok := val.(int); ok {
+				numDimensions = int64(i)
+			}
+		} else if node.Target != nil {
+			if ndFields, ok := node.Target.Fields["NumberOfDimensions"]; ok && len(ndFields) > 0 {
+				val := v.valueToInterface(ndFields[0].Value, node.Target)
+				if i, ok := val.(int64); ok {
+					numDimensions = i
+				} else if i, ok := val.(int); ok {
+					numDimensions = int64(i)
+				}
+			} else if nd, ok := node.Target.Metadata["NumberOfDimensions"]; ok {
+				if i, err := strconv.ParseInt(nd, 0, 64); err == nil {
+					numDimensions = i
+				}
+			}
+		}
+		totalElements = numElements * numDimensions
+	}
+
+	// 2. Check for Samples multiplier
+	if sampleFields, ok := fields["Samples"]; ok && len(sampleFields) > 0 {
+		val := v.valueToInterface(sampleFields[0].Value, node)
+		var samples int64
+		if i, ok := val.(int64); ok {
+			samples = i
+		} else if i, ok := val.(int); ok {
+			samples = int64(i)
+		}
+		if samples > 0 {
+			totalElements *= samples
+		}
+	}
+
+	return int64(typeSize) * totalElements
+}
+
+func (v *Validator) validateByteSize(node *index.ProjectNode, fields map[string][]index.EvaluatedField) {
+	expectedSize := v.getSignalByteSize(node)
+	if expectedSize == 0 {
+		return
+	}
+
+	// Check ByteSize or ByteDimension
+	sizeFields := [][]index.EvaluatedField{}
+	if f, ok := fields["ByteSize"]; ok {
+		sizeFields = append(sizeFields, f)
+	}
+	if f, ok := fields["ByteDimension"]; ok {
+		sizeFields = append(sizeFields, f)
+	}
+
+	for _, fs := range sizeFields {
+		if len(fs) > 0 {
+			val := v.valueToInterface(fs[0].Value, node)
+			var definedSize int64
+			if i, ok := val.(int64); ok {
+				definedSize = i
+			} else if i, ok := val.(int); ok {
+				definedSize = int64(i)
+			} else {
+				continue
+			}
+
+			if definedSize != expectedSize {
+				v.Diagnostics = append(v.Diagnostics, Diagnostic{
+					Level:    LevelError,
+					Message:  fmt.Sprintf("Size mismatch for signal '%s': defined %d, expected %d", node.RealName, definedSize, expectedSize),
+					Position: fs[0].Raw.Position,
+					File:     v.getNodeFile(node),
+				})
 			}
 		}
 	}
-	return node.Metadata[key]
+}
+
+func (v *Validator) getTypeSize(typeName string) int {
+	switch typeName {
+	case "uint8", "int8", "char8", "bool":
+		return 1
+	case "uint16", "int16":
+		return 2
+	case "uint32", "int32", "float32":
+		return 4
+	case "uint64", "int64", "float64":
+		return 8
+	case "string":
+		return -1 // Variable size, usually pointer or handled differently
+	}
+	return 0 // Unknown
 }
 
 func (v *Validator) checkSignalProperty(gamSig, dsSig *index.ProjectNode, prop string) {
@@ -849,19 +1052,11 @@ func (v *Validator) updateReferenceTarget(file string, pos parser.Position, targ
 
 // Helpers
 
-func (v *Validator) getFields(node *index.ProjectNode) map[string][]*parser.Field {
-	fields := make(map[string][]*parser.Field)
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if f, ok := def.(*parser.Field); ok {
-				fields[f.Name] = append(fields[f.Name], f)
-			}
-		}
-	}
-	return fields
+func (v *Validator) getFields(node *index.ProjectNode) map[string][]index.EvaluatedField {
+	return node.Fields
 }
 
-func (v *Validator) getFieldValue(f *parser.Field, ctx *index.ProjectNode) string {
+func (v *Validator) getFieldValue(f index.EvaluatedField, ctx *index.ProjectNode) string {
 	res := v.valueToInterface(f.Value, ctx)
 	if res == nil {
 		return ""
@@ -1033,7 +1228,7 @@ func (v *Validator) getNodeFile(node *index.ProjectNode) string {
 	return ""
 }
 
-func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[string][]*parser.Field) {
+func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[string][]index.EvaluatedField) {
 	if funcs, ok := fields["Functions"]; ok && len(funcs) > 0 {
 		f := funcs[0]
 		if arr, ok := f.Value.(*parser.ArrayValue); ok {
@@ -1052,7 +1247,7 @@ func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[stri
 					v.Diagnostics = append(v.Diagnostics, Diagnostic{
 						Level:    LevelError,
 						Message:  "Functions array must contain references",
-						Position: f.Position,
+						Position: f.Raw.Position,
 						File:     v.getNodeFile(node),
 					})
 				}

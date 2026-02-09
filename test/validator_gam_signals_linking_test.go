@@ -22,7 +22,7 @@ func TestGAMSignalLinking(t *testing.T) {
 }
 
 +MyGAM = {
-    Class = IOGAM
+    Class = ConversionGAM
     //! ignore(unused)
     InputSignals = {
         MySig = {

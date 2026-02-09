@@ -9,6 +9,10 @@ build:
 	mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/mdt
 
+build_codac:
+	mkdir -p $(BUILD_DIR)/Codac
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/Codac/$(BINARY_NAME) ./cmd/mdt
+
 test:
 	go test -v ./test/...
 

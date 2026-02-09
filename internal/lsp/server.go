@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -286,6 +287,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				}
 				logger.Printf("Scan done")
 				Tree.ResolveReferences()
+				Tree.ResolveFields()
 				logger.Printf("Resolve done")
 				GlobalSchema = schema.LoadFullSchema(ProjectRoot)
 				logger.Printf("Schema done")
@@ -380,10 +382,10 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 	p := parser.NewParser(params.TextDocument.Text)
 	config, _ := p.Parse()
 
-	publishParserErrors(params.TextDocument.URI, p.Errors())
-
 	if config != nil {
 		Tree.AddFile(path, config)
+		Tree.ResolveReferences()
+		Tree.ResolveFields()
 		if SynchronousValidation {
 			runValidation(params.TextDocument.URI)
 		} else {
@@ -418,6 +420,8 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 
 	if config != nil {
 		Tree.AddFile(path, config)
+		Tree.ResolveReferences()
+		Tree.ResolveFields()
 		if SynchronousValidation {
 			runValidation(uri)
 		} else {
@@ -703,32 +707,11 @@ func HandleHover(params HoverParams) *Hover {
 }
 
 func valueToString(val parser.Value, ctx *index.ProjectNode) string {
-	val = evaluate(val, ctx)
-	switch v := val.(type) {
-	case *parser.StringValue:
-		if v.Quoted {
-			return fmt.Sprintf("\"%s\"", v.Value)
-		}
-		return v.Value
-	case *parser.IntValue:
-		return v.Raw
-	case *parser.FloatValue:
-		return v.Raw
-	case *parser.BoolValue:
-		return fmt.Sprintf("%v", v.Value)
-	case *parser.ReferenceValue:
-		return v.Value
-	case *parser.VariableReferenceValue:
-		return v.Name
-	case *parser.ArrayValue:
-		elements := []string{}
-		for _, e := range v.Elements {
-			elements = append(elements, valueToString(e, ctx))
-		}
-		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
-	default:
-		return ""
+	res := Tree.Evaluate(val, ctx)
+	if s, ok := res.(*parser.StringValue); ok && s.Quoted {
+		return fmt.Sprintf("\"%s\"", s.Value)
 	}
+	return Tree.ValueToString(res)
 }
 
 func HandleCompletion(params CompletionParams) *CompletionList {
@@ -1345,12 +1328,8 @@ func HandleReferences(params ReferenceParams) []Location {
 }
 
 func getEvaluatedMetadata(node *index.ProjectNode, key string) string {
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if f, ok := def.(*parser.Field); ok && f.Name == key {
-				return valueToString(f.Value, node)
-			}
-		}
+	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
+		return Tree.ValueToString(Tree.Evaluate(fields[len(fields)-1].Value, node))
 	}
 	return node.Metadata[key]
 }
@@ -1387,16 +1366,11 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 
 		// Size
-		dims := getEvaluatedMetadata(node, "NumberOfDimensions")
-		elems := getEvaluatedMetadata(node, "NumberOfElements")
-		if dims != "" || elems != "" {
-			if dims == "" {
-				dims = "1"
-			}
-			if elems == "" {
-				elems = "1"
-			}
-			sigInfo += fmt.Sprintf("**Size**: %sx%s ", dims, elems)
+		_, byteSize, desc := calculateSignalElements(node)
+		if byteSize > 0 {
+			sigInfo += fmt.Sprintf("**Size**: %d bytes (%s) ", byteSize, desc)
+		} else {
+			sigInfo += fmt.Sprintf("**Size**: %s ", desc)
 		}
 		info += sigInfo
 	}
@@ -1897,124 +1871,102 @@ func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
 	return peers
 }
 
-func evaluate(val parser.Value, ctx *index.ProjectNode) parser.Value {
-	switch v := val.(type) {
-	case *parser.VariableReferenceValue:
-		name := strings.TrimLeft(v.Name, "@")
-		if info := Tree.ResolveVariable(ctx, name); info != nil {
-			if info.Def.DefaultValue != nil {
-				return evaluate(info.Def.DefaultValue, ctx)
-			}
-		}
-		return v
-	case *parser.BinaryExpression:
-		left := evaluate(v.Left, ctx)
-		right := evaluate(v.Right, ctx)
-		return compute(left, v.Operator, right)
-	case *parser.UnaryExpression:
-		right := evaluate(v.Right, ctx)
-		return computeUnary(v.Operator, right)
+func getEvaluatedField(node *index.ProjectNode, key string) parser.Value {
+	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
+		return Tree.Evaluate(fields[len(fields)-1].Value, node)
 	}
-	return val
+	return nil
 }
 
-func compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
-	if op.Type == parser.TokenConcat {
-		getRaw := func(v parser.Value) string {
-			if s, ok := v.(*parser.StringValue); ok {
-				return s.Value
-			}
-			return valueToString(v, nil)
-		}
-		s1 := getRaw(left)
-		s2 := getRaw(right)
-		return &parser.StringValue{Value: s1 + s2, Quoted: true}
+func valueToInt(val parser.Value) int64 {
+	if i, ok := val.(*parser.IntValue); ok {
+		return i.Value
 	}
-
-	toInt := func(v parser.Value) (int64, bool) {
-		if idx, ok := v.(*parser.IntValue); ok {
-			return idx.Value, true
-		}
-		return 0, false
-	}
-	toFloat := func(v parser.Value) (float64, bool) {
-		if f, ok := v.(*parser.FloatValue); ok {
-			return f.Value, true
-		}
-		if idx, ok := v.(*parser.IntValue); ok {
-			return float64(idx.Value), true
-		}
-		return 0, false
-	}
-
-	lI, lIsI := toInt(left)
-	rI, rIsI := toInt(right)
-
-	if lIsI && rIsI {
-		var res int64
-		switch op.Type {
-		case parser.TokenPlus:
-			res = lI + rI
-		case parser.TokenMinus:
-			res = lI - rI
-		case parser.TokenStar:
-			res = lI * rI
-		case parser.TokenSlash:
-			if rI != 0 {
-				res = lI / rI
-			}
-		case parser.TokenPercent:
-			if rI != 0 {
-				res = lI % rI
-			}
-		case parser.TokenAmpersand:
-			res = lI & rI
-		case parser.TokenPipe:
-			res = lI | rI
-		case parser.TokenCaret:
-			res = lI ^ rI
-		}
-		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
-	}
-
-	lF, lIsF := toFloat(left)
-	rF, rIsF := toFloat(right)
-
-	if lIsF || rIsF {
-		var res float64
-		switch op.Type {
-		case parser.TokenPlus:
-			res = lF + rF
-		case parser.TokenMinus:
-			res = lF - rF
-		case parser.TokenStar:
-			res = lF * rF
-		case parser.TokenSlash:
-			res = lF / rF
-		}
-		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
-	}
-
-	return left
+	return 0
 }
 
-func computeUnary(op parser.Token, val parser.Value) parser.Value {
-	switch op.Type {
-	case parser.TokenMinus:
-		if i, ok := val.(*parser.IntValue); ok {
-			return &parser.IntValue{Value: -i.Value, Raw: fmt.Sprintf("%d", -i.Value)}
-		}
-		if f, ok := val.(*parser.FloatValue); ok {
-			return &parser.FloatValue{Value: -f.Value, Raw: fmt.Sprintf("%g", -f.Value)}
-		}
-	case parser.TokenSymbol:
-		if op.Value == "!" {
-			if b, ok := val.(*parser.BoolValue); ok {
-				return &parser.BoolValue{Value: !b.Value}
+func getTypeSize(typeName string) int64 {
+	switch typeName {
+	case "uint8", "int8", "char8", "bool":
+		return 1
+	case "uint16", "int16":
+		return 2
+	case "uint32", "int32", "float32":
+		return 4
+	case "uint64", "int64", "float64":
+		return 8
+	case "string":
+		return 0 // Dynamic
+	}
+	return 0
+}
+
+func calculateSignalElements(node *index.ProjectNode) (int64, int64, string) {
+	// Returns: (totalElements, byteSize, description)
+	typ := getEvaluatedMetadata(node, "Type")
+	if typ == "" && node.Target != nil {
+		typ = getEvaluatedMetadata(node.Target, "Type")
+	}
+	typeSize := getTypeSize(typ)
+
+	// Check Modifiers
+	rangesVal := getEvaluatedField(node, "Ranges")
+	samplesVal := getEvaluatedField(node, "Samples")
+
+	totalElements := int64(1)
+	isModified := false
+
+	if rangesVal != nil {
+		if arr, ok := rangesVal.(*parser.ArrayValue); ok {
+			totalElements = 1
+			for _, elem := range arr.Elements {
+				if inner, ok := elem.(*parser.ArrayValue); ok && len(inner.Elements) >= 2 {
+					start := valueToInt(inner.Elements[0])
+					stop := valueToInt(inner.Elements[1])
+					if stop >= start {
+						totalElements *= (stop - start + 1)
+					}
+				}
 			}
+			isModified = true
+		}
+	} else {
+		// Base
+		elems := getEvaluatedMetadata(node, "NumberOfElements")
+		dims := getEvaluatedMetadata(node, "NumberOfDimensions")
+
+		if elems == "" && node.Target != nil {
+			elems = getEvaluatedMetadata(node.Target, "NumberOfElements")
+		}
+		if dims == "" && node.Target != nil {
+			dims = getEvaluatedMetadata(node.Target, "NumberOfDimensions")
+		}
+
+		e, _ := strconv.ParseInt(elems, 0, 64)
+		if e <= 0 {
+			e = 1
+		}
+		d, _ := strconv.ParseInt(dims, 0, 64)
+		if d <= 0 {
+			d = 1
+		}
+		totalElements = e * d
+	}
+
+	if samplesVal != nil {
+		s := valueToInt(samplesVal)
+		if s > 0 {
+			totalElements *= s
+			isModified = true
 		}
 	}
-	return val
+
+	desc := fmt.Sprintf("%d elements", totalElements)
+	if isModified {
+		desc += " (modified)"
+	}
+
+	return totalElements, totalElements * typeSize, desc
 }
 
 func isComplexValue(val parser.Value) bool {
@@ -2046,27 +1998,14 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 			// Signal Name Hint (::TYPE[SIZE])
 			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
 				typ := getEvaluatedMetadata(node, "Type")
-				elems := getEvaluatedMetadata(node, "NumberOfElements")
-				dims := getEvaluatedMetadata(node, "NumberOfDimensions")
 
 				if typ == "" && node.Target != nil {
-					typ = node.Target.Metadata["Type"]
-					if elems == "" {
-						elems = node.Target.Metadata["NumberOfElements"]
-					}
-					if dims == "" {
-						dims = node.Target.Metadata["NumberOfDimensions"]
-					}
+					typ = getEvaluatedMetadata(node.Target, "Type")
 				}
 
 				if typ != "" {
-					if elems == "" {
-						elems = "1"
-					}
-					if dims == "" {
-						dims = "1"
-					}
-					label := fmt.Sprintf("::%s[%sx%s]", typ, dims, elems)
+					elems, _, _ := calculateSignalElements(node)
+					label := fmt.Sprintf("::%s[%d]", typ, elems)
 
 					pos := frag.ObjectPos
 					addHint(InlayHint{

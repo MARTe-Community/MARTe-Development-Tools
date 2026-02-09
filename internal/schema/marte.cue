@@ -1,5 +1,7 @@
 package schema
 
+import "list"
+
 #Classes: {
 	RealTimeApplication: {
 		Functions!: {
@@ -73,10 +75,14 @@ package schema
 		...
 	}
 	IOGAM: {
-		InputSignals: {...} // type: node
-		OutputSignals: {...} // type: node
+		InputSignals: { [_]: { ByteSize: int, ... } }
+		OutputSignals: { [_]: { ByteSize: int, ... } }
 		#meta: type: "gam"
-		...
+		
+		InputSize: list.Sum([for k, v in InputSignals { v.ByteSize }])
+		OutputSize: list.Sum([for k, v in OutputSignals { v.ByteSize }])
+		
+		InputSize: OutputSize
 	}
 	ReferenceContainer: {
 		...
