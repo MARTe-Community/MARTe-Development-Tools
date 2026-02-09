@@ -183,6 +183,61 @@ type RenameParams struct {
 	NewName      string                 `json:"newName"`
 }
 
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           SymbolKind       `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+type SymbolKind int
+
+const (
+	SymbolKindFile          SymbolKind = 1
+	SymbolKindModule        SymbolKind = 2
+	SymbolKindNamespace     SymbolKind = 3
+	SymbolKindPackage       SymbolKind = 4
+	SymbolKindClass         SymbolKind = 5
+	SymbolKindMethod        SymbolKind = 6
+	SymbolKindProperty      SymbolKind = 7
+	SymbolKindField         SymbolKind = 8
+	SymbolKindConstructor   SymbolKind = 9
+	SymbolKindEnum          SymbolKind = 10
+	SymbolKindInterface     SymbolKind = 11
+	SymbolKindFunction      SymbolKind = 12
+	SymbolKindVariable      SymbolKind = 13
+	SymbolKindConstant      SymbolKind = 14
+	SymbolKindString        SymbolKind = 15
+	SymbolKindNumber        SymbolKind = 16
+	SymbolKindBoolean       SymbolKind = 17
+	SymbolKindArray         SymbolKind = 18
+	SymbolKindObject        SymbolKind = 19
+	SymbolKindKey           SymbolKind = 20
+	SymbolKindNull          SymbolKind = 21
+	SymbolKindEnumMember    SymbolKind = 22
+	SymbolKindStruct        SymbolKind = 23
+	SymbolKindEvent         SymbolKind = 24
+	SymbolKindOperator      SymbolKind = 25
+	SymbolKindTypeParameter SymbolKind = 26
+)
+
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
+}
+
+type SymbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          SymbolKind `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
+}
+
 type WorkspaceEdit struct {
 	Changes map[string][]TextEdit `json:"changes"`
 }
@@ -303,6 +358,8 @@ func HandleMessage(msg *JsonRpcMessage) {
 				"documentFormattingProvider": true,
 				"renameProvider":             true,
 				"inlayHintProvider":          true,
+				"documentSymbolProvider":     true,
+				"workspaceSymbolProvider":    true,
 				"completionProvider": map[string]any{
 					"triggerCharacters": []string{"=", " ", "@"},
 				},
@@ -369,6 +426,17 @@ func HandleMessage(msg *JsonRpcMessage) {
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, HandleInlayHint(params))
 		}
+	case "textDocument/documentSymbol":
+		var params DocumentSymbolParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleDocumentSymbol(params))
+		}
+	case "workspace/symbol":
+		var params WorkspaceSymbolParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleWorkspaceSymbol(params))
+		}
+	default:
 	}
 }
 
@@ -2122,9 +2190,9 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 							break
 						}
 					}
-				}
-				if isClass {
-					break
+					if isClass {
+						break
+					}
 				}
 			}
 		}
@@ -2161,4 +2229,240 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 	}
 
 	return hints
+}
+
+func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
+	file := uriToPath(params.TextDocument.URI)
+
+	// Helper to check if a range is inside another
+	isInside := func(parent, child Range) bool {
+		if child.Start.Line < parent.Start.Line || child.End.Line > parent.End.Line {
+			return false
+		}
+		if child.Start.Line == parent.Start.Line && child.Start.Character < parent.Start.Character {
+			return false
+		}
+		if child.End.Line == parent.End.Line && child.End.Character > parent.End.Character {
+			return false
+		}
+		return true
+	}
+
+	// Helper to check if a node is a signal
+	isSignal := func(n *index.ProjectNode) bool {
+		if n.Parent == nil {
+			return false
+		}
+		pName := n.Parent.Name
+		return pName == "InputSignals" || pName == "OutputSignals"
+	}
+
+	// Helper to extract symbols from a node
+	var getSymbols func(*index.ProjectNode, *Range) []DocumentSymbol
+	getSymbols = func(node *index.ProjectNode, containerRange *Range) []DocumentSymbol {
+		var nodeSyms []DocumentSymbol
+		for _, frag := range node.Fragments {
+			if frag.File == file {
+				if !frag.IsObject {
+					// Non-object fragment (e.g. top-level definitions in a file)
+					for _, def := range frag.Definitions {
+						if v, ok := def.(*parser.VariableDefinition); ok {
+							kind := SymbolKindVariable
+							if len(v.Name) > 0 && v.Name[0] != '@' {
+								kind = SymbolKindConstant
+							}
+							nodeSyms = append(nodeSyms, DocumentSymbol{
+								Name: v.Name,
+								Kind: kind,
+								Range: Range{
+									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+									End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
+								},
+								SelectionRange: Range{
+									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+									End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name)},
+								},
+							})
+						}
+					}
+					continue
+				}
+
+				r := Range{
+					Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column},
+					End:   Position{Line: frag.EndPos.Line - 1, Character: frag.EndPos.Column},
+				}
+
+				// If we have a container range (from parent), only consider fragments inside it
+				if containerRange != nil && !isInside(*containerRange, r) {
+					continue
+				}
+
+				kind := SymbolKindObject
+				if isSignal(node) {
+					kind = SymbolKindVariable
+				} else if len(node.RealName) > 0 {
+					if node.RealName[0] == '+' {
+						kind = SymbolKindClass
+					} else if node.RealName[0] == '$' {
+						kind = SymbolKindInterface
+					}
+				}
+
+				sym := DocumentSymbol{
+					Name: node.RealName,
+					Kind: kind,
+					Range: r,
+					SelectionRange: Range{
+						Start: r.Start,
+						End:   Position{Line: r.Start.Line, Character: r.Start.Character + len(node.RealName)},
+					},
+				}
+
+				// Add Variables as children (Fields are excluded now)
+				for _, def := range frag.Definitions {
+					if v, ok := def.(*parser.VariableDefinition); ok {
+						kind := SymbolKindVariable
+						if len(v.Name) > 0 && v.Name[0] != '@' {
+							kind = SymbolKindConstant
+						}
+						sym.Children = append(sym.Children, DocumentSymbol{
+							Name: v.Name,
+							Kind: kind,
+							Range: Range{
+								Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+								End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
+							},
+							SelectionRange: Range{
+								Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+								End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name)},
+							},
+						})
+					}
+				}
+
+				// Recurse into children nodes, passing this fragment's range as container
+				for _, child := range node.Children {
+					sym.Children = append(sym.Children, getSymbols(child, &r)...)
+				}
+
+				nodeSyms = append(nodeSyms, sym)
+			}
+		}
+
+		// Always recurse into children if node itself is NOT in this file or not an object
+		// (e.g. package node, or Root)
+		for _, child := range node.Children {
+			// If we are in a fragment, children were already handled above.
+			// This loop handles children of nodes that didn't have a matching fragment in this file.
+			foundInLocalFrags := false
+			for _, frag := range node.Fragments {
+				if frag.File == file && frag.IsObject {
+					foundInLocalFrags = true
+					break
+				}
+			}
+			if !foundInLocalFrags {
+				nodeSyms = append(nodeSyms, getSymbols(child, containerRange)...)
+			}
+		}
+		return nodeSyms
+	}
+
+
+	symbols := getSymbols(Tree.Root, nil)
+	for _, iso := range Tree.IsolatedFiles {
+		symbols = append(symbols, getSymbols(iso, nil)...)
+	}
+
+	return symbols
+}
+
+
+func HandleWorkspaceSymbol(params WorkspaceSymbolParams) []SymbolInformation {
+	query := strings.ToLower(params.Query)
+	var symbols []SymbolInformation
+
+	isSignal := func(n *index.ProjectNode) bool {
+		if n.Parent == nil {
+			return false
+		}
+		pName := n.Parent.Name
+		return pName == "InputSignals" || pName == "OutputSignals"
+	}
+
+	var collect func(*index.ProjectNode)
+	collect = func(node *index.ProjectNode) {
+		// 1. Check the node itself
+		if query == "" || strings.Contains(strings.ToLower(node.RealName), query) {
+			for _, frag := range node.Fragments {
+				if !frag.IsObject {
+					continue
+				}
+				kind := SymbolKindObject
+				if isSignal(node) {
+					kind = SymbolKindVariable
+				} else if len(node.RealName) > 0 {
+					if node.RealName[0] == '+' {
+						kind = SymbolKindClass
+					} else if node.RealName[0] == '$' {
+						kind = SymbolKindInterface
+					} else {
+						continue
+					}
+				} else {
+					continue
+				}
+
+				symbols = append(symbols, SymbolInformation{
+					Name: node.RealName,
+					Kind: kind,
+					Location: Location{
+						URI: "file://" + frag.File,
+						Range: Range{
+							Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column},
+							End:   Position{Line: frag.EndPos.Line - 1, Character: frag.EndPos.Column},
+						},
+					},
+				})
+			}
+		}
+
+		// 2. Check variables/constants in all fragments of this node
+		for _, frag := range node.Fragments {
+			for _, def := range frag.Definitions {
+				if v, ok := def.(*parser.VariableDefinition); ok {
+					if query == "" || strings.Contains(strings.ToLower(v.Name), query) {
+						kind := SymbolKindVariable
+						if len(v.Name) > 0 && v.Name[0] != '@' {
+							kind = SymbolKindConstant
+						}
+						symbols = append(symbols, SymbolInformation{
+							Name: v.Name,
+							Kind: kind,
+							Location: Location{
+								URI: "file://" + frag.File,
+								Range: Range{
+									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+									End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
+								},
+							},
+							ContainerName: node.RealName,
+						})
+					}
+				}
+			}
+		}
+
+		for _, child := range node.Children {
+			collect(child)
+		}
+	}
+
+	collect(Tree.Root)
+	for _, iso := range Tree.IsolatedFiles {
+		collect(iso)
+	}
+
+	return symbols
 }
