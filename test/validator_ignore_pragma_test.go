@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -45,8 +46,8 @@ func TestIgnorePragma(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
-	v.CheckUnused()
+	v.ValidateProject(context.Background())
+	v.CheckUnused(context.Background())
 
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "Unused Signal") {

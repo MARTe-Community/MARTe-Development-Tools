@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestSchemaValidationType(t *testing.T) {
 	idx.AddFile("test.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {
@@ -62,7 +63,7 @@ func TestSchemaValidationOrder(t *testing.T) {
 	idx.AddFile("test.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {
@@ -95,7 +96,7 @@ func TestSchemaValidationMandatoryNode(t *testing.T) {
 	idx.AddFile("test.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "Missing mandatory field 'States'") {

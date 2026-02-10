@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestSignalProperties(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundBadType := false
 	foundBadElements := false

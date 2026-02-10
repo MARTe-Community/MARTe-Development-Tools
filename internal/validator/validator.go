@@ -1,7 +1,9 @@
 package validator
 
 import (
+	"context"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +48,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	for name, valStr := range overrides {
 		p := parser.NewParser("Temp = " + valStr)
 		cfg, _ := p.Parse()
-		if len(cfg.Definitions) > 0 {
+		if cfg != nil && len(cfg.Definitions) > 0 {
 			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
 				v.Overrides[name] = f.Value
 			}
@@ -56,46 +58,98 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	return v
 }
 
-func (v *Validator) ValidateProject() {
+func (v *Validator) ValidateProject(ctx context.Context) {
 	if v.Tree == nil {
 		return
 	}
-	// Ensure references and fields are resolved (if not already done by builder/lsp)
+	// Ensure references and fields are resolved
 	v.Tree.ResolveFields()
 	v.Tree.ResolveReferences()
 
+	numWorkers := runtime.NumCPU()
+	if numWorkers < 4 {
+		numWorkers = 4
+	}
+	tasks := make(chan *index.ProjectNode, 100)
 	var wg sync.WaitGroup
 
+	for i := 0; i < numWorkers; i++ {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case node, ok := <-tasks:
+					if !ok {
+						return
+					}
+					v.validateNode(ctx, node)
+					wg.Done()
+				}
+			}
+		}()
+	}
+
+	queueTask := func(n *index.ProjectNode) {
+		// We need to count tasks to wait for them
+		// But validateNode itself recurses and we don't want to deadlock
+		// if we queue from inside validateNode.
+		// Actually, let's just use the workers for TOP-LEVEL packages/files
+		// and let validateNode recurse synchronously within each worker.
+		wg.Add(1)
+		select {
+		case <-ctx.Done():
+			wg.Done()
+		case tasks <- n:
+		}
+	}
+
 	if v.Tree.Root != nil {
-		// Validate root itself (usually empty container for packages)
-		// But children (Packages) can be validated in parallel
 		for _, child := range v.Tree.Root.Children {
-			wg.Add(1)
-			go func(n *index.ProjectNode) {
-				defer wg.Done()
-				v.validateNode(n)
-			}(child)
+			if ctx.Err() != nil {
+				break
+			}
+			queueTask(child)
 		}
 	}
 	for _, node := range v.Tree.IsolatedFiles {
-		wg.Add(1)
-		go func(n *index.ProjectNode) {
-			defer wg.Done()
-			v.validateNode(n)
-		}(node)
+		if ctx.Err() != nil {
+			break
+		}
+		queueTask(node)
 	}
 
-	wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 
-	v.CheckUnused()
-	v.CheckDataSourceThreading()
-	v.CheckINOUTOrdering()
-	v.CheckSignalConsistency()
-	v.CheckVariables()
-	v.CheckUnresolvedVariables()
+	select {
+	case <-ctx.Done():
+		// Canceled
+	case <-done:
+		// Finished workers
+	}
+
+	close(tasks)
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	v.CheckUnused(ctx)
+	v.CheckDataSourceThreading(ctx)
+	v.CheckINOUTOrdering(ctx)
+	v.CheckSignalConsistency(ctx)
+	v.CheckVariables(ctx)
+	v.CheckUnresolvedVariables(ctx)
 }
 
-func (v *Validator) validateNode(node *index.ProjectNode) {
+func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Check for invalid content in Signals container of DataSource
 	if node.RealName == "Signals" && node.Parent != nil && isDataSource(node.Parent) {
 		for _, frag := range node.Fragments {
@@ -196,7 +250,7 @@ func (v *Validator) validateNode(node *index.ProjectNode) {
 
 	// Recursively validate children
 	for _, child := range node.Children {
-		v.validateNode(child)
+		v.validateNode(ctx, child)
 	}
 }
 
@@ -210,12 +264,14 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 		// Treated as string literal for Class field
 		className = val.Value
 	default:
+		v.mu.Lock()
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
 			Position: f.Raw.Position,
 			File:     v.getFileForField(f.Raw, node),
 		})
+		v.mu.Unlock()
 		return
 	}
 
@@ -232,12 +288,14 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 		if v.Schema.Value.LookupPath(path).Err() != nil {
 			// Unknown Class
 			if !v.isSuppressed("unknown_class", node) {
+				v.mu.Lock()
 				v.Diagnostics = append(v.Diagnostics, Diagnostic{
 					Level:    LevelWarning,
 					Message:  fmt.Sprintf("Unknown Class '%s'", className),
 					Position: f.Raw.Position,
 					File:     v.getFileForField(f.Raw, node),
 				})
+				v.mu.Unlock()
 			}
 		}
 	}
@@ -252,22 +310,26 @@ func (v *Validator) validateTypeField(f index.EvaluatedField, node *index.Projec
 	case *parser.ReferenceValue:
 		typeName = val.Value
 	default:
+		v.mu.Lock()
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
 			Position: f.Raw.Position,
 			File:     v.getFileForField(f.Raw, node),
 		})
+		v.mu.Unlock()
 		return
 	}
 
 	if !isValidType(typeName) {
+		v.mu.Lock()
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
 			Level:    LevelError,
 			Message:  fmt.Sprintf("Invalid Type '%s'", typeName),
 			Position: f.Raw.Position,
 			File:     v.getFileForField(f.Raw, node),
 		})
+		v.mu.Unlock()
 	}
 }
 
@@ -282,12 +344,14 @@ func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, fil
 		// Non-quoted string: a reference -> Must resolve
 		target := v.resolveReference(t.Value, node, nil)
 		if target == nil {
+			v.mu.Lock()
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,
 				Message:  fmt.Sprintf("Unknown reference '%s'", t.Value),
 				Position: t.Position,
 				File:     file,
 			})
+			v.mu.Unlock()
 		} else {
 			// Link reference
 			v.updateReferenceTarget(file, t.Position, target)
@@ -341,8 +405,9 @@ func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
 		return // Unknown class, skip validation
 	}
 
-	// Convert node to map
-	data := v.nodeToMap(node)
+	// Convert node to map (shallow for validation of this specific object)
+	// We use depth 3 to reach Signals and their elements for GAM/DataSource validation.
+	data := v.nodeToMapWithDepth(node, 3)
 
 	// Encode data to CUE
 	dataVal := v.Schema.Context.Encode(data)
@@ -364,6 +429,8 @@ func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
 
 func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
 	list := errors.Errors(err)
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	for _, e := range list {
 		msg := e.Error()
 		v.Diagnostics = append(v.Diagnostics, Diagnostic{
@@ -375,7 +442,7 @@ func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
 	}
 }
 
-func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
+func (v *Validator) nodeToMapWithDepth(node *index.ProjectNode, depth int) map[string]interface{} {
 	m := make(map[string]interface{})
 	fields := v.getFields(node)
 
@@ -400,19 +467,15 @@ func (v *Validator) nodeToMap(node *index.ProjectNode) map[string]interface{} {
 	}
 
 	// Children as nested maps?
-	// CUE schema expects nested structs for "node" type fields.
-	// But `node.Children` contains ALL children (even those defined as +Child).
-	// If schema expects `States: { ... }`, we map children.
-
-	for name, child := range node.Children {
-		// normalize name? CUE keys are strings.
-		// If child real name is "+States", key in Children is "States".
-		// We use "States" as key in map.
-		m[name] = v.nodeToMap(child)
+	if depth > 0 {
+		for name, child := range node.Children {
+			m[name] = v.nodeToMapWithDepth(child, depth-1)
+		}
 	}
 
 	return m
 }
+
 
 func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) interface{} {
 	switch t := val.(type) {
@@ -1099,7 +1162,7 @@ func (v *Validator) getFileForField(f *parser.Field, node *index.ProjectNode) st
 	return ""
 }
 
-func (v *Validator) CheckUnused() {
+func (v *Validator) CheckUnused(ctx context.Context) {
 	referencedNodes := make(map[*index.ProjectNode]bool)
 	for _, ref := range v.Tree.References {
 		if ref.Target != nil {
@@ -1115,10 +1178,10 @@ func (v *Validator) CheckUnused() {
 	}
 
 	if v.Tree.Root != nil {
-		v.checkUnusedRecursive(v.Tree.Root, referencedNodes)
+		v.checkUnusedRecursive(ctx, v.Tree.Root, referencedNodes)
 	}
 	for _, node := range v.Tree.IsolatedFiles {
-		v.checkUnusedRecursive(node, referencedNodes)
+		v.checkUnusedRecursive(ctx, node, referencedNodes)
 	}
 }
 
@@ -1131,7 +1194,10 @@ func (v *Validator) collectTargetUsage(node *index.ProjectNode, referenced map[*
 	}
 }
 
-func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
+func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
+	if ctx.Err() != nil {
+		return
+	}
 	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
@@ -1184,7 +1250,7 @@ func (v *Validator) checkUnusedRecursive(node *index.ProjectNode, referenced map
 	}
 
 	for _, child := range node.Children {
-		v.checkUnusedRecursive(child, referenced)
+		v.checkUnusedRecursive(ctx, child, referenced)
 	}
 }
 
@@ -1288,7 +1354,7 @@ func (v *Validator) isGloballyAllowed(warningType string, contextFile string) bo
 	return false
 }
 
-func (v *Validator) CheckDataSourceThreading() {
+func (v *Validator) CheckDataSourceThreading(ctx context.Context) {
 	if v.Tree.Root == nil {
 		return
 	}
@@ -1302,11 +1368,14 @@ func (v *Validator) CheckDataSourceThreading() {
 	v.Tree.Walk(findApp)
 
 	for _, appNode := range appNodes {
-		v.checkAppDataSourceThreading(appNode)
+		if ctx.Err() != nil {
+			return
+		}
+		v.checkAppDataSourceThreading(ctx, appNode)
 	}
 }
 
-func (v *Validator) checkAppDataSourceThreading(appNode *index.ProjectNode) {
+func (v *Validator) checkAppDataSourceThreading(ctx context.Context, appNode *index.ProjectNode) {
 	// 2. Find States
 	var statesNode *index.ProjectNode
 	if s, ok := appNode.Children["States"]; ok {
@@ -1428,7 +1497,7 @@ func (v *Validator) isMultithreaded(ds *index.ProjectNode) bool {
 	return false
 }
 
-func (v *Validator) CheckINOUTOrdering() {
+func (v *Validator) CheckINOUTOrdering(ctx context.Context) {
 	if v.Tree.Root == nil {
 		return
 	}
@@ -1442,11 +1511,14 @@ func (v *Validator) CheckINOUTOrdering() {
 	v.Tree.Walk(findApp)
 
 	for _, appNode := range appNodes {
-		v.checkAppINOUTOrdering(appNode)
+		if ctx.Err() != nil {
+			return
+		}
+		v.checkAppINOUTOrdering(ctx, appNode)
 	}
 }
 
-func (v *Validator) checkAppINOUTOrdering(appNode *index.ProjectNode) {
+func (v *Validator) checkAppINOUTOrdering(ctx context.Context, appNode *index.ProjectNode) {
 	var statesNode *index.ProjectNode
 	if s, ok := appNode.Children["States"]; ok {
 		statesNode = s
@@ -1634,12 +1706,15 @@ func (v *Validator) getDataSourceDirection(ds *index.ProjectNode) string {
 	return ""
 }
 
-func (v *Validator) CheckSignalConsistency() {
+func (v *Validator) CheckSignalConsistency(ctx context.Context) {
 	// Map: DataSourceNode -> SignalName -> List of Signals
 	signals := make(map[*index.ProjectNode]map[string][]*index.ProjectNode)
 
 	// Helper to collect signals
 	collect := func(node *index.ProjectNode) {
+		if ctx.Err() != nil {
+			return
+		}
 		if !isGAM(node) {
 			return
 		}
@@ -1682,6 +1757,9 @@ func (v *Validator) CheckSignalConsistency() {
 
 	// Check Consistency
 	for ds, sigMap := range signals {
+		if ctx.Err() != nil {
+			return
+		}
 		for sigName, usages := range sigMap {
 			if len(usages) <= 1 {
 				continue
@@ -1721,13 +1799,16 @@ func (v *Validator) CheckSignalConsistency() {
 	}
 }
 
-func (v *Validator) CheckVariables() {
+func (v *Validator) CheckVariables(ctx context.Context) {
 	if v.Schema == nil {
 		return
 	}
-	ctx := v.Schema.Context
+	ctx_cue := v.Schema.Context
 
 	checkNodeVars := func(node *index.ProjectNode) {
+		if ctx.Err() != nil {
+			return
+		}
 		seen := make(map[string]parser.Position)
 		for _, frag := range node.Fragments {
 			for _, def := range frag.Definitions {
@@ -1753,7 +1834,7 @@ func (v *Validator) CheckVariables() {
 					}
 
 					// Compile Type
-					typeVal := ctx.CompileString(vdef.TypeExpr)
+					typeVal := ctx_cue.CompileString(vdef.TypeExpr)
 					if typeVal.Err() != nil {
 						v.Diagnostics = append(v.Diagnostics, Diagnostic{
 							Level:    LevelError,
@@ -1766,7 +1847,7 @@ func (v *Validator) CheckVariables() {
 
 					if vdef.DefaultValue != nil {
 						valInterface := v.valueToInterface(vdef.DefaultValue, node)
-						valVal := ctx.Encode(valInterface)
+						valVal := ctx_cue.Encode(valInterface)
 
 						// Unify
 						res := typeVal.Unify(valVal)
@@ -1786,8 +1867,11 @@ func (v *Validator) CheckVariables() {
 
 	v.Tree.Walk(checkNodeVars)
 }
-func (v *Validator) CheckUnresolvedVariables() {
+func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
 	for _, ref := range v.Tree.References {
+		if ctx.Err() != nil {
+			return
+		}
 		if ref.IsVariable && ref.TargetVariable == nil {
 			v.Diagnostics = append(v.Diagnostics, Diagnostic{
 				Level:    LevelError,

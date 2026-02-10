@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -63,7 +64,7 @@ func TestINOUTOrdering(t *testing.T) {
 	// Use validator with default schema (embedded)
 	// We pass "." but it shouldn't matter if no .marte_schema.cue exists
 	v := validator.NewValidator(pt, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundError := false
 	for _, d := range v.Diagnostics {

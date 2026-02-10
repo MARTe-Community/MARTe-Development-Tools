@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -34,8 +35,8 @@ func TestGlobalPragmaUpdate(t *testing.T) {
 	check := func() bool {
 		idx.ResolveReferences()
 		v := validator.NewValidator(idx, ".", nil)
-		v.ValidateProject()
-		v.CheckUnused()
+		v.ValidateProject(context.Background())
+		v.CheckUnused(context.Background())
 		for _, d := range v.Diagnostics {
 			if strings.Contains(d.Message, "Unused Signal") {
 				return true // Found warning

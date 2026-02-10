@@ -629,21 +629,21 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 }
 
 func (pt *ProjectTree) RebuildIndex() {
-	// Deprecated or optimized away?
-	// ResolveReferences calls this.
-	// If we maintain NodeMap incrementally, we don't need this.
-	// But let's check if we trust incremental updates.
-	// For now, let's just ensure NodeMap is populated.
-	if len(pt.NodeMap) == 0 {
+	if pt.NodeMap == nil {
 		pt.NodeMap = make(map[string][]*ProjectNode)
-		visitor := func(n *ProjectNode) {
-			pt.NodeMap[n.Name] = append(pt.NodeMap[n.Name], n)
-			if n.RealName != n.Name {
-				pt.NodeMap[n.RealName] = append(pt.NodeMap[n.RealName], n)
-					}
-				}
-				pt.walk(visitor)
-			}}
+	}
+	if len(pt.NodeMap) > 0 {
+		return
+	}
+
+	visitor := func(n *ProjectNode) {
+		pt.NodeMap[n.Name] = append(pt.NodeMap[n.Name], n)
+		if n.RealName != n.Name {
+			pt.NodeMap[n.RealName] = append(pt.NodeMap[n.RealName], n)
+		}
+	}
+	pt.walk(visitor)
+}
 
 func (pt *ProjectTree) ResolveReferences() {
 	pt.mu.Lock()

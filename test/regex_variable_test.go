@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestRegexVariable(t *testing.T) {
 	pt.AddFile("regex.marte", cfg)
 
 	v := validator.NewValidator(pt, ".", nil)
-	v.CheckVariables()
+	v.CheckVariables(context.Background())
 
 	foundError := false
 	for _, d := range v.Diagnostics {

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -153,7 +154,7 @@ func TestValidator_ByteSize(t *testing.T) {
 			pt.AddFile("test.marte", cfg)
 
 			v := validator.NewValidator(pt, ".", nil)
-			v.ValidateProject()
+			v.ValidateProject(context.Background())
 
 			for _, exp := range tt.expected {
 				found := false

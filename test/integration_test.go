@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"bytes"
 	"io/ioutil"
 	"os"
@@ -31,8 +32,8 @@ func TestCheckCommand(t *testing.T) {
 	idx.AddFile(inputFile, config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
-	v.CheckUnused()
+	v.ValidateProject(context.Background())
+	v.CheckUnused(context.Background())
 
 	foundError := false
 	for _, diag := range v.Diagnostics {
@@ -64,7 +65,7 @@ func TestCheckDuplicate(t *testing.T) {
 	idx.AddFile(inputFile, config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundError := false
 	for _, diag := range v.Diagnostics {
@@ -96,7 +97,7 @@ func TestSignalNoClassValidation(t *testing.T) {
 	idx.AddFile(inputFile, config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	if len(v.Diagnostics) > 0 {
 		t.Errorf("Expected no errors for signal without Class, but got: %v", v.Diagnostics)

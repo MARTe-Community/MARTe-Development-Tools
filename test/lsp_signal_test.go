@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -42,7 +43,7 @@ func TestLSPSignalReferences(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// Find definition of MySig in MyDS
 	root := idx.IsolatedFiles["signal_refs.marte"]

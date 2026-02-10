@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -43,7 +44,7 @@ func TestRenameSignalInGAM(t *testing.T) {
 
 	// Run validator to populate Targets
 	v := validator.NewValidator(lsp.Tree, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// Rename DS.Sig1 to NewSig
 	// Sig1 is at Line 5.

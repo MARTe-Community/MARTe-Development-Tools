@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -41,7 +42,7 @@ func TestRenameImplicitToDefinition(t *testing.T) {
 
 	// Run validator to link targets
 	v := validator.NewValidator(lsp.Tree, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// Rename Implicit Sig1 (Line 11, 0-based 11)
 	// Line 11: "        Sig1 = { DataSource = DS }"

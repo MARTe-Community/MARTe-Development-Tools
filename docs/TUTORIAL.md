@@ -25,12 +25,12 @@ This command creates a standard project structure:
 
 ## Step 2: Define Components
 
-Open `src/components.marte`. This file uses the `#package App.Data` namespace, meaning all definitions here will be children of `App.Data`.
+Open `src/components.marte`. This file uses the `#package MyControlApp.App.Data` namespace, meaning all definitions here will be children of `App.Data`.
 
 Let's define a **Timer** (input source) and a **Logger** (output destination).
 
 ```marte
-#package MyContollApp.App.Data
+#package MyControlApp.App.Data
 
 +DDB = {
     Class = GAMDataSource
@@ -69,11 +69,11 @@ We will add a GAM that takes the time from the Timer, converts it, and logs it.
 Add the GAM definition inside the `+Main` object (or as a separate object if you prefer modularity). Let's modify `src/app.marte`:
 
 ```marte
-#package MyContollApp
+#package MyControlApp
 +App = {
     Class = RealTimeApplication
     +Functions = {
-        Class = RefenceContainer
+        Class = ReferenceContainer
         // Define the GAM
         +Converter = {
             Class = IOGAM
@@ -116,7 +116,16 @@ Add the GAM definition inside the `+Main` object (or as a separate object if you
 }
 ```
 
-## Step 4: Validate
+## Step 4: Navigate and Explore
+
+With the LSP server active, you can leverage advanced navigation features to explore your multi-file project:
+
+- **Document Symbols**: Open the symbols view in your editor to see a hierarchical tree of objects and signals in the current file.
+- **Workspace Symbols**: Press the workspace symbol shortcut (e.g., `Ctrl+T` or `Cmd+T`) and type "Timer" to find all timer definitions across all files.
+- **Go to Definition**: Hover over `DataSource = Timer` in `app.marte` and jump directly to its definition in `components.marte`.
+- **Find References**: Find everywhere the `LogValue` signal is used by searching for its references.
+
+## Step 5: Validate
 
 Run the validation check to ensure everything is correct (types match, references are valid).
 

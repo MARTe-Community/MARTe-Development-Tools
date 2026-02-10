@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"io/ioutil"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func TestMultiFileNodeValidation(t *testing.T) {
 	// Let's assume the Validator or Index does the merging logic.
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// +MyNode is split.
 	// valid_1 has FieldA
@@ -58,7 +59,7 @@ func TestMultiFileDuplicateField(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/multifile_dup_2.marte")
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundError := false
 	for _, diag := range v.Diagnostics {
@@ -82,7 +83,7 @@ func TestMultiFileReference(t *testing.T) {
 
 	// Check if the reference in +SourceNode to TargetNode is resolved.
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	if len(v.Diagnostics) > 0 {
 		// Filter out irrelevant errors
@@ -95,7 +96,7 @@ func TestHierarchicalPackageMerge(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/hierarchical_pkg_2.marte")
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// +MyObj should have Class (from file 1) and FieldX (from file 2).
 	// If Class is missing, ValidateProject reports error.
@@ -140,7 +141,7 @@ func TestHierarchicalDuplicate(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/hierarchical_dup_2.marte")
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundError := false
 	for _, diag := range v.Diagnostics {

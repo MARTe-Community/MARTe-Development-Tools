@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 	tree.ResolveReferences()
 
 	v := validator.NewValidator(tree, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// There should be no errors because @N evaluates to 10
 	for _, d := range v.Diagnostics {
@@ -70,7 +71,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 	tree2.ResolveReferences()
 
 	v2 := validator.NewValidator(tree2, ".", nil)
-	v2.ValidateProject()
+	v2.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v2.Diagnostics {

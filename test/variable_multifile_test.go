@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -51,7 +52,7 @@ func TestMultiFileVariableResolution(t *testing.T) {
 	t.Logf("Root Variables keys: %v", getKeys(pt.Root.Variables))
 
 	v := validator.NewValidator(pt, ".", nil)
-	v.CheckUnresolvedVariables()
+	v.CheckUnresolvedVariables(context.Background())
 
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "Unresolved variable") {

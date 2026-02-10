@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -41,7 +42,7 @@ func TestFunctionsArrayValidation(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundInvalid := false
 	foundMissing := false

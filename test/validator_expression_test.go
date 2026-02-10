@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -69,7 +70,7 @@ func TestValidatorExpressionCoverage(t *testing.T) {
 	// Use NewSchema to ensure basic types
 	v.Schema = schema.NewSchema()
 
-	v.CheckVariables()
+	v.CheckVariables(context.Background())
 
 	// Check for expected errors
 	foundBadSum := false

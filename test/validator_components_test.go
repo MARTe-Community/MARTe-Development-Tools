@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestPIDGAMValidation(t *testing.T) {
 	idx.AddFile("pid.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundKi := false
 	foundKd := false
@@ -69,7 +70,7 @@ func TestFileDataSourceValidation(t *testing.T) {
 	idx.AddFile("file.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

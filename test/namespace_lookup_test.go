@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ $GAM1 = {
 	idx.AddFile("main.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

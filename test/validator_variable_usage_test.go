@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestVariableValidation(t *testing.T) {
 	pt.AddFile("def.marte", cfg)
 	
 	v := validator.NewValidator(pt, ".", nil)
-	v.CheckVariables()
+	v.CheckVariables(context.Background())
 	
 	foundError := false
 	for _, d := range v.Diagnostics {
@@ -56,7 +57,7 @@ func TestVariableValidation(t *testing.T) {
 	pt2.AddFile("usage.marte", cfg2)
 	
 	v2 := validator.NewValidator(pt2, ".", nil)
-	v2.ValidateProject() // Should run CUE validation on nodes
+	v2.ValidateProject(context.Background()) // Should run CUE validation on nodes
 	
 	foundUsageError := false
 	for _, d := range v2.Diagnostics {
@@ -91,7 +92,7 @@ func TestVariableValidation(t *testing.T) {
 	pt3.AddFile("valid.marte", cfg3)
 	
 	v3 := validator.NewValidator(pt3, ".", nil)
-	v3.ValidateProject()
+	v3.ValidateProject(context.Background())
 	
 	for _, d := range v3.Diagnostics {
 		if strings.Contains(d.Message, "Schema Validation Error") {

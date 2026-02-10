@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"io/ioutil"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestLSPDiagnostics(t *testing.T) {
 	idx.AddFile(inputFile, config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// Check for expected diagnostics
 	found := false

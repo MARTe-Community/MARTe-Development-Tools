@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -94,7 +95,7 @@ func TestNamespaceClassValidation(t *testing.T) {
 			idx.AddFile("test.marte", config)
 
 			v := validator.NewValidator(idx, ".", nil)
-			v.ValidateProject()
+			v.ValidateProject(context.Background())
 
 			found := false
 			for _, d := range v.Diagnostics {

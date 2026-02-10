@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -85,7 +86,7 @@ func TestLetMacroFull(t *testing.T) {
 		tree2 := index.NewProjectTree()
 		tree2.AddFile("err.marte", cfg2)
 		v := validator.NewValidator(tree2, ".", nil)
-		v.ValidateProject()
+		v.ValidateProject(context.Background())
 
 		found := false
 		for _, d := range v.Diagnostics {
@@ -110,7 +111,7 @@ func TestLetMacroFull(t *testing.T) {
 	tree3 := index.NewProjectTree()
 	tree3.AddFile("dup.marte", cfg3)
 	v3 := validator.NewValidator(tree3, ".", nil)
-	v3.ValidateProject()
+	v3.ValidateProject(context.Background())
 
 	foundDup := false
 	for _, d := range v3.Diagnostics {

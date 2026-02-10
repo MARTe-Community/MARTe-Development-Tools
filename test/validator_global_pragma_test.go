@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -43,8 +44,8 @@ func TestGlobalPragma(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
-	v.CheckUnused()
+	v.ValidateProject(context.Background())
+	v.CheckUnused(context.Background())
 
 	foundUnusedWarning := false
 	foundImplicitWarning := false

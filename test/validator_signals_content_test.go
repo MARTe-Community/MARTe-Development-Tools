@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestSignalsContentValidation(t *testing.T) {
 	idx.AddFile("signals_content.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundBadField := false
 	foundBadArray := false

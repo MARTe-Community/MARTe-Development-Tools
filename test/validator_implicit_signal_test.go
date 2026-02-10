@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func TestImplicitSignal(t *testing.T) {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundWarning := false
 	foundError := false
@@ -90,7 +91,7 @@ func TestImplicitSignal(t *testing.T) {
 	idx2.AddFile("missing_type.marte", config2)
 	idx2.ResolveReferences()
 	v2 := validator.NewValidator(idx2, ".", nil)
-	v2.ValidateProject()
+	v2.ValidateProject(context.Background())
 
 	foundTypeErr := false
 	for _, d := range v2.Diagnostics {

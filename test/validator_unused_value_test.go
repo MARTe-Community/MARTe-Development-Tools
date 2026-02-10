@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestUnusedGAMValueValidation(t *testing.T) {
 	pt.AddFile("unused.marte", cfg)
 
 	v := validator.NewValidator(pt, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

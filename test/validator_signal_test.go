@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -50,7 +51,7 @@ func TestSignalValidation(t *testing.T) {
 	idx.AddFile("signal_test.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundMissing := false
 	foundInvalid := false

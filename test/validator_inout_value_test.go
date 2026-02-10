@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestINOUTValueInitialization(t *testing.T) {
 	pt.AddFile("main.marte", cfg)
 
 	v := validator.NewValidator(pt, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	for _, d := range v.Diagnostics {
 		if strings.Contains(d.Message, "before being produced") {
@@ -87,7 +88,7 @@ func TestINOUTValueTypeMismatch(t *testing.T) {
 	pt.AddFile("fail.marte", cfg)
 
 	v := validator.NewValidator(pt, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

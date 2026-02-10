@@ -41,16 +41,17 @@ Responsible for converting MARTe configuration text into structured data.
 The brain of the system. It maintains a holistic view of the project.
 
 *   **ProjectTree**: The central data structure. It holds the root of the configuration hierarchy (`Root`), references, and isolated files.
-*   **ScanDirectory**: Recursively walks the project directory to find all `.marte` files, adding them to the tree even if they contain partial syntax errors.
+*   **ScanDirectory**: Recursively walks the project directory to find all `.marte` files, adding them to the tree even if they contain partial syntax errors. Uses a semaphore to limit concurrency.
 *   **ProjectNode**: Represents a logical node in the configuration. Since a node can be defined across multiple files (fragments), `ProjectNode` aggregates these fragments. It also stores locally defined variables and constants in its `Variables` map.
 *   **NodeMap**: A hash map index (`map[string][]*ProjectNode`) for $O(1)$ symbol lookups, optimizing `FindNode` operations.
-*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `ResolveName` (exported) which respects lexical scoping rules by searching the hierarchy upwards from the reference's container, using `FindNode` for deep searches within each scope.
+*   **Reference Resolution**: The `ResolveReferences` method links `Reference` objects to their target `ProjectNode` or `VariableDefinition`. It uses `FileReferences` (map by file) to enable incremental updates and respects lexical scoping rules.
 
 ### 3. `internal/validator`
 
-Ensures configuration correctness.
+Ensures configuration correctness. Supports **cancellation** via `context.Context`.
 
-*   **Validator**: Iterates over the `ProjectTree` to check rules.
+*   **Validator**: Iterates over the `ProjectTree` to check rules. Uses a throttled worker pool (limited to `runtime.NumCPU()`) for parallel validation of top-level nodes.
+*   **Performance**: Employs a recursion depth limit (depth=3) when converting `ProjectNode` to CUE-compatible maps to prevent exponential overhead in large projects while still allowing nested signal validation.
 *   **Checks**:
     *   **Structure**: Duplicate fields, invalid content.
     *   **Schema**: Unifies nodes with CUE schemas (loaded via `internal/schema`) to validate types and mandatory fields.
@@ -65,6 +66,8 @@ Ensures configuration correctness.
 Implements the Language Server Protocol.
 
 *   **Server (`server.go`)**: Handles JSON-RPC messages over stdio.
+*   **Serialized Validation**: Validation tasks are debounced (500ms) and serialized to prevent concurrent `ValidateProject` calls from overloading the system.
+*   **Cancellation**: Validation requests are tracked per-file URI. Triggering a new validation for a file automatically cancels any ongoing validation for that same file using context cancellation.
 *   **Evaluation**: Implements a lightweight expression evaluator to show evaluated values in Hover and completion snippets.
 *   **Incremental Sync**: Supports `textDocumentSync: 2`. `HandleDidChange` applies patches to the in-memory document buffers using `offsetAt` logic.
 *   **Features**:
@@ -72,6 +75,8 @@ Implements the Language Server Protocol.
     *   `HandleHover`: Shows documentation (including docstrings for variables), evaluated signal types/dimensions, and usage analysis.
     *   `HandleDefinition` / `HandleReferences`: specific lookup using the `index`.
     *   `HandleRename`: Project-wide renaming supporting objects, fields, and signals (including implicit ones).
+    *   `HandleDocumentSymbol`: Provides a hierarchical view of objects, signals, variables, and constants within a file.
+    *   `HandleWorkspaceSymbol`: Enables project-wide symbol searching with container context.
 
 ### 5. `internal/builder`
 
@@ -88,6 +93,13 @@ Manages CUE schemas.
 *   **Loading**: Loads the embedded default schema (`marte.cue`) and merges it with any user-provided `.marte_schema.cue`.
 *   **Metadata**: Handles the `#meta` field in schemas to extract properties like `direction` and `multithreaded` support for the validator.
 
+### 7. `internal/logger`
+
+Centralized logging facility.
+
+*   **Customizable Output**: Supports redirection of log output to any `io.Writer` via `SetOutput`, facilitating testing and integration into different environments.
+*   **Convenience Wrappers**: Provides standard logging methods (`Printf`, `Println`, `Fatal`) with a consistent `[mdt]` prefix.
+
 ## Key Data Flows
 
 ### Reference Resolution
@@ -98,10 +110,13 @@ Manages CUE schemas.
 
 ### Validation Lifecycle
 1.  `mdt check` or LSP `didChange` triggers validation.
-2.  A new `Validator` is created with the current `Tree`.
-3.  `ValidateProject` is called.
-4.  It walks the tree, runs checks, and populates `Diagnostics`.
-5.  Diagnostics are printed (CLI) or published via `textDocument/publishDiagnostics` (LSP).
+2.  LSP triggers are debounced (500ms) and queued.
+3.  The validation worker ensures only one global validation runs at a time.
+4.  If a new request for the same file URI arrives, the current validation for that URI is canceled via `context.Context`.
+5.  A new `Validator` is created with the current `Tree`.
+6.  `ValidateProject(ctx)` is called.
+7.  The worker pool walks the tree, runs checks, and populates `Diagnostics`, frequently checking for cancellation.
+8.  Diagnostics are printed (CLI) or published via `textDocument/publishDiagnostics` (LSP).
 
 ### Threading Check Logic
 1.  Iterates all `RealTimeApplication` nodes found in the project.

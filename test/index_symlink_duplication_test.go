@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,7 @@ func TestScanDirectory_SymlinkDuplication(t *testing.T) {
 
 	// 5. Validate
 	v := validator.NewValidator(pt, rootDir, nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	// 6. Check for duplicates (Expect NONE)
 	for _, d := range v.Diagnostics {

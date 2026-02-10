@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"log"
 	"os"
 )
@@ -10,7 +11,7 @@ var (
 	std = log.New(os.Stderr, "[mdt] ", log.LstdFlags)
 )
 
-func SetOutput(output *os.File) {
+func SetOutput(output io.Writer) {
 	std.SetOutput(output)
 }
 

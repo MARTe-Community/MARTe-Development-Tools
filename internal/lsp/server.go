@@ -3,6 +3,7 @@ package lsp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
@@ -252,26 +254,80 @@ type TextEdit struct {
 	NewText string `json:"newText"`
 }
 
-var validationChan = make(chan string, 10)
+var validationChan = make(chan string, 1)
 var SynchronousValidation = true // Default to true for tests
+
+var (
+	valMu      sync.Mutex
+	valCancels = make(map[string]context.CancelFunc)
+)
 
 func init() {
 	// Start validation debouncer
 	go func() {
+		type request struct {
+			uri string
+		}
 		var timer *time.Timer
-		var pendingURI string
+		runRequested := make(chan request, 1)
+
+		// Goroutine to serialize validation
+		go func() {
+			for req := range runRequested {
+				ctx, cancel := context.WithCancel(context.Background())
+				
+				valMu.Lock()
+				if oldCancel, ok := valCancels[req.uri]; ok {
+					oldCancel()
+				}
+				valCancels[req.uri] = cancel
+				valMu.Unlock()
+
+				runValidation(ctx, req.uri)
+				
+				valMu.Lock()
+				// Cleanup if it's still our cancel func
+				if currentCancel, ok := valCancels[req.uri]; ok {
+					// Compare function pointers is tricky in Go, 
+					// but since we only care about this URI, 
+					// we can just check if it's still there.
+					// Actually, if a new request came in, valCancels[req.uri] was already replaced.
+					// So we only remove if it's OURS. 
+					// To be sure, we could use a request ID or just skip cleanup and let it be overwritten.
+					_ = currentCancel
+				}
+				valMu.Unlock()
+			}
+		}()
 
 		for uri := range validationChan {
 			if timer != nil {
 				timer.Stop()
 			}
-			pendingURI = uri
-			timer = time.AfterFunc(200*time.Millisecond, func() {
-				runValidation(pendingURI)
+			u := uri
+			timer = time.AfterFunc(500*time.Millisecond, func() {
+				select {
+				case runRequested <- request{uri: u}:
+				default:
+					// Already a run requested, don't need to queue another
+				}
 			})
 		}
 	}()
 }
+
+func triggerValidation(uri string) {
+	if SynchronousValidation {
+		runValidation(context.Background(), uri)
+	} else {
+		select {
+		case validationChan <- uri:
+		default:
+			// Already triggered
+		}
+	}
+}
+
 
 func RunServer() {
 	SynchronousValidation = false // Disable sync for production
@@ -366,7 +422,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 			},
 		})
 	case "initialized":
-		runValidation("")
+		triggerValidation("")
 	case "shutdown":
 		respond(msg.ID, nil)
 	case "exit":
@@ -454,11 +510,7 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		Tree.AddFile(path, config)
 		Tree.ResolveReferences()
 		Tree.ResolveFields()
-		if SynchronousValidation {
-			runValidation(params.TextDocument.URI)
-		} else {
-			validationChan <- params.TextDocument.URI
-		}
+		triggerValidation(params.TextDocument.URI)
 	}
 }
 
@@ -490,11 +542,7 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		Tree.AddFile(path, config)
 		Tree.ResolveReferences()
 		Tree.ResolveFields()
-		if SynchronousValidation {
-			runValidation(uri)
-		} else {
-			validationChan <- uri
-		}
+		triggerValidation(uri)
 	}
 }
 
@@ -569,10 +617,15 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	}
 }
 
-func runValidation(_ string) {
+func runValidation(ctx context.Context, _ string) {
 	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
 	v := validator.NewValidator(Tree, ProjectRoot, nil)
-	v.ValidateProject()
+	v.ValidateProject(ctx)
+
+	if ctx.Err() != nil {
+		logger.Printf("Validation canceled")
+		return
+	}
 
 	logger.Printf("Validation complete. Diagnostics: %d", len(v.Diagnostics))
 

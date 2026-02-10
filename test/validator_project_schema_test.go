@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ package schema
 
 	// Pass tmpDir as projectRoot
 	v := validator.NewValidator(idx, tmpDir, nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -43,7 +44,7 @@ func TestLSPInlayHint(t *testing.T) {
 	lsp.Tree.ResolveReferences()
 
 	v := validator.NewValidator(lsp.Tree, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	params := lsp.InlayHintParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},

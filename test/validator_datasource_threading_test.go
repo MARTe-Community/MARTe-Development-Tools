@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -100,7 +101,7 @@ func TestDataSourceThreadingValidation(t *testing.T) {
 	// So it should work.
 
 	v := validator.NewValidator(pt, "", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	foundError := false
 	for _, d := range v.Diagnostics {

@@ -253,3 +253,12 @@ Inlay hints provide real-time contextual information directly in the editor:
 - **Expression Evaluation**:
   - Complex expressions show their result at the end of the line, e.g., `Expr = 10 + 20` **` => 30`**.
   - Variable references show their current value inline, e.g., `@MyVar` **`(=> 10)`**.
+
+### Navigation and Symbols
+`mdt` makes it easy to navigate large MARTe projects:
+
+- **Go to Definition**: Jump directly to the definition of an object, signal, or variable.
+- **Find References**: Find all usages of a symbol across the entire project.
+- **Document Symbols**: A hierarchical view of the current file's structure (Objects, Signals, Variables).
+- **Workspace Symbols**: Search for any symbol in the project by name. Supports fuzzy matching and shows the container context.
+- **Renaming**: Project-wide renaming of objects, variables, and signals. Renaming a signal correctly updates all GAM references and its DataSource definition.

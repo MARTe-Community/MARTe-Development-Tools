@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -40,8 +41,8 @@ func TestGlobalPragmaDebug(t *testing.T) {
 	t.Logf("Global Pragma stored: %s", pragmas[0])
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
-	v.CheckUnused() // Must call this for unused check!
+	v.ValidateProject(context.Background())
+	v.CheckUnused(context.Background()) // Must call this for unused check!
 
 	foundImplicitWarning := false
 	foundUnusedWarning := false

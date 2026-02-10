@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -297,7 +298,7 @@ func TestValidator_IOGAM(t *testing.T) {
 			pt.ResolveFields()
 
 			v := validator.NewValidator(pt, ".", nil)
-			v.ValidateProject()
+			v.ValidateProject(context.Background())
 
 			for _, exp := range tt.expected {
 				found := false

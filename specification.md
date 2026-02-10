@@ -29,6 +29,8 @@ The LSP server should provide the following capabilities:
   - **Referenced Signals**: Show the list of GAMs where the signal is referenced (indicating Input/Output direction).
 - **Go to Definition**: Jump to the definition of a reference, supporting navigation across any file in the current project.
 - **Go to References**: Find usages of a node or field, supporting navigation across any file in the current project.
+- **Document Symbols**: Hierarchical view of definitions (Objects, Signals, Variables, Constants) in the current file.
+- **Workspace Symbols**: Project-wide search for any symbol by name, showing its container context.
 - **Code Completion**: Autocomplete fields, values, and references.
   - **Context-Aware**: Suggestions depend on the cursor position (e.g., inside an object, assigning a value).
   - **Schema-Driven**: Field suggestions are derived from the CUE schema for the current object's Class, indicating mandatory vs. optional fields.

@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -42,7 +43,7 @@ $App = {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.CheckUnused()
+	v.CheckUnused(context.Background())
 
 	foundUnused := false
 	for _, d := range v.Diagnostics {
@@ -88,7 +89,7 @@ $App = {
 	idx.ResolveReferences()
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.CheckUnused()
+	v.CheckUnused(context.Background())
 
 	foundUnusedSig2 := false
 	for _, d := range v.Diagnostics {

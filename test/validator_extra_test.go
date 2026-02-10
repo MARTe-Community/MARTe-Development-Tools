@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -28,7 +29,7 @@ func TestSDNSubscriberValidation(t *testing.T) {
 	idx.AddFile("sdn.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {
@@ -61,7 +62,7 @@ func TestFileWriterValidation(t *testing.T) {
 	idx.AddFile("writer.marte", config)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	found := false
 	for _, d := range v.Diagnostics {

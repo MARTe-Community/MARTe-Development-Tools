@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -138,7 +139,7 @@ func runBuild(args []string) {
 	}
 
 	v := validator.NewValidator(tree, ".", overrides)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	hasErrors := false
 	for _, diag := range v.Diagnostics {
@@ -268,7 +269,7 @@ func runCheck(args []string) {
 	}
 
 	v := validator.NewValidator(tree, ".", overrides)
-	v.ValidateProject()
+	v.ValidateProject(context.Background())
 
 	for _, diag := range v.Diagnostics {
 		level := "ERROR"
