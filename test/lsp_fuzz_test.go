@@ -10,10 +10,10 @@ import (
 
 func TestIncrementalFuzz(t *testing.T) {
 	// Initialize
-	lsp.Documents = make(map[string]string)
+	// Documents reset via ResetTestServer
 	uri := "file://fuzz.marte"
 	currentText := ""
-	lsp.Documents[uri] = currentText
+	lsp.GetTestDocuments()[uri] = currentText
 
 	rand.Seed(time.Now().UnixNano())
 
@@ -74,8 +74,8 @@ func TestIncrementalFuzz(t *testing.T) {
 		})
 		
 		// Verify
-		if lsp.Documents[uri] != currentText {
-			t.Fatalf("Fuzz iteration %d failed.\nExpected len: %d\nGot len:      %d\nChange: %+v", i, len(currentText), len(lsp.Documents[uri]), change)
+		if lsp.GetTestDocuments()[uri] != currentText {
+			t.Fatalf("Fuzz iteration %d failed.\nExpected len: %d\nGot len:      %d\nChange: %+v", i, len(currentText), len(lsp.GetTestDocuments()[uri]), change)
 		}
 	}
 }

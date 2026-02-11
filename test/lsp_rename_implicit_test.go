@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
@@ -12,8 +11,8 @@ import (
 
 func TestRenameImplicitToDefinition(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 +DS = {
@@ -31,17 +30,17 @@ func TestRenameImplicitToDefinition(t *testing.T) {
 }
 `
 	uri := "file://rename_imp.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("rename_imp.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("rename_imp.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// Run validator to link targets
-	v := validator.NewValidator(lsp.Tree, ".", nil)
+	v := validator.NewValidator(lsp.GetTestTree(), ".", nil)
 	v.ValidateProject(context.Background())
 
 	// Rename Implicit Sig1 (Line 11, 0-based 11)

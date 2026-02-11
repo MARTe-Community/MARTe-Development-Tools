@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
@@ -12,9 +11,9 @@ import (
 
 func TestHandleCompletion(t *testing.T) {
 	setup := func() {
-		lsp.Tree = index.NewProjectTree()
-		lsp.Documents = make(map[string]string)
-		lsp.ProjectRoot = "."
+		lsp.ResetTestServer()
+		// Documents reset via ResetTestServer
+		lsp.SetTestProjectRoot(".")
 		lsp.GlobalSchema = schema.NewSchema()
 	}
 
@@ -24,7 +23,7 @@ func TestHandleCompletion(t *testing.T) {
 	t.Run("Suggest Classes", func(t *testing.T) {
 		setup()
 		content := "+Obj = { Class = "
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 
 		params := lsp.CompletionParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
@@ -56,10 +55,10 @@ func TestHandleCompletion(t *testing.T) {
     
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
+		lsp.GetTestTree().AddFile(path, cfg)
 
 		// Position at line 3 (empty line inside MyApp)
 		params := lsp.CompletionParams{
@@ -106,11 +105,11 @@ $App = {
     }
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
-		lsp.Tree.ResolveReferences()
+		lsp.GetTestTree().AddFile(path, cfg)
+		lsp.GetTestTree().ResolveReferences()
 
 		// Position at end of "DataSource = "
 		params := lsp.CompletionParams{
@@ -144,10 +143,10 @@ $App = {
     
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
+		lsp.GetTestTree().AddFile(path, cfg)
 
 		// Position at line 4
 		params := lsp.CompletionParams{
@@ -167,15 +166,15 @@ $App = {
 		setup()
 		// Define a project DataSource in one file
 		cfg1, _ := parser.NewParser("#package MYPROJ.Data\n+ProjectDS = { Class = FileReader +Signals = { S1 = { Type = int32 } } }").Parse()
-		lsp.Tree.AddFile("project_ds.marte", cfg1)
+		lsp.GetTestTree().AddFile("project_ds.marte", cfg1)
 
 		// Define an isolated file
 		contentIso := "+MyGAM = { Class = IOGAM +InputSignals = { S1 = { DataSource =  } } }"
-		lsp.Documents["file://iso.marte"] = contentIso
+		lsp.GetTestDocuments()["file://iso.marte"] = contentIso
 		cfg2, _ := parser.NewParser(contentIso).Parse()
-		lsp.Tree.AddFile("iso.marte", cfg2)
+		lsp.GetTestTree().AddFile("iso.marte", cfg2)
 
-		lsp.Tree.ResolveReferences()
+		lsp.GetTestTree().ResolveReferences()
 
 		// Completion in isolated file
 		params := lsp.CompletionParams{
@@ -200,14 +199,14 @@ $App = {
 		// Completion in a project file
 		lineContent := "+MyGAM = { Class = IOGAM +InputSignals = { S1 = { DataSource = Dummy } } }"
 		contentPrj := "#package MYPROJ.App\n" + lineContent
-		lsp.Documents["file://prj.marte"] = contentPrj
+		lsp.GetTestDocuments()["file://prj.marte"] = contentPrj
 		pPrj := parser.NewParser(contentPrj)
 		cfg3, err := pPrj.Parse()
 		if err != nil {
 			t.Logf("Parser error in contentPrj: %v", err)
 		}
-		lsp.Tree.AddFile("prj.marte", cfg3)
-		lsp.Tree.ResolveReferences()
+		lsp.GetTestTree().AddFile("prj.marte", cfg3)
+		lsp.GetTestTree().ResolveReferences()
 
 		paramsPrj := lsp.CompletionParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: "file://prj.marte"},
@@ -239,10 +238,10 @@ $App = {
     }
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
+		lsp.GetTestTree().AddFile(path, cfg)
 
 		params := lsp.CompletionParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
@@ -286,10 +285,10 @@ package schema
     Mode =  
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
+		lsp.GetTestTree().AddFile(path, cfg)
 
 		params := lsp.CompletionParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
@@ -326,10 +325,10 @@ package schema
     Field = 
 }
 `
-		lsp.Documents[uri] = content
+		lsp.GetTestDocuments()[uri] = content
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
-		lsp.Tree.AddFile(path, cfg)
+		lsp.GetTestTree().AddFile(path, cfg)
 
 		// 1. Triggered by =
 		params := lsp.CompletionParams{
@@ -354,7 +353,7 @@ package schema
 
 		// 2. Triggered by @
 		// "Field = @"
-		lsp.Documents[uri] = `
+		lsp.GetTestDocuments()[uri] = `
 #var MyVar: uint = 10
 +App = {
     Field = @

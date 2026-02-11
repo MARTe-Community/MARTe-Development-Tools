@@ -3,14 +3,13 @@ package integration
 import (
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestLSPVariableRefs(t *testing.T) {
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 #var MyVar: int = 1
@@ -19,14 +18,14 @@ func TestLSPVariableRefs(t *testing.T) {
 }
 `
 	uri := "file://vars.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("vars.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("vars.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// 1. Definition from Usage
 	// Line 4: "    Field = @MyVar"

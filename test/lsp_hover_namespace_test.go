@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
@@ -19,15 +18,15 @@ func TestHoverNamespaceStripping(t *testing.T) {
 }
 `
 	// Reset global state
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	p := parser.NewParser(content)
 	config, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("hover.marte", config)
+	lsp.GetTestTree().AddFile("hover.marte", config)
 	
     // Resolve references to populate NodeMap/Metadata? 
     // AddFile does populate NodeMap.
@@ -40,7 +39,7 @@ func TestHoverNamespaceStripping(t *testing.T) {
 		Position:     lsp.Position{Line: 3, Character: 4}, // +DS1
 	}
 
-	lsp.Documents["file://hover.marte"] = content
+	lsp.GetTestDocuments()["file://hover.marte"] = content
 
 	res := lsp.HandleHover(params)
     

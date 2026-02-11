@@ -4,14 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestLSPHoverVariable(t *testing.T) {
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 #var MyInt: int = 123
@@ -20,14 +19,14 @@ func TestLSPHoverVariable(t *testing.T) {
 }
 `
 	uri := "file://hover_var.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("hover_var.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("hover_var.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// 1. Hover on Definition (#var MyInt)
 	// Line 2 (index 1). # is at 0. Name "MyInt" is at 5.

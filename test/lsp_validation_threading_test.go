@@ -5,16 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
 
 func TestLSPValidationThreading(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
-	lsp.ProjectRoot = "."
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
+	lsp.SetTestProjectRoot(".")
 	lsp.GlobalSchema = schema.NewSchema() // Empty schema but not nil
 
 	// Capture Output

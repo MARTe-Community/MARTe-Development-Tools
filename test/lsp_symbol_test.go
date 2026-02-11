@@ -3,14 +3,13 @@ package integration
 import (
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestHandleDocumentSymbol(t *testing.T) {
 	// Reset tree for test
-	lsp.Tree = index.NewProjectTree()
+	lsp.ResetTestServer()
 
 	content := `
 #let VAR : uint32 = 10
@@ -29,7 +28,7 @@ func TestHandleDocumentSymbol(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	lsp.Tree.AddFile(path, config)
+	lsp.GetTestTree().AddFile(path, config)
 
 	params := lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
@@ -95,7 +94,7 @@ func TestHandleDocumentSymbol(t *testing.T) {
 	uri2 := "file://" + path2
 	p2 := parser.NewParser(content2)
 	config2, _ := p2.Parse()
-	lsp.Tree.AddFile(path2, config2)
+	lsp.GetTestTree().AddFile(path2, config2)
 
 	symbols2 := lsp.HandleDocumentSymbol(lsp.DocumentSymbolParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri2},
@@ -126,7 +125,7 @@ func TestHandleDocumentSymbol(t *testing.T) {
 
 func TestHandleWorkspaceSymbol(t *testing.T) {
 	// Reset tree
-	lsp.Tree = index.NewProjectTree()
+	lsp.ResetTestServer()
 
 	files := map[string]string{
 		"/a.marte": "+ObjectA = { Class = C }",
@@ -136,13 +135,13 @@ func TestHandleWorkspaceSymbol(t *testing.T) {
 	for path, content := range files {
 		p := parser.NewParser(content)
 		config, _ := p.Parse()
-		lsp.Tree.AddFile(path, config)
+		lsp.GetTestTree().AddFile(path, config)
 	}
 
 	// Add a variable to one of the files
 	pVar := parser.NewParser("#let GLOBAL_VAR : uint32 = 100")
 	cVar, _ := pVar.Parse()
-	lsp.Tree.AddFile("/vars.marte", cVar)
+	lsp.GetTestTree().AddFile("/vars.marte", cVar)
 
 	// 1. Search for "Object"
 	res1 := lsp.HandleWorkspaceSymbol(lsp.WorkspaceSymbolParams{Query: "Object"})

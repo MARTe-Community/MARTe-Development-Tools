@@ -5,16 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
 
 func TestIncrementalCorrectness(t *testing.T) {
-	lsp.Documents = make(map[string]string)
+	// Documents reset via ResetTestServer
 	uri := "file://test.txt"
 	initial := "12345\n67890"
-	lsp.Documents[uri] = initial
+	lsp.GetTestDocuments()[uri] = initial
 
 	// Edit 1: Insert "A" at 0:1 -> "1A2345\n67890"
 	change1 := lsp.TextDocumentContentChangeEvent{
@@ -26,8 +25,8 @@ func TestIncrementalCorrectness(t *testing.T) {
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{change1},
 	})
 
-	if lsp.Documents[uri] != "1A2345\n67890" {
-		t.Errorf("Edit 1 failed: %q", lsp.Documents[uri])
+	if lsp.GetTestDocuments()[uri] != "1A2345\n67890" {
+		t.Errorf("Edit 1 failed: %q", lsp.GetTestDocuments()[uri])
 	}
 
 	// Edit 2: Delete newline (merge lines)
@@ -46,8 +45,8 @@ func TestIncrementalCorrectness(t *testing.T) {
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{change2},
 	})
 
-	if lsp.Documents[uri] != "1A234567890" {
-		t.Errorf("Edit 2 failed: %q", lsp.Documents[uri])
+	if lsp.GetTestDocuments()[uri] != "1A234567890" {
+		t.Errorf("Edit 2 failed: %q", lsp.GetTestDocuments()[uri])
 	}
 
 	// Edit 3: Add newline at end
@@ -62,15 +61,15 @@ func TestIncrementalCorrectness(t *testing.T) {
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{change3},
 	})
 
-	if lsp.Documents[uri] != "1A234567890\n" {
-		t.Errorf("Edit 3 failed: %q", lsp.Documents[uri])
+	if lsp.GetTestDocuments()[uri] != "1A234567890\n" {
+		t.Errorf("Edit 3 failed: %q", lsp.GetTestDocuments()[uri])
 	}
 }
 
 func TestIncrementalAppValidation(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 	lsp.GlobalSchema = schema.LoadFullSchema(".")
 	var buf bytes.Buffer
 	lsp.Output = &buf
@@ -169,7 +168,7 @@ func TestIncrementalAppValidation(t *testing.T) {
 	buf.Reset()
 
 	// 3. Add Value to A
-	currentText := lsp.Documents[uri]
+	currentText := lsp.GetTestDocuments()[uri]
 	idx := strings.Index(currentText, "Placeholder")
 	if idx == -1 {
 		t.Fatal("Could not find anchor string")

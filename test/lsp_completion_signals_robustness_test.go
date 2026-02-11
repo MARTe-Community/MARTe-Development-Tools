@@ -3,7 +3,6 @@ package integration
 import (
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
@@ -11,9 +10,9 @@ import (
 
 func TestSuggestSignalsRobustness(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
-	lsp.ProjectRoot = "."
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
+	lsp.SetTestProjectRoot(".")
 	lsp.GlobalSchema = schema.NewSchema()
 
 	// Inject schema with INOUT
@@ -44,13 +43,13 @@ package schema
 }
 `
 	uri := "file://robust.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("robust.marte", cfg)
+	lsp.GetTestTree().AddFile("robust.marte", cfg)
 
 	// Check Input (Line 10)
 	paramsIn := lsp.CompletionParams{

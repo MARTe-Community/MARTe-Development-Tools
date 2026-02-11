@@ -17,6 +17,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
+	"github.com/marte-community/marte-dev-tools/internal/lsp/cache"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
@@ -49,9 +50,7 @@ type CompletionList struct {
 	Items        []CompletionItem `json:"items"`
 }
 
-var Tree = index.NewProjectTree()
-var Documents = make(map[string]string)
-var ProjectRoot string
+var GlobalSession *cache.Session
 var GlobalSchema *schema.Schema
 var Output io.Writer = os.Stdout
 
@@ -346,18 +345,14 @@ func init() {
 				}
 				valCancels[req.uri] = cancel
 				valMu.Unlock()
-
-				runValidation(ctx, req.uri)
+				
+				view := GlobalSession.ViewOf(req.uri)
+				if view != nil {
+					runValidation(ctx, req.uri, view.Snapshot())
+				}
 				
 				valMu.Lock()
-				// Cleanup if it's still our cancel func
 				if currentCancel, ok := valCancels[req.uri]; ok {
-					// Compare function pointers is tricky in Go, 
-					// but since we only care about this URI, 
-					// we can just check if it's still there.
-					// Actually, if a new request came in, valCancels[req.uri] was already replaced.
-					// So we only remove if it's OURS. 
-					// To be sure, we could use a request ID or just skip cleanup and let it be overwritten.
 					_ = currentCancel
 				}
 				valMu.Unlock()
@@ -373,7 +368,7 @@ func init() {
 				select {
 				case runRequested <- request{uri: u}:
 				default:
-					// Already a run requested, don't need to queue another
+					// Already a run requested
 				}
 			})
 		}
@@ -382,7 +377,10 @@ func init() {
 
 func triggerValidation(uri string) {
 	if SynchronousValidation {
-		runValidation(context.Background(), uri)
+		view := GlobalSession.ViewOf(uri)
+		if view != nil {
+			runValidation(context.Background(), uri, view.Snapshot())
+		}
 	} else {
 		select {
 		case validationChan <- uri:
@@ -395,6 +393,9 @@ func triggerValidation(uri string) {
 
 func RunServer() {
 	SynchronousValidation = false // Disable sync for production
+	
+	GlobalSession = cache.NewSession("default")
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		msg, err := readMessage(reader)
@@ -455,16 +456,21 @@ func HandleMessage(msg *JsonRpcMessage) {
 			}
 
 			if root != "" {
-				ProjectRoot = root
+				if GlobalSession == nil {
+					GlobalSession = cache.NewSession("default")
+				}
+				view := GlobalSession.CreateView("main", root)
+				snap := view.Snapshot()
+
 				logger.Printf("Scanning workspace: %s\n", root)
-				if err := Tree.ScanDirectory(root); err != nil {
+				if err := snap.Tree().ScanDirectory(root); err != nil {
 					logger.Printf("ScanDirectory failed: %v\n", err)
 				}
 				logger.Printf("Scan done")
-				Tree.ResolveReferences()
-				Tree.ResolveFields()
+				snap.Tree().ResolveReferences()
+				snap.Tree().ResolveFields()
 				logger.Printf("Resolve done")
-				GlobalSchema = schema.LoadFullSchema(ProjectRoot)
+				GlobalSchema = schema.LoadFullSchema(root)
 				logger.Printf("Schema done")
 			}
 		}
@@ -593,24 +599,52 @@ func uriToPath(uri string) string {
 }
 
 func HandleDidOpen(params DidOpenTextDocumentParams) {
+	if GlobalSession == nil {
+		GlobalSession = cache.NewSession("default")
+	}
+	
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil {
+		// Fallback create view if not exists
+		root := uriToPath(params.TextDocument.URI)
+		// Try to find project root by looking up tree? No.
+		// Simplified: just create a view for this file's dir
+		view = GlobalSession.CreateView("auto", root) 
+	}
+	
+	// Create new snapshot
+	oldSnap := view.Snapshot()
+	newSnap := oldSnap.Clone(context.Background())
+	
 	path := uriToPath(params.TextDocument.URI)
-	Documents[params.TextDocument.URI] = params.TextDocument.Text
+	newSnap.Documents()[params.TextDocument.URI] = params.TextDocument.Text
+	
 	p := parser.NewParser(params.TextDocument.Text)
 	config, _ := p.Parse()
 
 	if config != nil {
-		Tree.AddFile(path, config)
-		Tree.ResolveReferences()
-		Tree.ResolveFields()
+		newSnap.Tree().AddFile(path, config)
+		newSnap.Tree().ResolveReferences()
+		newSnap.Tree().ResolveFields()
+		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
+	} else {
+		view.SetSnapshot(newSnap)
 	}
 }
 
 func HandleDidChange(params DidChangeTextDocumentParams) {
 	uri := params.TextDocument.URI
-	text, ok := Documents[uri]
+	view := GlobalSession.ViewOf(uri)
+	if view == nil {
+		return
+	}
+	
+	oldSnap := view.Snapshot()
+	newSnap := oldSnap.Clone(context.Background())
+	
+	text, ok := newSnap.Documents()[uri]
 	if !ok {
-		// If not found, rely on full sync being first or error
 		logger.Printf("[ERROR] document %s not found\n", uri)
 		return
 	}
@@ -623,7 +657,7 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		}
 	}
 
-	Documents[uri] = text
+	newSnap.Documents()[uri] = text
 	path := uriToPath(uri)
 	p := parser.NewParser(text)
 	config, _ := p.Parse()
@@ -631,10 +665,13 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	publishParserErrors(uri, p.Errors())
 
 	if config != nil {
-		Tree.AddFile(path, config)
-		Tree.ResolveReferences()
-		Tree.ResolveFields()
+		newSnap.Tree().AddFile(path, config)
+		newSnap.Tree().ResolveReferences()
+		newSnap.Tree().ResolveFields()
+		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
+	} else {
+		view.SetSnapshot(newSnap)
 	}
 }
 
@@ -677,8 +714,14 @@ func offsetAt(text string, pos Position) int {
 }
 
 func HandleFormatting(params DocumentFormattingParams) []TextEdit {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil {
+		return nil
+	}
+	snap := view.Snapshot()
+	
 	uri := params.TextDocument.URI
-	text, ok := Documents[uri]
+	text, ok := snap.Documents()[uri]
 	if !ok {
 		return nil
 	}
@@ -709,9 +752,23 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	}
 }
 
-func runValidation(ctx context.Context, _ string) {
+func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
-	v := validator.NewValidator(Tree, ProjectRoot, nil)
+	// Validator needs root path. View has it.
+	if snap.Tree() == nil || snap.Tree().Root == nil {
+		return 
+	}
+	
+	// We need the project root from the View.
+	// But snapshot doesn't expose View publicly? 
+	// Snapshot has unexported 'view'.
+	// But validator uses ProjectRoot mostly for schema loading or paths.
+	// We'll use the session logic.
+	
+	// Wait, validator.NewValidator takes `tree`, `projectRoot`, `schema`.
+	// We need to pass the snapshot's tree.
+	
+	v := validator.NewValidator(snap.Tree(), snap.View().Root(), nil) // Assuming we expose View()
 	v.ValidateProject(ctx)
 
 	if ctx.Err() != nil {
@@ -726,8 +783,8 @@ func runValidation(ctx context.Context, _ string) {
 
 	// Collect all known files to ensure we clear diagnostics for fixed files
 	knownFiles := make(map[string]bool)
-	collectFiles(Tree.Root, knownFiles)
-	for _, node := range Tree.IsolatedFiles {
+	collectFiles(snap.Tree().Root, knownFiles)
+	for _, node := range snap.Tree().IsolatedFiles {
 		collectFiles(node, knownFiles)
 	}
 
@@ -836,25 +893,30 @@ func mustMarshal(v any) json.RawMessage {
 }
 
 func HandleHover(params HoverParams) *Hover {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil {
 		logger.Printf("No object/node/reference found")
 		return nil
 	}
 
-	container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+	container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
 
 	var content string
 
 	if res.Node != nil {
 		if res.Node.Target != nil {
-			content = fmt.Sprintf("**Link**: `%s` -> `%s`\n\n%s", res.Node.RealName, res.Node.Target.RealName, formatNodeInfo(res.Node.Target))
+			content = fmt.Sprintf("**Link**: `%s` -> `%s`\n\n%s", res.Node.RealName, res.Node.Target.RealName, formatNodeInfo(tree, res.Node.Target))
 		} else {
-			content = formatNodeInfo(res.Node)
+			content = formatNodeInfo(tree, res.Node)
 		}
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
@@ -865,9 +927,9 @@ func HandleHover(params HoverParams) *Hover {
 		}
 		content = fmt.Sprintf("**%s**: `%s`\nType: `%s`", kind, res.Variable.Name, res.Variable.TypeExpr)
 		if res.Variable.DefaultValue != nil {
-			content += fmt.Sprintf("\nDefault: `%s`", valueToString(res.Variable.DefaultValue, container))
+			content += fmt.Sprintf("\nDefault: `%s`", valueToString(tree, res.Variable.DefaultValue, container))
 		}
-		if info := Tree.ResolveVariable(container, res.Variable.Name); info != nil {
+		if info := tree.ResolveVariable(container, res.Variable.Name); info != nil {
 			if info.Doc != "" {
 				content += "\n\n" + info.Doc
 			}
@@ -880,7 +942,7 @@ func HandleHover(params HoverParams) *Hover {
 		if res.Reference.Target != nil {
 			targetName = res.Reference.Target.RealName
 			targetDoc = res.Reference.Target.Doc
-			fullInfo = formatNodeInfo(res.Reference.Target)
+			fullInfo = formatNodeInfo(tree, res.Reference.Target)
 		} else if res.Reference.TargetVariable != nil {
 			v := res.Reference.TargetVariable
 			targetName = v.Name
@@ -890,9 +952,9 @@ func HandleHover(params HoverParams) *Hover {
 			}
 			fullInfo = fmt.Sprintf("**%s**: `@%s`\nType: `%s`", kind, v.Name, v.TypeExpr)
 			if v.DefaultValue != nil {
-				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(v.DefaultValue, container))
+				fullInfo += fmt.Sprintf("\nDefault: `%s`", valueToString(tree, v.DefaultValue, container))
 			}
-			if info := Tree.ResolveVariable(container, res.Reference.Name); info != nil {
+			if info := tree.ResolveVariable(container, res.Reference.Name); info != nil {
 				if info.Doc != "" {
 					fullInfo += "\n\n" + info.Doc
 				}
@@ -919,18 +981,23 @@ func HandleHover(params HoverParams) *Hover {
 	}
 }
 
-func valueToString(val parser.Value, ctx *index.ProjectNode) string {
-	res := Tree.Evaluate(val, ctx)
+func valueToString(tree *index.ProjectTree, val parser.Value, ctx *index.ProjectNode) string {
+	res := tree.Evaluate(val, ctx)
 	if s, ok := res.(*parser.StringValue); ok && s.Quoted {
 		return fmt.Sprintf("\"%s\"", s.Value)
 	}
-	return Tree.ValueToString(res)
+	return tree.ValueToString(res)
 }
 
 func HandleCompletion(params CompletionParams) *CompletionList {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	uri := params.TextDocument.URI
 	path := uriToPath(uri)
-	text, ok := Documents[uri]
+	text, ok := snap.Documents()[uri]
 	if !ok {
 		return nil
 	}
@@ -959,15 +1026,15 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	// Case 3: Variable completion
 	varRegex := regexp.MustCompile(`([@])([a-zA-Z0-9_]*)$`)
 	if matches := varRegex.FindStringSubmatch(prefix); matches != nil {
-		container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 		if container == nil {
-			if iso, ok := Tree.IsolatedFiles[path]; ok {
+			if iso, ok := tree.IsolatedFiles[path]; ok {
 				container = iso
 			} else {
-				container = Tree.Root
+				container = tree.Root
 			}
 		}
-		return suggestVariables(container)
+		return suggestVariables(tree, container)
 	}
 
 	// Case 1: Assigning a value (Ends with "=" or "= ")
@@ -987,15 +1054,15 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 			return suggestClasses()
 		}
 
-		container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 		if container != nil {
-			return suggestFieldValues(container, key, path)
+			return suggestFieldValues(tree, container, key, path)
 		}
 		return nil
 	}
 
 	// Case 2: Typing a key inside an object
-	container := Tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+	container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 	if container != nil {
 		if container.Parent != nil && isGAM(container.Parent) {
 			if container.Name == "InputSignals" {
@@ -1194,12 +1261,12 @@ func suggestFields(container *index.ProjectNode) *CompletionList {
 	return &CompletionList{Items: items}
 }
 
-func suggestFieldValues(container *index.ProjectNode, field string, path string) *CompletionList {
+func suggestFieldValues(tree *index.ProjectTree, container *index.ProjectNode, field string, path string) *CompletionList {
 	var root *index.ProjectNode
-	if iso, ok := Tree.IsolatedFiles[path]; ok {
+	if iso, ok := tree.IsolatedFiles[path]; ok {
 		root = iso
 	} else {
-		root = Tree.Root
+		root = tree.Root
 	}
 
 	var items []CompletionItem
@@ -1227,7 +1294,7 @@ func suggestFieldValues(container *index.ProjectNode, field string, path string)
 	}
 	if !ok {
 		// Add variables
-		vars := suggestVariables(container)
+		vars := suggestVariables(tree, container)
 		if vars != nil {
 			for _, item := range vars.Items {
 				// Create copy to modify label
@@ -1367,11 +1434,16 @@ func isDataSource(node *index.ProjectNode) bool {
 }
 
 func HandleDefinition(params DefinitionParams) any {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -1396,8 +1468,8 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	if targetVar != nil {
-		container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
-		if info := Tree.ResolveVariable(container, targetVar.Name); info != nil {
+		container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+		if info := tree.ResolveVariable(container, targetVar.Name); info != nil {
 			return []Location{{
 				URI: "file://" + info.File,
 				Range: Range{
@@ -1428,11 +1500,16 @@ func HandleDefinition(params DefinitionParams) any {
 }
 
 func HandleTypeDefinition(params TypeDefinitionParams) any {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -1450,9 +1527,9 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	}
 
 	// 1. If it's a Signal usage in a GAM, jump to the Signal definition in the DataSource
-	if ds, _ := getSignalInfo(targetNode); ds != nil {
+	if ds, _ := getSignalInfo(tree, targetNode); ds != nil {
 		// Find the peer that is a definition in a DataSource
-		peers := findSignalPeers(targetNode)
+		peers := findSignalPeers(tree, targetNode)
 		for _, peer := range peers {
 			if peer.Parent != nil && peer.Parent.Name == "Signals" {
 				var locations []Location
@@ -1475,7 +1552,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	}
 
 	// 2. Resolve via Class field (if it points to a template $)
-	class := getEvaluatedMetadata(targetNode, "Class")
+	class := getEvaluatedMetadata(tree, targetNode, "Class")
 	if class != "" {
 		// Look for a template with this name ($Class)
 		templateName := "$" + class
@@ -1486,7 +1563,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		}
 		// Search globally for template
 		var found *index.ProjectNode
-		Tree.Walk(func(n *index.ProjectNode) {
+		tree.Walk(func(n *index.ProjectNode) {
 			if n.RealName == templateName {
 				found = n
 			}
@@ -1619,11 +1696,16 @@ func HandleCodeAction(params CodeActionParams) []CodeAction {
 }
 
 func HandlePrepareCallHierarchy(params CallHierarchyPrepareParams) []CallHierarchyItem {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil || res.Node == nil {
 		return nil
 	}
@@ -1649,7 +1731,7 @@ func HandlePrepareCallHierarchy(params CallHierarchyPrepareParams) []CallHierarc
 	kind := SymbolKindObject
 	if isGAM(node) {
 		kind = SymbolKindClass
-	} else if _, sig := getSignalInfo(node); sig != "" {
+	} else if _, sig := getSignalInfo(tree, node); sig != "" {
 		kind = SymbolKindVariable
 	}
 
@@ -1671,10 +1753,15 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	if !ok {
 		return nil
 	}
+	
+	view := GlobalSession.ViewOf(params.Item.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
 
 	// Resolve the node globally by name (simplification)
 	var node *index.ProjectNode
-	Tree.Walk(func(n *index.ProjectNode) {
+	tree.Walk(func(n *index.ProjectNode) {
 		if n.RealName == nodeName {
 			node = n
 		}
@@ -1690,10 +1777,10 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	if isGAM(node) {
 		if inputs, ok := node.Children["InputSignals"]; ok {
 			for _, sig := range inputs.Children {
-				producers := getGAMSignalPeers(sig, "Output")
+				producers := getGAMSignalPeers(tree, sig, "Output")
 				for _, prod := range producers {
 					calls = append(calls, CallHierarchyIncomingCall{
-						From: nodeToCallItem(prod),
+						From: nodeToCallItem(tree, prod),
 						FromRanges: []Range{params.Item.Range},
 					})
 				}
@@ -1702,11 +1789,11 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	}
 
 	// 2. If it's a Signal, incoming calls are GAMs that produce it (OutputSignals)
-	if _, sig := getSignalInfo(node); sig != "" {
-		producers := getGAMSignalPeers(node, "Output")
+	if _, sig := getSignalInfo(tree, node); sig != "" {
+		producers := getGAMSignalPeers(tree, node, "Output")
 		for _, prod := range producers {
 			calls = append(calls, CallHierarchyIncomingCall{
-				From: nodeToCallItem(prod),
+				From: nodeToCallItem(tree, prod),
 				FromRanges: []Range{params.Item.Range},
 			})
 		}
@@ -1720,9 +1807,14 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	if !ok {
 		return nil
 	}
+	
+	view := GlobalSession.ViewOf(params.Item.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
 
 	var node *index.ProjectNode
-	Tree.Walk(func(n *index.ProjectNode) {
+	tree.Walk(func(n *index.ProjectNode) {
 		if n.RealName == nodeName {
 			node = n
 		}
@@ -1738,10 +1830,10 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	if isGAM(node) {
 		if outputs, ok := node.Children["OutputSignals"]; ok {
 			for _, sig := range outputs.Children {
-				consumers := getGAMSignalPeers(sig, "Input")
+				consumers := getGAMSignalPeers(tree, sig, "Input")
 				for _, cons := range consumers {
 					calls = append(calls, CallHierarchyOutgoingCall{
-						To: nodeToCallItem(cons),
+						To: nodeToCallItem(tree, cons),
 						FromRanges: []Range{params.Item.Range},
 					})
 				}
@@ -1750,11 +1842,11 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	}
 
 	// 2. If it's a Signal, outgoing calls are GAMs that consume it (InputSignals)
-	if _, sig := getSignalInfo(node); sig != "" {
-		consumers := getGAMSignalPeers(node, "Input")
+	if _, sig := getSignalInfo(tree, node); sig != "" {
+		consumers := getGAMSignalPeers(tree, node, "Input")
 		for _, cons := range consumers {
 			calls = append(calls, CallHierarchyOutgoingCall{
-				To: nodeToCallItem(cons),
+				To: nodeToCallItem(tree, cons),
 				FromRanges: []Range{params.Item.Range},
 			})
 		}
@@ -1763,7 +1855,7 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	return calls
 }
 
-func nodeToCallItem(node *index.ProjectNode) CallHierarchyItem {
+func nodeToCallItem(tree *index.ProjectTree, node *index.ProjectNode) CallHierarchyItem {
 	var itemRange Range
 	var uri string
 	if len(node.Fragments) > 0 {
@@ -1778,7 +1870,7 @@ func nodeToCallItem(node *index.ProjectNode) CallHierarchyItem {
 	kind := SymbolKindObject
 	if isGAM(node) {
 		kind = SymbolKindClass
-	} else if _, sig := getSignalInfo(node); sig != "" {
+	} else if _, sig := getSignalInfo(tree, node); sig != "" {
 		kind = SymbolKindVariable
 	}
 
@@ -1794,14 +1886,14 @@ func nodeToCallItem(node *index.ProjectNode) CallHierarchyItem {
 }
 
 // Helper to find GAMs connected to a signal in a specific direction
-func getGAMSignalPeers(sigNode *index.ProjectNode, direction string) []*index.ProjectNode {
-	ds, sigName := getSignalInfo(sigNode)
+func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, direction string) []*index.ProjectNode {
+	ds, sigName := getSignalInfo(tree, sigNode)
 	if ds == nil || sigName == "" {
 		return nil
 	}
 
 	var peers []*index.ProjectNode
-	Tree.Walk(func(n *index.ProjectNode) {
+	tree.Walk(func(n *index.ProjectNode) {
 		if n.Parent == nil || n.Parent.Parent == nil {
 			return
 		}
@@ -1815,7 +1907,7 @@ func getGAMSignalPeers(sigNode *index.ProjectNode, direction string) []*index.Pr
 		}
 
 		if match && isGAM(n.Parent.Parent) {
-			d, s := getSignalInfo(n)
+			d, s := getSignalInfo(tree, n)
 			if d == ds && index.NormalizeName(s) == index.NormalizeName(sigName) {
 				peers = append(peers, n.Parent.Parent)
 			}
@@ -1825,11 +1917,16 @@ func getGAMSignalPeers(sigNode *index.ProjectNode, direction string) []*index.Pr
 }
 
 func HandleReferences(params ReferenceParams) []Location {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -1853,8 +1950,8 @@ func HandleReferences(params ReferenceParams) []Location {
 		var locations []Location
 		// Declaration
 		if params.Context.IncludeDeclaration {
-			container := Tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
-			if info := Tree.ResolveVariable(container, targetVar.Name); info != nil {
+			container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+			if info := tree.ResolveVariable(container, targetVar.Name); info != nil {
 				locations = append(locations, Location{
 					URI: "file://" + info.File,
 					Range: Range{
@@ -1865,7 +1962,7 @@ func HandleReferences(params ReferenceParams) []Location {
 			}
 		}
 		// References
-		for _, ref := range Tree.References {
+		for _, ref := range tree.References {
 			if ref.TargetVariable == targetVar {
 				locations = append(locations, Location{
 					URI: "file://" + ref.File,
@@ -1905,7 +2002,7 @@ func HandleReferences(params ReferenceParams) []Location {
 	}
 
 	// 1. References from index (Aliases)
-	for _, ref := range Tree.References {
+	for _, ref := range tree.References {
 		if ref.Target == canonical {
 			locations = append(locations, Location{
 				URI: "file://" + ref.File,
@@ -1918,7 +2015,7 @@ func HandleReferences(params ReferenceParams) []Location {
 	}
 
 	// 2. References from Node Targets (Direct References)
-	Tree.Walk(func(node *index.ProjectNode) {
+	tree.Walk(func(node *index.ProjectNode) {
 		if node.Target == canonical {
 			for _, frag := range node.Fragments {
 				if frag.IsObject {
@@ -1937,14 +2034,14 @@ func HandleReferences(params ReferenceParams) []Location {
 	return locations
 }
 
-func getEvaluatedMetadata(node *index.ProjectNode, key string) string {
+func getEvaluatedMetadata(tree *index.ProjectTree, node *index.ProjectNode, key string) string {
 	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
-		return Tree.ValueToString(Tree.Evaluate(fields[len(fields)-1].Value, node))
+		return tree.ValueToString(tree.Evaluate(fields[len(fields)-1].Value, node))
 	}
 	return node.Metadata[key]
 }
 
-func formatNodeInfo(node *index.ProjectNode) string {
+func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode) string {
 	info := ""
 	if class := node.Metadata["Class"]; class != "" {
 		if idx := strings.LastIndex(class, "::"); idx != -1 {
@@ -1955,8 +2052,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		info = fmt.Sprintf("`%s`\n\n", node.RealName)
 	}
 	// Check if it's a Signal (has Type or DataSource)
-	typ := getEvaluatedMetadata(node, "Type")
-	ds := getEvaluatedMetadata(node, "DataSource")
+	typ := getEvaluatedMetadata(tree, node, "Type")
+	ds := getEvaluatedMetadata(tree, node, "DataSource")
 
 	if ds == "" {
 		if node.Parent != nil && node.Parent.Name == "Signals" {
@@ -1976,7 +2073,7 @@ func formatNodeInfo(node *index.ProjectNode) string {
 		}
 
 		// Size
-		_, byteSize, desc := calculateSignalElements(node)
+		_, byteSize, desc := calculateSignalElements(tree, node)
 		if byteSize > 0 {
 			sigInfo += fmt.Sprintf("**Size**: %d bytes (%s) ", byteSize, desc)
 		} else {
@@ -1990,8 +2087,8 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	}
 
 	// Check if Implicit Signal peers exist
-	if ds, _ := getSignalInfo(node); ds != nil {
-		peers := findSignalPeers(node)
+	if ds, _ := getSignalInfo(tree, node); ds != nil {
+		peers := findSignalPeers(tree, node)
 
 		// 1. Explicit Definition Fields
 		var defNode *index.ProjectNode
@@ -2008,7 +2105,7 @@ func formatNodeInfo(node *index.ProjectNode) string {
 					if f, ok := def.(*parser.Field); ok {
 						key := f.Name
 						if key != "Type" && key != "NumberOfElements" && key != "NumberOfDimensions" && key != "Class" {
-							val := valueToString(f.Value, defNode)
+							val := valueToString(tree, f.Value, defNode)
 							info += fmt.Sprintf("\n**%s**: `%s`", key, val)
 						}
 					}
@@ -2025,7 +2122,7 @@ func formatNodeInfo(node *index.ProjectNode) string {
 						if f, ok := def.(*parser.Field); ok {
 							key := f.Name
 							if key != "DataSource" && key != "Alias" && key != "Type" && key != "Class" && key != "NumberOfElements" && key != "NumberOfDimensions" {
-								val := valueToString(f.Value, p)
+								val := valueToString(tree, f.Value, p)
 								extraInfo += fmt.Sprintf("\n- **%s** (%s): `%s`", key, gamName, val)
 							}
 						}
@@ -2040,9 +2137,9 @@ func formatNodeInfo(node *index.ProjectNode) string {
 
 	// Find references
 	var refs []string
-	for _, ref := range Tree.References {
+	for _, ref := range tree.References {
 		if ref.Target == node {
-			container := Tree.GetNodeContaining(ref.File, ref.Position)
+			container := tree.GetNodeContaining(ref.File, ref.Position)
 			if container != nil {
 				threadName := ""
 				stateName := ""
@@ -2092,9 +2189,9 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	var gams []string
 
 	// 1. Check References (explicit text references)
-	for _, ref := range Tree.References {
+	for _, ref := range tree.References {
 		if ref.Target == node {
-			container := Tree.GetNodeContaining(ref.File, ref.Position)
+			container := tree.GetNodeContaining(ref.File, ref.Position)
 			if container != nil {
 				curr := container
 				for curr != nil {
@@ -2122,7 +2219,7 @@ func formatNodeInfo(node *index.ProjectNode) string {
 	}
 
 	// 2. Check Direct Usages (Nodes targeting this node)
-	Tree.Walk(func(n *index.ProjectNode) {
+	tree.Walk(func(n *index.ProjectNode) {
 		if n.Target == node {
 			if n.Parent != nil && (n.Parent.Name == "InputSignals" || n.Parent.Name == "OutputSignals") {
 				if n.Parent.Parent != nil && isGAM(n.Parent.Parent) {
@@ -2151,11 +2248,16 @@ func formatNodeInfo(node *index.ProjectNode) string {
 }
 
 func HandleRename(params RenameParams) *WorkspaceEdit {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
-	res := Tree.Query(path, line, col)
+	res := tree.Query(path, line, col)
 	if res == nil {
 		return nil
 	}
@@ -2187,8 +2289,8 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	if targetNode != nil {
 		// Special handling for Signals (Implicit/Explicit)
-		if ds, _ := getSignalInfo(targetNode); ds != nil {
-			peers := findSignalPeers(targetNode)
+		if ds, _ := getSignalInfo(tree, targetNode); ds != nil {
+			peers := findSignalPeers(tree, targetNode)
 			seenPeers := make(map[*index.ProjectNode]bool)
 
 			for _, peer := range peers {
@@ -2230,7 +2332,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 				}
 
 				// Rename References to this Peer
-				for _, ref := range Tree.References {
+				for _, ref := range tree.References {
 					if ref.Target == peer {
 						// Handle qualified names
 						if strings.Contains(ref.Name, ".") {
@@ -2283,7 +2385,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 		}
 
 		// 2. Rename References
-		for _, ref := range Tree.References {
+		for _, ref := range tree.References {
 			if ref.Target == targetNode {
 				// Handle qualified names (e.g. Pkg.Node)
 				if strings.Contains(ref.Name, ".") {
@@ -2312,7 +2414,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 		}
 
 		// 3. Rename Implicit Node References (Signals in GAMs relying on name match)
-		Tree.Walk(func(n *index.ProjectNode) {
+		tree.Walk(func(n *index.ProjectNode) {
 			if n.Target == targetNode {
 				hasAlias := false
 				for _, frag := range n.Fragments {
@@ -2339,7 +2441,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 		return &WorkspaceEdit{Changes: changes}
 	} else if targetField != nil {
-		container := Tree.GetNodeContaining(path, targetField.Position)
+		container := tree.GetNodeContaining(path, targetField.Position)
 		if container != nil {
 			for _, frag := range container.Fragments {
 				for _, def := range frag.Definitions {
@@ -2375,7 +2477,7 @@ func send(msg any) {
 	fmt.Fprintf(Output, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }
 
-func suggestVariables(container *index.ProjectNode) *CompletionList {
+func suggestVariables(tree *index.ProjectTree, container *index.ProjectNode) *CompletionList {
 	items := []CompletionItem{}
 	seen := make(map[string]bool)
 
@@ -2387,7 +2489,7 @@ func suggestVariables(container *index.ProjectNode) *CompletionList {
 
 				doc := ""
 				if info.Def.DefaultValue != nil {
-					doc = fmt.Sprintf("Default: %s", valueToString(info.Def.DefaultValue, container))
+					doc = fmt.Sprintf("Default: %s", valueToString(tree, info.Def.DefaultValue, container))
 				}
 
 				kind := "Variable"
@@ -2408,7 +2510,7 @@ func suggestVariables(container *index.ProjectNode) *CompletionList {
 	return &CompletionList{Items: items}
 }
 
-func getSignalInfo(node *index.ProjectNode) (*index.ProjectNode, string) {
+func getSignalInfo(tree *index.ProjectTree, node *index.ProjectNode) (*index.ProjectNode, string) {
 	if node.Parent == nil {
 		return nil, ""
 	}
@@ -2448,15 +2550,15 @@ func getSignalInfo(node *index.ProjectNode) (*index.ProjectNode, string) {
 		}
 
 		if dsName != "" {
-			dsNode := Tree.ResolveName(node, dsName, isDataSource)
+			dsNode := tree.ResolveName(node, dsName, isDataSource)
 			return dsNode, sigName
 		}
 	}
 	return nil, ""
 }
 
-func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
-	dsNode, sigName := getSignalInfo(target)
+func findSignalPeers(tree *index.ProjectTree, target *index.ProjectNode) []*index.ProjectNode {
+	dsNode, sigName := getSignalInfo(tree, target)
 	if dsNode == nil || sigName == "" {
 		return nil
 	}
@@ -2471,8 +2573,8 @@ func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
 	}
 
 	// Find usages
-	Tree.Walk(func(n *index.ProjectNode) {
-		d, s := getSignalInfo(n)
+	tree.Walk(func(n *index.ProjectNode) {
+		d, s := getSignalInfo(tree, n)
 		if d == dsNode && s == sigName {
 			peers = append(peers, n)
 		}
@@ -2481,9 +2583,9 @@ func findSignalPeers(target *index.ProjectNode) []*index.ProjectNode {
 	return peers
 }
 
-func getEvaluatedField(node *index.ProjectNode, key string) parser.Value {
+func getEvaluatedField(tree *index.ProjectTree, node *index.ProjectNode, key string) parser.Value {
 	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
-		return Tree.Evaluate(fields[len(fields)-1].Value, node)
+		return tree.Evaluate(fields[len(fields)-1].Value, node)
 	}
 	return nil
 }
@@ -2511,17 +2613,17 @@ func getTypeSize(typeName string) int64 {
 	return 0
 }
 
-func calculateSignalElements(node *index.ProjectNode) (int64, int64, string) {
+func calculateSignalElements(tree *index.ProjectTree, node *index.ProjectNode) (int64, int64, string) {
 	// Returns: (totalElements, byteSize, description)
-	typ := getEvaluatedMetadata(node, "Type")
+	typ := getEvaluatedMetadata(tree, node, "Type")
 	if typ == "" && node.Target != nil {
-		typ = getEvaluatedMetadata(node.Target, "Type")
+		typ = getEvaluatedMetadata(tree, node.Target, "Type")
 	}
 	typeSize := getTypeSize(typ)
 
 	// Check Modifiers
-	rangesVal := getEvaluatedField(node, "Ranges")
-	samplesVal := getEvaluatedField(node, "Samples")
+	rangesVal := getEvaluatedField(tree, node, "Ranges")
+	samplesVal := getEvaluatedField(tree, node, "Samples")
 
 	totalElements := int64(1)
 	isModified := false
@@ -2542,14 +2644,14 @@ func calculateSignalElements(node *index.ProjectNode) (int64, int64, string) {
 		}
 	} else {
 		// Base
-		elems := getEvaluatedMetadata(node, "NumberOfElements")
-		dims := getEvaluatedMetadata(node, "NumberOfDimensions")
+		elems := getEvaluatedMetadata(tree, node, "NumberOfElements")
+		dims := getEvaluatedMetadata(tree, node, "NumberOfDimensions")
 
 		if elems == "" && node.Target != nil {
-			elems = getEvaluatedMetadata(node.Target, "NumberOfElements")
+			elems = getEvaluatedMetadata(tree, node.Target, "NumberOfElements")
 		}
 		if dims == "" && node.Target != nil {
-			dims = getEvaluatedMetadata(node.Target, "NumberOfDimensions")
+			dims = getEvaluatedMetadata(tree, node.Target, "NumberOfDimensions")
 		}
 
 		e, _ := strconv.ParseInt(elems, 0, 64)
@@ -2588,6 +2690,11 @@ func isComplexValue(val parser.Value) bool {
 }
 
 func HandleInlayHint(params InlayHintParams) []InlayHint {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+	
 	path := uriToPath(params.TextDocument.URI)
 	var hints []InlayHint
 	seenPositions := make(map[Position]bool)
@@ -2599,7 +2706,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 		}
 	}
 
-	Tree.Walk(func(node *index.ProjectNode) {
+	tree.Walk(func(node *index.ProjectNode) {
 		for _, frag := range node.Fragments {
 			if frag.File != path {
 				continue
@@ -2607,14 +2714,14 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 			// Signal Name Hint (::TYPE[SIZE])
 			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
-				typ := getEvaluatedMetadata(node, "Type")
+				typ := getEvaluatedMetadata(tree, node, "Type")
 
 				if typ == "" && node.Target != nil {
-					typ = getEvaluatedMetadata(node.Target, "Type")
+					typ = getEvaluatedMetadata(tree, node.Target, "Type")
 				}
 
 				if typ != "" {
-					elems, _, _ := calculateSignalElements(node)
+					elems, _, _ := calculateSignalElements(tree, node)
 					label := fmt.Sprintf("::%s[%d]", typ, elems)
 
 					pos := frag.ObjectPos
@@ -2638,10 +2745,10 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 						case *parser.ReferenceValue:
 							dsName = v.Value
 						default:
-							dsName = valueToString(f.Value, node)
+							dsName = valueToString(tree, f.Value, node)
 						}
 
-						dsNode := Tree.ResolveName(node, dsName, isDataSource)
+						dsNode := tree.ResolveName(node, dsName, isDataSource)
 						if dsNode != nil {
 							cls := dsNode.Metadata["Class"]
 							if cls != "" {
@@ -2659,7 +2766,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 					// Expression Evaluation Hint
 					if isComplexValue(f.Value) {
-						res := valueToString(f.Value, node)
+						res := valueToString(tree, f.Value, node)
 						if res != "" {
 							end := f.Value.End()
 							addHint(InlayHint{
@@ -2678,7 +2785,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 								if subArr, ok := elem.(*parser.ArrayValue); ok {
 									processArray(subArr)
 								} else if isComplexValue(elem) {
-									res := valueToString(elem, node)
+									res := valueToString(tree, elem, node)
 									if res != "" {
 										end := elem.End()
 										addHint(InlayHint{
@@ -2695,7 +2802,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 				} else if v, ok := def.(*parser.VariableDefinition); ok {
 					// Expression Evaluation Hint for #let/#var
 					if v.DefaultValue != nil && isComplexValue(v.DefaultValue) {
-						res := valueToString(v.DefaultValue, node)
+						res := valueToString(tree, v.DefaultValue, node)
 						if res != "" {
 							end := v.DefaultValue.End()
 							addHint(InlayHint{
@@ -2711,14 +2818,14 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 	})
 
 	// Add logic for general object references
-	for _, ref := range Tree.References {
+	for _, ref := range tree.References {
 		if ref.File != path {
 			continue
 		}
 
 		// Check if reference is value of a Class field
 		isClass := false
-		container := Tree.GetNodeContaining(ref.File, ref.Position)
+		container := tree.GetNodeContaining(ref.File, ref.Position)
 		if container != nil {
 			for _, frag := range container.Fragments {
 				if frag.File != ref.File {
@@ -2754,19 +2861,6 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 					Kind:     1, // Parameter
 				})
 			}
-			// } else if ref.IsVariable {
-			// 	// Variable reference evaluation hint: @VAR(=> VALUE)
-			// 	container := Tree.GetNodeContaining(ref.File, ref.Position)
-			// 	if info := Tree.ResolveVariable(container, ref.Name); info != nil && info.Def.DefaultValue != nil {
-			// 		val := valueToString(info.Def.DefaultValue, container)
-			// 		if val != "" {
-			// 			addHint(InlayHint{
-			// 				Position: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name) + 1},
-			// 				Label:    "(=> " + val + ")",
-			// 				Kind:     2,
-			// 			})
-			// 		}
-			// 	}
 		}
 	}
 
@@ -2774,6 +2868,11 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 }
 
 func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
+	view := GlobalSession.ViewOf(params.TextDocument.URI)
+	if view == nil { return nil }
+	snap := view.Snapshot()
+	tree := snap.Tree()
+
 	file := uriToPath(params.TextDocument.URI)
 
 	// Helper to check if a range is inside another
@@ -2912,8 +3011,8 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 	}
 
 
-	symbols := getSymbols(Tree.Root, nil)
-	for _, iso := range Tree.IsolatedFiles {
+	symbols := getSymbols(tree.Root, nil)
+	for _, iso := range tree.IsolatedFiles {
 		symbols = append(symbols, getSymbols(iso, nil)...)
 	}
 
@@ -2922,88 +3021,96 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 
 
 func HandleWorkspaceSymbol(params WorkspaceSymbolParams) []SymbolInformation {
-	query := strings.ToLower(params.Query)
+	// Query all views
+	// For simplicity, just use default view if exists or iterate all
 	var symbols []SymbolInformation
+	
+	for _, view := range GlobalSession.Views() {
+		snap := view.Snapshot()
+		tree := snap.Tree()
+		
+		query := strings.ToLower(params.Query)
 
-	isSignal := func(n *index.ProjectNode) bool {
-		if n.Parent == nil {
-			return false
+		isSignal := func(n *index.ProjectNode) bool {
+			if n.Parent == nil {
+				return false
+			}
+			pName := n.Parent.Name
+			return pName == "InputSignals" || pName == "OutputSignals"
 		}
-		pName := n.Parent.Name
-		return pName == "InputSignals" || pName == "OutputSignals"
-	}
 
-	var collect func(*index.ProjectNode)
-	collect = func(node *index.ProjectNode) {
-		// 1. Check the node itself
-		if query == "" || strings.Contains(strings.ToLower(node.RealName), query) {
-			for _, frag := range node.Fragments {
-				if !frag.IsObject {
-					continue
-				}
-				kind := SymbolKindObject
-				if isSignal(node) {
-					kind = SymbolKindVariable
-				} else if len(node.RealName) > 0 {
-					if node.RealName[0] == '+' {
-						kind = SymbolKindClass
-					} else if node.RealName[0] == '$' {
-						kind = SymbolKindInterface
+		var collect func(*index.ProjectNode)
+		collect = func(node *index.ProjectNode) {
+			// 1. Check the node itself
+			if query == "" || strings.Contains(strings.ToLower(node.RealName), query) {
+				for _, frag := range node.Fragments {
+					if !frag.IsObject {
+						continue
+					}
+					kind := SymbolKindObject
+					if isSignal(node) {
+						kind = SymbolKindVariable
+					} else if len(node.RealName) > 0 {
+						if node.RealName[0] == '+' {
+							kind = SymbolKindClass
+						} else if node.RealName[0] == '$' {
+							kind = SymbolKindInterface
+						} else {
+							continue
+						}
 					} else {
 						continue
 					}
-				} else {
-					continue
-				}
 
-				symbols = append(symbols, SymbolInformation{
-					Name: node.RealName,
-					Kind: kind,
-					Location: Location{
-						URI: "file://" + frag.File,
-						Range: Range{
-							Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column},
-							End:   Position{Line: frag.EndPos.Line - 1, Character: frag.EndPos.Column},
-						},
-					},
-				})
-			}
-		}
-
-		// 2. Check variables/constants in all fragments of this node
-		for _, frag := range node.Fragments {
-			for _, def := range frag.Definitions {
-				if v, ok := def.(*parser.VariableDefinition); ok {
-					if query == "" || strings.Contains(strings.ToLower(v.Name), query) {
-						kind := SymbolKindVariable
-						if len(v.Name) > 0 && v.Name[0] != '@' {
-							kind = SymbolKindConstant
-						}
-						symbols = append(symbols, SymbolInformation{
-							Name: v.Name,
-							Kind: kind,
-							Location: Location{
-								URI: "file://" + frag.File,
-								Range: Range{
-									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
-									End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
-								},
+					symbols = append(symbols, SymbolInformation{
+						Name: node.RealName,
+						Kind: kind,
+						Location: Location{
+							URI: "file://" + frag.File,
+							Range: Range{
+								Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column},
+								End:   Position{Line: frag.EndPos.Line - 1, Character: frag.EndPos.Column},
 							},
-							ContainerName: node.RealName,
-						})
+						},
+					})
+				}
+			}
+
+			// 2. Check variables/constants in all fragments of this node
+			for _, frag := range node.Fragments {
+				for _, def := range frag.Definitions {
+					if v, ok := def.(*parser.VariableDefinition); ok {
+						if query == "" || strings.Contains(strings.ToLower(v.Name), query) {
+							kind := SymbolKindVariable
+							if len(v.Name) > 0 && v.Name[0] != '@' {
+								kind = SymbolKindConstant
+							}
+							symbols = append(symbols, SymbolInformation{
+								Name: v.Name,
+								Kind: kind,
+								Location: Location{
+									URI: "file://" + frag.File,
+									Range: Range{
+										Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+										End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
+									},
+								},
+								ContainerName: node.RealName,
+							})
+						}
 					}
 				}
 			}
+
+			for _, child := range node.Children {
+				collect(child)
+			}
 		}
 
-		for _, child := range node.Children {
-			collect(child)
+		collect(tree.Root)
+		for _, iso := range tree.IsolatedFiles {
+			collect(iso)
 		}
-	}
-
-	collect(Tree.Root)
-	for _, iso := range Tree.IsolatedFiles {
-		collect(iso)
 	}
 
 	return symbols

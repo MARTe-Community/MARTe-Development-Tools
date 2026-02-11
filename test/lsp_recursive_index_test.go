@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 )
 
@@ -42,18 +41,18 @@ func TestLSPRecursiveIndexing(t *testing.T) {
 	}
 
 	// Initialize LSP
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	// Simulate ScanDirectory
-	if err := lsp.Tree.ScanDirectory(rootDir); err != nil {
+	if err := lsp.GetTestTree().ScanDirectory(rootDir); err != nil {
 		t.Fatalf("ScanDirectory failed: %v", err)
 	}
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().ResolveReferences()
 
 	// Check if SubComp is in the tree
 	// Root -> App -> SubComp
-	appNode := lsp.Tree.Root.Children["App"]
+	appNode := lsp.GetTestTree().Root.Children["App"]
 	if appNode == nil {
 		t.Fatal("App package not found")
 	}

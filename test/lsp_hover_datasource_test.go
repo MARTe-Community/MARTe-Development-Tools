@@ -4,15 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestHoverDataSourceName(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 +DS1 = {
@@ -32,14 +31,14 @@ func TestHoverDataSourceName(t *testing.T) {
 }
 `
 	uri := "file://test_ds.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
-	lsp.Tree.AddFile("test_ds.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("test_ds.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// Test 1: Explicit Signal (Sig1)
 	// Position: "Sig1" at line 5 (0-based 4)

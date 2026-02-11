@@ -4,15 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestLSPCrashOnUndefinedReference(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 +App = {
@@ -27,14 +26,14 @@ func TestLSPCrashOnUndefinedReference(t *testing.T) {
 }
 `
 	uri := "file://crash.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("crash.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("crash.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// Line 7: "            Functions = { UndefinedGAM }"
 	// 12 spaces + "Functions" (9) + " = { " (5) = 26 chars prefix.

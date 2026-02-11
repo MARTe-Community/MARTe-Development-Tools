@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
@@ -12,8 +11,8 @@ import (
 
 func TestLSPInlayHint(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 #let N : int= 10 + 5
@@ -37,13 +36,13 @@ func TestLSPInlayHint(t *testing.T) {
 }
 `
 	uri := "file://inlay.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, _ := p.Parse()
-	lsp.Tree.AddFile("inlay.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("inlay.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
-	v := validator.NewValidator(lsp.Tree, ".", nil)
+	v := validator.NewValidator(lsp.GetTestTree(), ".", nil)
 	v.ValidateProject(context.Background())
 
 	params := lsp.InlayHintParams{

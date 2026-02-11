@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
@@ -12,9 +11,9 @@ import (
 
 func TestSuggestSignalsInGAM(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
-	lsp.ProjectRoot = "."
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
+	lsp.SetTestProjectRoot(".")
 	lsp.GlobalSchema = schema.NewSchema()
 
 	// Inject schema for directionality
@@ -52,13 +51,13 @@ package schema
 }
 `
 	uri := "file://signals.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("signals.marte", cfg)
+	lsp.GetTestTree().AddFile("signals.marte", cfg)
 
 	// 1. Suggest in InputSignals
 	// Line 16 (empty line inside InputSignals)

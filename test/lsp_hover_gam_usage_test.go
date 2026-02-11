@@ -4,15 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 func TestHoverGAMUsage(t *testing.T) {
 	// Setup
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	content := `
 +DS1 = {
@@ -41,14 +40,14 @@ func TestHoverGAMUsage(t *testing.T) {
 }
 `
 	uri := "file://test_gam_usage.marte"
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("test_gam_usage.marte", cfg)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("test_gam_usage.marte", cfg)
+	lsp.GetTestTree().ResolveReferences()
 
 	// Query hover for Sig1 (Line 5)
 	// Line 4: Sig1... (0-based)

@@ -1046,6 +1046,146 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 	return val
 }
 
+func (pt *ProjectTree) Clone() *ProjectTree {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+
+	newPT := NewProjectTree()
+	
+	// Clone isolated files
+	for k, v := range pt.IsolatedFiles {
+		newPT.IsolatedFiles[k] = v.Clone(nil)
+	}
+
+	// Clone Root
+	if pt.Root != nil {
+		newPT.Root = pt.Root.Clone(nil)
+	}
+
+	// Clone GlobalPragmas
+	for k, v := range pt.GlobalPragmas {
+		newPragmas := make([]string, len(v))
+		copy(newPragmas, v)
+		newPT.GlobalPragmas[k] = newPragmas
+	}
+
+	// Clone FileReferences
+	for k, v := range pt.FileReferences {
+		newRefs := make([]Reference, len(v))
+		// We can shallow copy references because they mostly point to data we aren't mutating deeply in place
+		// BUT Reference.Target points to *ProjectNode. 
+		// If we clone the nodes, we need to update the references to point to the NEW nodes.
+		// This is tricky. A simple Clone() breaks the graph links (Reference -> Target).
+		
+		// For now, we will perform a simple copy and rely on RebuildIndex/ResolveReferences 
+		// being called or handling it. 
+		// Actually, in the Snapshot model, we typically 'Update' a snapshot by cloning it and applying a delta.
+		// If we clone the whole tree, all pointers in 'Reference.Target' will point to the OLD tree's nodes.
+		// This is BAD.
+		
+		// To fix this correctly, we would need to re-resolve references after cloning.
+		// Since 'ResolveReferences' is fast enough (lookup in map), we can just clear Targets and re-resolve?
+		// Or we can traverse and update.
+		
+		// Let's copy them, and then nil out the Targets so they get re-resolved lazily or explicitly.
+		for i, r := range v {
+			newRef := r
+			newRef.Target = nil // Invalidate pointers to old tree
+			newRef.TargetVariable = nil
+			newRefs[i] = newRef
+		}
+		newPT.FileReferences[k] = newRefs
+	}
+
+	// Rebuild NodeMap
+	newPT.RebuildIndex()
+
+	// Re-resolve references (connect to new nodes)
+	// Note: This makes Clone() expensive. But necessary for correctness.
+	newPT.ResolveReferences()
+
+	return newPT
+}
+
+func (pn *ProjectNode) Clone(parent *ProjectNode) *ProjectNode {
+	newNode := &ProjectNode{
+		Name:      pn.Name,
+		RealName:  pn.RealName,
+		Doc:       pn.Doc,
+		Parent:    parent,
+		Children:  make(map[string]*ProjectNode),
+		Metadata:  make(map[string]string),
+		Variables: make(map[string]VariableInfo),
+		Fields:    make(map[string][]EvaluatedField),
+	}
+
+	// Clone Metadata
+	for k, v := range pn.Metadata {
+		newNode.Metadata[k] = v
+	}
+
+	// Clone Variables
+	for k, v := range pn.Variables {
+		newNode.Variables[k] = v // VariableInfo is value type, safe shallow copy
+	}
+
+	// Clone Fields
+	for k, v := range pn.Fields {
+		newFields := make([]EvaluatedField, len(v))
+		copy(newFields, v)
+		newNode.Fields[k] = newFields
+	}
+
+	// Clone Pragmas
+	if len(pn.Pragmas) > 0 {
+		newNode.Pragmas = make([]string, len(pn.Pragmas))
+		copy(newNode.Pragmas, pn.Pragmas)
+	}
+
+	// Clone Fragments
+	// Fragment pointers can be shared? 
+	// Fragments contain AST nodes (*parser.Definition).
+	// If we don't mutate AST nodes, sharing fragments is fine.
+	// But Fragments also contain IsObject, Doc...
+	// Ideally we clone Fragments too.
+	for _, frag := range pn.Fragments {
+		newFrag := *frag // Shallow copy of struct
+		// Deep copy slices in fragment if necessary
+		if len(frag.Definitions) > 0 {
+			newDefs := make([]parser.Definition, len(frag.Definitions))
+			copy(newDefs, frag.Definitions)
+			newFrag.Definitions = newDefs
+		}
+		if len(frag.Pragmas) > 0 {
+			newPrags := make([]string, len(frag.Pragmas))
+			copy(newPrags, frag.Pragmas)
+			newFrag.Pragmas = newPrags
+		}
+		// DefinitionDocs map
+		if len(frag.DefinitionDocs) > 0 {
+			newDocs := make(map[parser.Definition]string)
+			for k, v := range frag.DefinitionDocs {
+				newDocs[k] = v
+			}
+			newFrag.DefinitionDocs = newDocs
+		}
+		newNode.Fragments = append(newNode.Fragments, &newFrag)
+	}
+
+	// Recursively clone children
+	for k, child := range pn.Children {
+		newNode.Children[k] = child.Clone(newNode)
+	}
+	
+	// Note: newNode.Target is NOT cloned here because it points to an arbitrary node in the tree.
+	// It must be resolved after the full tree is built.
+	// We leave it nil or deal with it in RebuildIndex/Resolve?
+	// The `Target` field is set during `ResolveReferences` usually (or ResolveName).
+	// So we leave it nil.
+
+	return newNode
+}
+
 func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
 	if op.Type == parser.TokenConcat {
 		s1 := pt.valueToString(left)

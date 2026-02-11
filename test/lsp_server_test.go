@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
@@ -30,7 +29,7 @@ func TestInitProjectScan(t *testing.T) {
 	}
 
 	// 2. Initialize
-	lsp.Tree = index.NewProjectTree() // Reset global tree
+	lsp.ResetTestServer() // Reset global tree
 
 	initParams := lsp.InitializeParams{RootPath: tmpDir}
 	paramsBytes, _ := json.Marshal(initParams)
@@ -72,7 +71,7 @@ func TestInitProjectScan(t *testing.T) {
 
 func TestHandleDefinition(t *testing.T) {
 	// Reset tree for test
-	lsp.Tree = index.NewProjectTree()
+	lsp.ResetTestServer()
 
 	content := `
 +MyObject = {
@@ -89,11 +88,11 @@ func TestHandleDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	lsp.Tree.AddFile(path, config)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile(path, config)
+	lsp.GetTestTree().ResolveReferences()
 
-	t.Logf("Refs: %d", len(lsp.Tree.References))
-	for _, r := range lsp.Tree.References {
+	t.Logf("Refs: %d", len(lsp.GetTestTree().References))
+	for _, r := range lsp.GetTestTree().References {
 		t.Logf("  %s at %d:%d", r.Name, r.Position.Line, r.Position.Column)
 	}
 
@@ -124,7 +123,7 @@ func TestHandleDefinition(t *testing.T) {
 
 func TestHandleReferences(t *testing.T) {
 	// Reset tree for test
-	lsp.Tree = index.NewProjectTree()
+	lsp.ResetTestServer()
 
 	content := `
 +MyObject = {
@@ -144,8 +143,8 @@ func TestHandleReferences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	lsp.Tree.AddFile(path, config)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile(path, config)
+	lsp.GetTestTree().ResolveReferences()
 
 	// Test Find References for MyObject (triggered from its definition)
 	params := lsp.ReferenceParams{
@@ -171,7 +170,7 @@ Field=1
 	uri := "file:///test.marte"
 
 	// Open (populate Documents map)
-	lsp.Documents[uri] = content
+	lsp.GetTestDocuments()[uri] = content
 
 	// Format
 	params := lsp.DocumentFormattingParams{

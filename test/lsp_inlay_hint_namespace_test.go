@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
@@ -28,23 +27,23 @@ $GAM = {
 }
 `
 	// Reset global state
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 
 	p := parser.NewParser(content)
 	config, err := p.Parse()
 	if err != nil {
 		t.Fatal(err)
 	}
-	lsp.Tree.AddFile("test.marte", config)
-	lsp.Tree.ResolveReferences()
+	lsp.GetTestTree().AddFile("test.marte", config)
+	lsp.GetTestTree().ResolveReferences()
 
 	params := lsp.InlayHintParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: "file://test.marte"},
 		Range:        lsp.Range{Start: lsp.Position{0, 0}, End: lsp.Position{20, 0}},
 	}
 
-	lsp.Documents["file://test.marte"] = content
+	lsp.GetTestDocuments()["file://test.marte"] = content
 
 	hints := lsp.HandleInlayHint(params)
 

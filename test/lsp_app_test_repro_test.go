@@ -5,14 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
 
 func TestLSPAppTestRepro(t *testing.T) {
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 	lsp.GlobalSchema = schema.LoadFullSchema(".")
 
 	var buf bytes.Buffer

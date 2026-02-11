@@ -6,14 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 )
 
 func TestLSPValidationSchema(t *testing.T) {
 	// Setup LSP
-	lsp.Tree = index.NewProjectTree()
-	lsp.Documents = make(map[string]string)
+	lsp.ResetTestServer()
+	// Documents reset via ResetTestServer
 	var buf bytes.Buffer
 	lsp.Output = &buf
 
