@@ -879,7 +879,9 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 					}
 				} else if v, ok := def.(*parser.VariableDefinition); ok {
 					if line == v.Position.Line {
-						return &QueryResult{Variable: v}
+						if col >= v.Position.Column && col < v.Position.Column+len(v.Name)+5 {
+							return &QueryResult{Variable: v}
+						}
 					}
 				}
 			}

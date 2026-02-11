@@ -74,9 +74,12 @@ Implements the Language Server Protocol.
     *   `HandleCompletion`: Context-aware suggestions (Macros, Schema fields, Signal references, Class names).
     *   `HandleHover`: Shows documentation (including docstrings for variables), evaluated signal types/dimensions, and usage analysis.
     *   `HandleDefinition` / `HandleReferences`: specific lookup using the `index`.
+    *   `HandleTypeDefinition`: Jumps from object instances (`+`) to their templates (`$`) or from signal usages to definitions in DataSources.
+    *   `HandleCodeAction`: Provides quick-fixes for common errors (e.g., adding missing `Class` or `Type` fields).
     *   `HandleRename`: Project-wide renaming supporting objects, fields, and signals (including implicit ones).
     *   `HandleDocumentSymbol`: Provides a hierarchical view of objects, signals, variables, and constants within a file.
     *   `HandleWorkspaceSymbol`: Enables project-wide symbol searching with container context.
+    *   `Call Hierarchy`: Traces signal flow between GAMs and DataSources (`IncomingCalls` shows producers, `OutgoingCalls` shows consumers).
 
 ### 5. `internal/builder`
 

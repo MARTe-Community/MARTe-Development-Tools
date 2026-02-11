@@ -29,6 +29,15 @@ The LSP server should provide the following capabilities:
   - **Referenced Signals**: Show the list of GAMs where the signal is referenced (indicating Input/Output direction).
 - **Go to Definition**: Jump to the definition of a reference, supporting navigation across any file in the current project.
 - **Go to References**: Find usages of a node or field, supporting navigation across any file in the current project.
+- **Go to Type Definition**:
+  - **Objects**: Jump from an instance (`+Name`) to its template (`$Name` or `$Class`) if defined.
+  - **Signals**: Jump from a signal usage in a GAM to its primary definition in a `DataSource`.
+- **Code Actions**: Provide quick-fixes for common issues.
+  - **Missing Fields**: Suggestions to add `Class = ReferenceContainer` or `Type = uint32`.
+  - **Suppressions**: Quickly add `//! ignore(...)` pragmas for unused or implicit signal warnings.
+- **Call Hierarchy**: Trace signal flow between components.
+  - **Incoming Calls**: For a GAM, lists all other GAMs that produce the signals it consumes. For a signal, lists all its producers.
+  - **Outgoing Calls**: For a GAM, lists all other GAMs that consume the signals it produces. For a signal, lists all its consumers.
 - **Document Symbols**: Hierarchical view of definitions (Objects, Signals, Variables, Constants) in the current file.
 - **Workspace Symbols**: Project-wide search for any symbol by name, showing its container context.
 - **Code Completion**: Autocomplete fields, values, and references.

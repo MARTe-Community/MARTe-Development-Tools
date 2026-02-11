@@ -153,6 +153,70 @@ type InlayHint struct {
 	PaddingRight bool     `json:"paddingRight,omitempty"`
 }
 
+type TypeDefinitionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CodeActionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+	Context      CodeActionContext      `json:"context"`
+}
+
+type CallHierarchyPrepareParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CallHierarchyItem struct {
+	Name           string     `json:"name"`
+	Kind           SymbolKind `json:"kind"`
+	Tags           []int      `json:"tags,omitempty"`
+	Detail         string     `json:"detail,omitempty"`
+	URI            string     `json:"uri"`
+	Range          Range      `json:"range"`
+	SelectionRange Range      `json:"selectionRange"`
+	Data           any        `json:"data,omitempty"`
+}
+
+type CallHierarchyIncomingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyIncomingCall struct {
+	From       CallHierarchyItem `json:"from"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
+type CallHierarchyOutgoingCallsParams struct {
+	Item CallHierarchyItem `json:"item"`
+}
+
+type CallHierarchyOutgoingCall struct {
+	To         CallHierarchyItem `json:"to"`
+	FromRanges []Range           `json:"fromRanges"`
+}
+
+type CodeActionContext struct {
+	Diagnostics []LSPDiagnostic `json:"diagnostics"`
+	Only        []string        `json:"only,omitempty"`
+}
+
+type CodeAction struct {
+	Title       string         `json:"title"`
+	Kind        string         `json:"kind,omitempty"`
+	Diagnostics []LSPDiagnostic `json:"diagnostics,omitempty"`
+	Edit        *WorkspaceEdit `json:"edit,omitempty"`
+	Command     *Command       `json:"command,omitempty"`
+}
+
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
+}
+
 type Hover struct {
 	Contents any `json:"contents"`
 }
@@ -416,6 +480,9 @@ func HandleMessage(msg *JsonRpcMessage) {
 				"inlayHintProvider":          true,
 				"documentSymbolProvider":     true,
 				"workspaceSymbolProvider":    true,
+				"typeDefinitionProvider":     true,
+				"codeActionProvider":         true,
+				"callHierarchyProvider":      true,
 				"completionProvider": map[string]any{
 					"triggerCharacters": []string{"=", " ", "@"},
 				},
@@ -486,6 +553,31 @@ func HandleMessage(msg *JsonRpcMessage) {
 		var params DocumentSymbolParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
 			respond(msg.ID, HandleDocumentSymbol(params))
+		}
+	case "textDocument/typeDefinition":
+		var params TypeDefinitionParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleTypeDefinition(params))
+		}
+	case "textDocument/codeAction":
+		var params CodeActionParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleCodeAction(params))
+		}
+	case "textDocument/prepareCallHierarchy":
+		var params CallHierarchyPrepareParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandlePrepareCallHierarchy(params))
+		}
+	case "callHierarchy/incomingCalls":
+		var params CallHierarchyIncomingCallsParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleIncomingCalls(params))
+		}
+	case "callHierarchy/outgoingCalls":
+		var params CallHierarchyOutgoingCallsParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			respond(msg.ID, HandleOutgoingCalls(params))
 		}
 	case "workspace/symbol":
 		var params WorkspaceSymbolParams
@@ -1333,6 +1425,403 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	return nil
+}
+
+func HandleTypeDefinition(params TypeDefinitionParams) any {
+	path := uriToPath(params.TextDocument.URI)
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+
+	res := Tree.Query(path, line, col)
+	if res == nil {
+		return nil
+	}
+
+	var targetNode *index.ProjectNode
+
+	if res.Reference != nil {
+		targetNode = res.Reference.Target
+	} else if res.Node != nil {
+		targetNode = res.Node
+	}
+
+	if targetNode == nil {
+		return nil
+	}
+
+	// 1. If it's a Signal usage in a GAM, jump to the Signal definition in the DataSource
+	if ds, _ := getSignalInfo(targetNode); ds != nil {
+		// Find the peer that is a definition in a DataSource
+		peers := findSignalPeers(targetNode)
+		for _, peer := range peers {
+			if peer.Parent != nil && peer.Parent.Name == "Signals" {
+				var locations []Location
+				for _, frag := range peer.Fragments {
+					if frag.IsObject {
+						locations = append(locations, Location{
+							URI: "file://" + frag.File,
+							Range: Range{
+								Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+								End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(peer.RealName)},
+							},
+						})
+					}
+				}
+				if len(locations) > 0 {
+					return locations
+				}
+			}
+		}
+	}
+
+	// 2. Resolve via Class field (if it points to a template $)
+	class := getEvaluatedMetadata(targetNode, "Class")
+	if class != "" {
+		// Look for a template with this name ($Class)
+		templateName := "$" + class
+		if targetNode.Parent != nil {
+			if template, ok := targetNode.Parent.Children[index.NormalizeName(templateName)]; ok {
+				return nodeToLocations(template)
+			}
+		}
+		// Search globally for template
+		var found *index.ProjectNode
+		Tree.Walk(func(n *index.ProjectNode) {
+			if n.RealName == templateName {
+				found = n
+			}
+		})
+		if found != nil {
+			return nodeToLocations(found)
+		}
+	}
+
+	// 3. Fallback: If it's an instance (+), jump to the template ($) with the same name
+	if len(targetNode.RealName) > 0 && targetNode.RealName[0] == '+' {
+		templateName := "$" + targetNode.Name
+		if targetNode.Parent != nil {
+			if template, ok := targetNode.Parent.Children[templateName]; ok {
+				return nodeToLocations(template)
+			}
+		}
+	}
+
+	return nil
+}
+
+func nodeToLocations(node *index.ProjectNode) []Location {
+	var locations []Location
+	for _, frag := range node.Fragments {
+		if frag.IsObject {
+			locations = append(locations, Location{
+				URI: "file://" + frag.File,
+				Range: Range{
+					Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+					End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(node.RealName)},
+				},
+			})
+		}
+	}
+	return locations
+}
+
+
+func HandleCodeAction(params CodeActionParams) []CodeAction {
+	var actions []CodeAction
+
+	for _, diag := range params.Context.Diagnostics {
+		// 1. Missing Class
+		if strings.Contains(diag.Message, "must contain a 'Class' field") {
+			actions = append(actions, CodeAction{
+				Title: "Add Class = ReferenceContainer",
+				Kind:  "quickfix",
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						params.TextDocument.URI: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line + 1, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line + 1, Character: 0},
+								},
+								NewText: "    Class = ReferenceContainer\n",
+							},
+						},
+					},
+				},
+			})
+		}
+
+		// 2. Implicit signal -> add ignore pragma
+		if strings.Contains(diag.Message, "Implicitly Defined Signal") {
+			actions = append(actions, CodeAction{
+				Title: "Ignore implicit signal warning",
+				Kind:  "quickfix",
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						params.TextDocument.URI: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line, Character: 0},
+								},
+								NewText: "    //! ignore(implicit)\n",
+							},
+						},
+					},
+				},
+			})
+		}
+
+		// 3. Signal missing Type
+		if strings.Contains(diag.Message, "must define Type") || strings.Contains(diag.Message, "missing mandatory field 'Type'") {
+			actions = append(actions, CodeAction{
+				Title: "Add Type = uint32",
+				Kind:  "quickfix",
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						params.TextDocument.URI: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line + 1, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line + 1, Character: 0},
+								},
+								NewText: "    Type = uint32\n",
+							},
+						},
+					},
+				},
+			})
+		}
+		
+		// 4. Unused GAM/Signal -> add ignore pragma
+		if strings.Contains(diag.Message, "Unused GAM") || strings.Contains(diag.Message, "Unused Signal") {
+			actions = append(actions, CodeAction{
+				Title: "Ignore unused warning",
+				Kind:  "quickfix",
+				Edit: &WorkspaceEdit{
+					Changes: map[string][]TextEdit{
+						params.TextDocument.URI: {
+							{
+								Range: Range{
+									Start: Position{Line: diag.Range.Start.Line, Character: 0},
+									End:   Position{Line: diag.Range.Start.Line, Character: 0},
+								},
+								NewText: "    //! ignore(unused)\n",
+							},
+						},
+					},
+				},
+			})
+		}
+	}
+
+	return actions
+}
+
+func HandlePrepareCallHierarchy(params CallHierarchyPrepareParams) []CallHierarchyItem {
+	path := uriToPath(params.TextDocument.URI)
+	line := params.Position.Line + 1
+	col := params.Position.Character + 1
+
+	res := Tree.Query(path, line, col)
+	if res == nil || res.Node == nil {
+		return nil
+	}
+
+	node := res.Node
+	if node.Target != nil {
+		node = node.Target
+	}
+
+	// Create CallHierarchyItem
+	// We need a physical range for the item
+	var itemRange Range
+	var uri string
+	if len(node.Fragments) > 0 {
+		frag := node.Fragments[0]
+		uri = "file://" + frag.File
+		itemRange = Range{
+			Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+			End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(node.RealName)},
+		}
+	}
+
+	kind := SymbolKindObject
+	if isGAM(node) {
+		kind = SymbolKindClass
+	} else if _, sig := getSignalInfo(node); sig != "" {
+		kind = SymbolKindVariable
+	}
+
+	return []CallHierarchyItem{
+		{
+			Name:           node.RealName,
+			Kind:           kind,
+			Detail:         node.Metadata["Class"],
+			URI:            uri,
+			Range:          itemRange,
+			SelectionRange: itemRange,
+			Data:           node.RealName, // Store name for resolution in subsequent calls
+		},
+	}
+}
+
+func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarchyIncomingCall {
+	nodeName, ok := params.Item.Data.(string)
+	if !ok {
+		return nil
+	}
+
+	// Resolve the node globally by name (simplification)
+	var node *index.ProjectNode
+	Tree.Walk(func(n *index.ProjectNode) {
+		if n.RealName == nodeName {
+			node = n
+		}
+	})
+
+	if node == nil {
+		return nil
+	}
+
+	var calls []CallHierarchyIncomingCall
+
+	// 1. If it's a GAM, incoming calls are GAMs that produce its inputs
+	if isGAM(node) {
+		if inputs, ok := node.Children["InputSignals"]; ok {
+			for _, sig := range inputs.Children {
+				producers := getGAMSignalPeers(sig, "Output")
+				for _, prod := range producers {
+					calls = append(calls, CallHierarchyIncomingCall{
+						From: nodeToCallItem(prod),
+						FromRanges: []Range{params.Item.Range},
+					})
+				}
+			}
+		}
+	}
+
+	// 2. If it's a Signal, incoming calls are GAMs that produce it (OutputSignals)
+	if _, sig := getSignalInfo(node); sig != "" {
+		producers := getGAMSignalPeers(node, "Output")
+		for _, prod := range producers {
+			calls = append(calls, CallHierarchyIncomingCall{
+				From: nodeToCallItem(prod),
+				FromRanges: []Range{params.Item.Range},
+			})
+		}
+	}
+
+	return calls
+}
+
+func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarchyOutgoingCall {
+	nodeName, ok := params.Item.Data.(string)
+	if !ok {
+		return nil
+	}
+
+	var node *index.ProjectNode
+	Tree.Walk(func(n *index.ProjectNode) {
+		if n.RealName == nodeName {
+			node = n
+		}
+	})
+
+	if node == nil {
+		return nil
+	}
+
+	var calls []CallHierarchyOutgoingCall
+
+	// 1. If it's a GAM, outgoing calls are GAMs that consume its outputs
+	if isGAM(node) {
+		if outputs, ok := node.Children["OutputSignals"]; ok {
+			for _, sig := range outputs.Children {
+				consumers := getGAMSignalPeers(sig, "Input")
+				for _, cons := range consumers {
+					calls = append(calls, CallHierarchyOutgoingCall{
+						To: nodeToCallItem(cons),
+						FromRanges: []Range{params.Item.Range},
+					})
+				}
+			}
+		}
+	}
+
+	// 2. If it's a Signal, outgoing calls are GAMs that consume it (InputSignals)
+	if _, sig := getSignalInfo(node); sig != "" {
+		consumers := getGAMSignalPeers(node, "Input")
+		for _, cons := range consumers {
+			calls = append(calls, CallHierarchyOutgoingCall{
+				To: nodeToCallItem(cons),
+				FromRanges: []Range{params.Item.Range},
+			})
+		}
+	}
+
+	return calls
+}
+
+func nodeToCallItem(node *index.ProjectNode) CallHierarchyItem {
+	var itemRange Range
+	var uri string
+	if len(node.Fragments) > 0 {
+		frag := node.Fragments[0]
+		uri = "file://" + frag.File
+		itemRange = Range{
+			Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+			End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(node.RealName)},
+		}
+	}
+
+	kind := SymbolKindObject
+	if isGAM(node) {
+		kind = SymbolKindClass
+	} else if _, sig := getSignalInfo(node); sig != "" {
+		kind = SymbolKindVariable
+	}
+
+	return CallHierarchyItem{
+		Name:           node.RealName,
+		Kind:           kind,
+		Detail:         node.Metadata["Class"],
+		URI:            uri,
+		Range:          itemRange,
+		SelectionRange: itemRange,
+		Data:           node.RealName,
+	}
+}
+
+// Helper to find GAMs connected to a signal in a specific direction
+func getGAMSignalPeers(sigNode *index.ProjectNode, direction string) []*index.ProjectNode {
+	ds, sigName := getSignalInfo(sigNode)
+	if ds == nil || sigName == "" {
+		return nil
+	}
+
+	var peers []*index.ProjectNode
+	Tree.Walk(func(n *index.ProjectNode) {
+		if n.Parent == nil || n.Parent.Parent == nil {
+			return
+		}
+		
+		match := false
+		if direction == "Input" && n.Parent.Name == "InputSignals" {
+			match = true
+		}
+		if direction == "Output" && n.Parent.Name == "OutputSignals" {
+			match = true
+		}
+
+		if match && isGAM(n.Parent.Parent) {
+			d, s := getSignalInfo(n)
+			if d == ds && index.NormalizeName(s) == index.NormalizeName(sigName) {
+				peers = append(peers, n.Parent.Parent)
+			}
+		}
+	})
+	return peers
 }
 
 func HandleReferences(params ReferenceParams) []Location {
