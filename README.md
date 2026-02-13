@@ -26,6 +26,10 @@ Few additional features have been added to the standard MARTe configuration lang
   - Fixed constants (`#let`)
   - Powerful expressions (arithmetic, bitwise, string concatenation)
 - Doc-strings support (`//#`) for objects, fields, and variables
+- Logic and Templates
+  - Conditional blocks (`#if`, `#else`)
+  - Loops (`#foreach` over arrays)
+  - Reusable parameterized templates (`#template`, `#use`)
 - Pragmas (`//!`) for warning suppression / documentation
 
 ## Documentation

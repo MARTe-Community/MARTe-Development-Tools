@@ -321,6 +321,27 @@ func (pt *ProjectTree) extractFieldMetadata(node *ProjectNode, f *parser.Field) 
 	}
 }
 
+func (pt *ProjectTree) valToString(val parser.Value) string {
+	if val == nil {
+		return ""
+	}
+	switch v := val.(type) {
+	case *parser.StringValue:
+		return v.Value
+	case *parser.ReferenceValue:
+		return v.Value
+	case *parser.IntValue:
+		return v.Raw
+	case *parser.BinaryExpression:
+		if v.Operator.Type == parser.TokenConcat {
+			return pt.valToString(v.Left) + pt.valToString(v.Right)
+		}
+	case *parser.VariableReferenceValue:
+		return v.Name
+	}
+	return ""
+}
+
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
@@ -429,11 +450,12 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
-			norm := NormalizeName(d.Name)
+			objName := pt.valToString(d.Name)
+			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
 					Name:      norm,
-					RealName:  d.Name,
+					RealName:  objName,
 					Children:  make(map[string]*ProjectNode),
 					Parent:    node,
 					Metadata:  make(map[string]string),
@@ -442,8 +464,8 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				}
 			}
 			child := node.Children[norm]
-			if child.RealName == norm && d.Name != norm {
-				child.RealName = d.Name
+			if child.RealName == norm && objName != norm {
+				child.RealName = objName
 			}
 			pt.addToNodeMap(child)
 
@@ -459,6 +481,8 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			}
 
 			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas)
+		default:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
 		}
 	}
 
@@ -497,11 +521,12 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
-			norm := NormalizeName(d.Name)
+			objName := pt.valToString(d.Name)
+			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
 					Name:      norm,
-					RealName:  d.Name,
+					RealName:  objName,
 					Children:  make(map[string]*ProjectNode),
 					Parent:    node,
 					Metadata:  make(map[string]string),
@@ -510,8 +535,8 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				}
 			}
 			child := node.Children[norm]
-			if child.RealName == norm && d.Name != norm {
-				child.RealName = d.Name
+			if child.RealName == norm && objName != norm {
+				child.RealName = objName
 			}
 			pt.addToNodeMap(child)
 
@@ -527,6 +552,8 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			}
 
 			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas)
+		default:
+			frag.Definitions = append(frag.Definitions, d)
 		}
 	}
 

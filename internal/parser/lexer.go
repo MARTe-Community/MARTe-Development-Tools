@@ -38,6 +38,15 @@ const (
 	TokenAmpersand
 	TokenConcat
 	TokenVariableReference
+	TokenIf
+	TokenElse
+	TokenEnd
+	TokenForeach
+	TokenIn
+	TokenTemplate
+	TokenUse
+	TokenVar
+	TokenAs
 )
 
 type Token struct {
@@ -215,6 +224,12 @@ func (l *Lexer) lexIdentifier() Token {
 		if val == "true" || val == "false" {
 			return l.emit(TokenBool)
 		}
+		if val == "as" {
+			return l.emit(TokenAs)
+		}
+		if val == "in" {
+			return l.emit(TokenIn)
+		}
 		return l.emit(TokenIdentifier)
 	}
 }
@@ -361,11 +376,25 @@ func (l *Lexer) lexHashIdentifier() Token {
 		break
 	}
 	val := l.input[l.start:l.pos]
-	if val == "#package" {
+	switch val {
+	case "#package":
 		return l.lexUntilNewline(TokenPackage)
-	}
-	if val == "#let" {
+	case "#let":
 		return l.emit(TokenLet)
+	case "#var":
+		return l.emit(TokenVar)
+	case "#if":
+		return l.emit(TokenIf)
+	case "#else":
+		return l.emit(TokenElse)
+	case "#end":
+		return l.emit(TokenEnd)
+	case "#foreach":
+		return l.emit(TokenForeach)
+	case "#template":
+		return l.emit(TokenTemplate)
+	case "#use":
+		return l.emit(TokenUse)
 	}
 	return l.emit(TokenIdentifier)
 }

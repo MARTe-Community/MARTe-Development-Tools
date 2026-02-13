@@ -34,7 +34,7 @@ func (f *Field) isDefinition() {}
 
 type ObjectNode struct {
 	Position Position
-	Name     string // includes + or $
+	Name     Value // can be StringValue, ReferenceValue or BinaryExpression (concat)
 	Subnode  Subnode
 }
 
@@ -211,3 +211,63 @@ type UnaryExpression struct {
 func (u *UnaryExpression) Pos() Position { return u.Position }
 func (u *UnaryExpression) End() Position { return u.Right.End() }
 func (u *UnaryExpression) isValue()      {}
+
+type IfBlock struct {
+	Position    Position
+	EndPosition Position
+	Condition   Value
+	Then        []Definition
+	Else        []Definition
+}
+
+func (i *IfBlock) Pos() Position { return i.Position }
+func (i *IfBlock) End() Position { return i.EndPosition }
+func (i *IfBlock) isDefinition() {}
+
+type ForeachBlock struct {
+	Position    Position
+	EndPosition Position
+	KeyVar      string // optional
+	ValueVar    string
+	Iterable    Value
+	Body        []Definition
+}
+
+func (f *ForeachBlock) Pos() Position { return f.Position }
+func (f *ForeachBlock) End() Position { return f.EndPosition }
+func (f *ForeachBlock) isDefinition() {}
+
+type TemplateDefinition struct {
+	Position    Position
+	EndPosition Position
+	Name        string
+	Parameters  []TemplateParameter
+	Body        []Definition
+}
+
+type TemplateParameter struct {
+	Name         string
+	TypeExpr     string
+	DefaultValue Value
+}
+
+func (t *TemplateDefinition) Pos() Position { return t.Position }
+func (t *TemplateDefinition) End() Position { return t.EndPosition }
+func (t *TemplateDefinition) isDefinition() {}
+
+type TemplateInstantiation struct {
+	Position    Position
+	EndPosition Position
+	Name        string // Name of the instance
+	Template    string // Name of the template
+	Arguments   []TemplateArgument
+}
+
+type TemplateArgument struct {
+	Name  string
+	Value Value
+}
+
+func (t *TemplateInstantiation) Pos() Position { return t.Position }
+func (t *TemplateInstantiation) End() Position { return t.EndPosition }
+func (t *TemplateInstantiation) isDefinition() {}

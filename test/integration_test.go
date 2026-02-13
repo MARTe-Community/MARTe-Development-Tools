@@ -178,6 +178,7 @@ func TestBuildCommand(t *testing.T) {
 	defer outputFile.Close()
 
 	err = b.Build(outputFile)
+	outputFile.Close() // Close before reading
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
 	}
@@ -187,7 +188,10 @@ func TestBuildCommand(t *testing.T) {
 		t.Fatalf("Expected output file build_test/TEST.marte not found")
 	}
 
-	content, _ := ioutil.ReadFile("build_test/TEST.marte")
+	content, err := ioutil.ReadFile("build_test/TEST.marte")
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
 	output := string(content)
 
 	if !strings.Contains(output, "FieldA = 1") || !strings.Contains(output, "FieldB = 2") {
@@ -205,6 +209,7 @@ func TestBuildCommand(t *testing.T) {
 	defer outputFileOrder.Close()
 
 	err = bOrder.Build(outputFileOrder)
+	outputFileOrder.Close()
 	if err != nil {
 		t.Fatalf("Build order test failed: %v", err)
 	}

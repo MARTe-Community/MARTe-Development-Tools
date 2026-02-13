@@ -1,0 +1,48 @@
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB
+    +DDB = {
+      Class = GAMDataSource
+    }
+    +TimingDataSource = {
+      Class = TimingDataSource
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +FnA = {
+      Class = IOGAM
+      InputSignals = {
+        A = {
+          DataSource = DDB
+          Type = uint32
+          Value = @Value
+        }
+      }
+      OutputSignals = {
+        B = {
+          DataSource = DDB
+          Type = uint32
+        }
+      }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +State = {
+      Class = RealTimeState
+      Threads = {
+        +Th1 = {
+          Class = RealTimeThread
+          Functions = { FnA }
+        }
+      }
+    }
+  }
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = TimingDataSource
+  }
+}

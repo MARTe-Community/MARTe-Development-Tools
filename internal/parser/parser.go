@@ -97,47 +97,66 @@ func (p *Parser) Parse() (*Configuration, error) {
 }
 
 func (p *Parser) parseDefinition() (Definition, bool) {
-	tok := p.next()
+	tok := p.peek()
 	switch tok.Type {
 	case TokenLet:
+		p.next()
 		return p.parseLet(tok)
+	case TokenVar:
+		p.next()
+		return p.parseVariableDefinition(tok)
+	case TokenIf:
+		p.next()
+		return p.parseIf(tok)
+	case TokenForeach:
+		p.next()
+		return p.parseForeach(tok)
+	case TokenTemplate:
+		p.next()
+		return p.parseTemplate(tok)
+	case TokenUse:
+		p.next()
+		return p.parseUse(tok)
 	case TokenIdentifier:
+		p.next()
 		name := tok.Value
-		if name == "#var" {
-			return p.parseVariableDefinition(tok)
-		}
-		if p.peek().Type != TokenEqual {
-			p.addError(tok.Position, "expected =")
-			return nil, false
-		}
-		p.next() // Consume =
-
-		nextTok := p.peek()
-		if nextTok.Type == TokenLBrace {
-			if p.isSubnodeLookahead() {
+		
+		// If followed by =, it's a definition
+		if p.peek().Type == TokenEqual {
+			p.next() // consume =
+			
+			if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
 				sub, ok := p.parseSubnode()
 				if !ok {
 					return nil, false
 				}
 				return &ObjectNode{
 					Position: tok.Position,
-					Name:     name,
+					Name:     &ReferenceValue{Position: tok.Position, Value: name},
 					Subnode:  sub,
 				}, true
 			}
-		}
 
-		val, ok := p.parseValue()
-		if !ok {
-			return nil, false
+			val, ok := p.parseValue()
+			if !ok {
+				return nil, false
+			}
+			return &Field{
+				Position: tok.Position,
+				Name:     name,
+				Value:    val,
+			}, true
 		}
-		return &Field{
-			Position: tok.Position,
-			Name:     name,
-			Value:    val,
-		}, true
+		
+		// If not followed by =, it might be an expression start?
+		// But parseDefinition expects a definition.
+		// Fallback to default if we want to support "A + B = C"
+		// But for now, let's stick to simple identifiers or fail.
+		p.addError(p.peek().Position, "expected =")
+		return nil, false
 
 	case TokenObjectIdentifier:
+		p.next()
 		name := tok.Value
 		if p.peek().Type != TokenEqual {
 			p.addError(tok.Position, "expected =")
@@ -151,14 +170,303 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		}
 		return &ObjectNode{
 			Position: tok.Position,
-			Name:     name,
+			Name:     &ReferenceValue{Position: tok.Position, Value: name},
 			Subnode:  sub,
 		}, true
 	default:
-		p.addError(tok.Position, fmt.Sprintf("unexpected token %v", tok.Value))
-		return nil, false
+		// Attempt to parse name (could be expression)
+		nameVal, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+
+		if p.peek().Type != TokenEqual {
+			// If not followed by =, it might be a naked expression (invalid as definition)
+			// or part of a template use if we messed up.
+			p.addError(p.peek().Position, fmt.Sprintf("expected =, got %v", p.peek().Value))
+			return nil, false
+		}
+		p.next() // consume =
+
+		if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
+			sub, ok := p.parseSubnode()
+			if !ok {
+				return nil, false
+			}
+			return &ObjectNode{
+				Position: nameVal.Pos(),
+				Name:     nameVal,
+				Subnode:  sub,
+			}, true
+		}
+
+		val, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+
+		// If it's a simple Field, Name must be string
+		fieldName := ""
+		if ref, ok := nameVal.(*ReferenceValue); ok {
+			fieldName = ref.Value
+		} else if str, ok := nameVal.(*StringValue); ok {
+			fieldName = str.Value
+		} else {
+			// It might be a complex expression name for an object, but if no { follows, it's weird.
+			// However, MARTe allows "Name" .. "Suffix" = Value for fields too?
+			// Let's assume field names can also be expressions if we want to be powerful.
+			// But for now, let's just use the string value if it's a constant.
+			// Actually, let's just use a placeholder or handle it in builder.
+			fieldName = "EXPR_FIELD" 
+		}
+
+		return &Field{
+			Position: nameVal.Pos(),
+			Name:     fieldName,
+			Value:    val,
+		}, true
 	}
 }
+
+func (p *Parser) parseIf(startTok Token) (Definition, bool) {
+	cond, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+
+	if p.peek().Type == TokenLBrace {
+		p.next() // consume {
+	}
+
+	thenBody, endTok, ok := p.parseBlock()
+	if !ok {
+		return nil, false
+	}
+
+	var elseBody []Definition
+	if endTok.Type == TokenElse {
+		if p.peek().Type == TokenLBrace {
+			p.next() // consume {
+		}
+		elseBody, endTok, ok = p.parseBlock()
+		if !ok {
+			return nil, false
+		}
+	}
+
+	if endTok.Type != TokenEnd {
+		p.addError(endTok.Position, "expected #end")
+	}
+
+	return &IfBlock{
+		Position:    startTok.Position,
+		EndPosition: endTok.Position,
+		Condition:   cond,
+		Then:        thenBody,
+		Else:        elseBody,
+	}, true
+}
+
+func (p *Parser) parseForeach(startTok Token) (Definition, bool) {
+	// #foreach Value in Array
+	// #foreach Key Value in Map
+	v1Tok := p.next()
+	if v1Tok.Type != TokenIdentifier {
+		p.addError(v1Tok.Position, "expected identifier in #foreach")
+		return nil, false
+	}
+
+	var keyVar, valueVar string
+	next := p.peek()
+	if next.Type == TokenIdentifier {
+		p.next()
+		keyVar = v1Tok.Value
+		valueVar = next.Value
+	} else {
+		valueVar = v1Tok.Value
+	}
+
+	if p.next().Type != TokenIn {
+		p.addError(p.peek().Position, "expected 'in' in #foreach")
+		return nil, false
+	}
+
+	iterable, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+
+	if p.peek().Type == TokenLBrace {
+		p.next() // consume {
+	}
+
+	body, endTok, ok := p.parseBlock()
+	if !ok {
+		return nil, false
+	}
+
+	if endTok.Type != TokenEnd {
+		p.addError(endTok.Position, "expected #end")
+	}
+
+	return &ForeachBlock{
+		Position:    startTok.Position,
+		EndPosition: endTok.Position,
+		KeyVar:      keyVar,
+		ValueVar:    valueVar,
+		Iterable:    iterable,
+		Body:        body,
+	}, true
+}
+
+func (p *Parser) parseTemplate(startTok Token) (Definition, bool) {
+	nameTok := p.next()
+	if nameTok.Type != TokenIdentifier {
+		p.addError(nameTok.Position, "expected template name")
+		return nil, false
+	}
+
+	var params []TemplateParameter
+	if p.peek().Type == TokenSymbol && p.peek().Value == "(" {
+		p.next() // consume (
+		for {
+			if p.peek().Type == TokenSymbol && p.peek().Value == ")" {
+				p.next()
+				break
+			}
+			paramName := p.next()
+			if paramName.Type != TokenIdentifier {
+				p.addError(paramName.Position, "expected parameter name")
+				return nil, false
+			}
+			if p.next().Type != TokenColon {
+				p.addError(p.peek().Position, "expected :")
+				return nil, false
+			}
+			// Parse type expression (simplified until =)
+			typeExpr := ""
+			for {
+				t := p.peek()
+				if t.Type == TokenEOF || t.Type == TokenEqual || t.Type == TokenComma || (t.Type == TokenSymbol && t.Value == ")") {
+					break
+				}
+				tok := p.next()
+				typeExpr += tok.Value + " "
+			}
+			var defVal Value
+			if p.peek().Type == TokenEqual {
+				p.next() // consume =
+				val, ok := p.parseValue()
+				if ok {
+					defVal = val
+				}
+			}
+			params = append(params, TemplateParameter{
+				Name:         paramName.Value,
+				TypeExpr:     strings.TrimSpace(typeExpr),
+				DefaultValue: defVal,
+			})
+			if p.peek().Type == TokenComma {
+				p.next()
+			}
+		}
+	}
+
+	if p.peek().Type == TokenLBrace {
+		p.next() // consume {
+	}
+
+	body, endTok, ok := p.parseBlock()
+	if !ok {
+		return nil, false
+	}
+
+	if endTok.Type != TokenEnd {
+		p.addError(endTok.Position, "expected #end")
+	}
+
+	return &TemplateDefinition{
+		Position:    startTok.Position,
+		EndPosition: endTok.Position,
+		Name:        nameTok.Value,
+		Parameters:  params,
+		Body:        body,
+	}, true
+}
+
+func (p *Parser) parseUse(startTok Token) (Definition, bool) {
+	templateTok := p.next()
+	if templateTok.Type != TokenIdentifier {
+		p.addError(templateTok.Position, "expected template name")
+		return nil, false
+	}
+
+	// Let's assume #use Template Name (args)
+	instanceNameTok := p.next()
+	if instanceNameTok.Type != TokenIdentifier {
+		p.addError(instanceNameTok.Position, "expected instance name")
+		return nil, false
+	}
+
+	var args []TemplateArgument
+	if p.peek().Type == TokenSymbol && p.peek().Value == "(" {
+		p.next()
+		for {
+			if p.peek().Type == TokenSymbol && p.peek().Value == ")" {
+				p.next()
+				break
+			}
+			argName := p.next()
+			if argName.Type != TokenIdentifier {
+				p.addError(argName.Position, "expected argument name")
+				return nil, false
+			}
+			if p.next().Type != TokenEqual {
+				p.addError(p.peek().Position, "expected =")
+				return nil, false
+			}
+			val, _ := p.parseValue()
+			args = append(args, TemplateArgument{Name: argName.Value, Value: val})
+			if p.peek().Type == TokenComma {
+				p.next()
+			}
+		}
+	}
+
+	return &TemplateInstantiation{
+		Position:    startTok.Position,
+		EndPosition: p.peek().Position, // Rough
+		Name:        instanceNameTok.Value,
+		Template:    templateTok.Value,
+		Arguments:   args,
+	}, true
+}
+
+func (p *Parser) parseBlock() ([]Definition, Token, bool) {
+	var defs []Definition
+	for {
+		t := p.peek()
+		if t.Type == TokenEOF {
+			return defs, t, false
+		}
+		if t.Type == TokenEnd || t.Type == TokenElse {
+			return defs, p.next(), true
+		}
+		if t.Type == TokenRBrace {
+			// If we are in a brace block, #end might be inside or after.
+			// Usually we expect #end to close the block.
+			p.next()
+			continue
+		}
+		def, ok := p.parseDefinition()
+		if ok {
+			defs = append(defs, def)
+		} else {
+			p.next()
+		}
+	}
+}
+
 
 func (p *Parser) isSubnodeLookahead() bool {
 	// We are before '{'.
@@ -231,18 +539,23 @@ func (p *Parser) parseValue() (Value, bool) {
 	return p.parseExpression(0)
 }
 
-func getPrecedence(t TokenType) int {
-	switch t {
+func getPrecedence(t Token) int {
+	switch t.Type {
 	case TokenStar, TokenSlash, TokenPercent:
 		return 5
 	case TokenPlus, TokenMinus:
 		return 4
 	case TokenConcat:
 		return 3
+	case TokenSymbol:
+		if t.Value == "<" || t.Value == ">" || t.Value == "<=" || t.Value == ">=" || t.Value == "==" || t.Value == "!=" {
+			return 2
+		}
+		return 0
 	case TokenAmpersand:
-		return 2
+		return 1 // Bitwise AND
 	case TokenPipe, TokenCaret:
-		return 1
+		return 1 // Bitwise OR/XOR
 	default:
 		return 0
 	}
@@ -256,7 +569,7 @@ func (p *Parser) parseExpression(minPrecedence int) (Value, bool) {
 
 	for {
 		t := p.peek()
-		prec := getPrecedence(t.Type)
+		prec := getPrecedence(t)
 		if prec == 0 || prec <= minPrecedence {
 			break
 		}

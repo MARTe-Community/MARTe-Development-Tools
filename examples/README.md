@@ -42,3 +42,44 @@ cd complex
 make check
 make build
 ```
+
+### Advanced Features (Logic & Templates)
+
+The tool supports dynamic configuration generation:
+
+**Templates:**
+```marte
+#template MyDevice(ID: int, Type: string = "Default")
+    "+Device_" .. @ID = {
+        Class = "MyDriver"
+        Type = @Type
+        Address = 0x100 + @ID
+    }
+#end
+
++Hardware = {
+    Class = ReferenceContainer
+    #use MyDevice Dev1 (ID = 1)
+    #use MyDevice Dev2 (ID = 2, Type = "Special")
+}
+```
+
+**Loops & Conditionals:**
+```marte
+#var Channels: array = { 1 2 3 }
+#var EnableLog: bool = true
+
++DAQ = {
+    Class = ReferenceContainer
+    #foreach Ch in $Channels
+        "+Channel_" .. @Ch = {
+            Class = ADCChannel
+            Index = @Ch
+        }
+    #end
+    
+    #if $EnableLog
+        Logger = { Class = FileLogger }
+    #end
+}
+```

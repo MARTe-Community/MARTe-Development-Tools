@@ -102,7 +102,9 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		endLine := f.formatValue(d.Value, indent)
 		return endLine
 	case *parser.ObjectNode:
-		fmt.Fprintf(f.writer, "%s%s = {", indentStr, d.Name)
+		fmt.Fprintf(f.writer, "%s", indentStr)
+		f.formatValue(d.Name, indent)
+		fmt.Fprint(f.writer, " = {")
 		if f.hasTrailingComment(d.Position.Line) {
 			fmt.Fprintf(f.writer, " %s", f.popComment())
 		}

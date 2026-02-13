@@ -1,0 +1,56 @@
+#var Value: > 0 & < 10 = 1
+#var strins: "asda" | "test" = "asda"
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB
+    +DDB = {
+      Class = GAMDataSource
+      Signals = {
+        B = {
+          Type = uint32
+          NumberOfElements = 10
+        }
+      }
+    }
+    +TimingDataSource = {
+      Class = TimingDataSource
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +A = {
+      Class = IOGAM
+      InputSignals = {
+        P = {
+          DataSource = DDB
+          Type = uint32
+          Value = 0
+        }
+      }
+      OutputSignals = {
+        B = {
+          DataSource = DDB
+          Ranges = { {0 0 } }
+        }
+      }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +State = {
+      Class = RealTimeState
+      Threads = {
+        +Th1 = {
+          Class = RealTimeThread
+          Functions = { A }
+        }
+      }
+    }
+  }
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = TimingDataSource
+  }
+}
