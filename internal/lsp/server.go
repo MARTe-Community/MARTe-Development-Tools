@@ -82,6 +82,10 @@ type DidChangeTextDocumentParams struct {
 	ContentChanges []TextDocumentContentChangeEvent `json:"contentChanges"`
 }
 
+type DidCloseTextDocumentParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
 type TextDocumentItem struct {
 	URI        string `json:"uri"`
 	LanguageID string `json:"languageId"`
@@ -317,63 +321,16 @@ type TextEdit struct {
 	NewText string `json:"newText"`
 }
 
-var validationChan = make(chan string, 1)
 var SynchronousValidation = true // Default to true for tests
 
 var (
 	valMu      sync.Mutex
 	valCancels = make(map[string]context.CancelFunc)
+	valTimers  = make(map[string]*time.Timer)
+
+	diagMu        sync.Mutex
+	lastPublished = make(map[string]string) // URI -> Hash of diagnostics
 )
-
-func init() {
-	// Start validation debouncer
-	go func() {
-		type request struct {
-			uri string
-		}
-		var timer *time.Timer
-		runRequested := make(chan request, 1)
-
-		// Goroutine to serialize validation
-		go func() {
-			for req := range runRequested {
-				ctx, cancel := context.WithCancel(context.Background())
-				
-				valMu.Lock()
-				if oldCancel, ok := valCancels[req.uri]; ok {
-					oldCancel()
-				}
-				valCancels[req.uri] = cancel
-				valMu.Unlock()
-				
-				view := GlobalSession.ViewOf(req.uri)
-				if view != nil {
-					runValidation(ctx, req.uri, view.Snapshot())
-				}
-				
-				valMu.Lock()
-				if currentCancel, ok := valCancels[req.uri]; ok {
-					_ = currentCancel
-				}
-				valMu.Unlock()
-			}
-		}()
-
-		for uri := range validationChan {
-			if timer != nil {
-				timer.Stop()
-			}
-			u := uri
-			timer = time.AfterFunc(500*time.Millisecond, func() {
-				select {
-				case runRequested <- request{uri: u}:
-				default:
-					// Already a run requested
-				}
-			})
-		}
-	}()
-}
 
 func triggerValidation(uri string) {
 	if SynchronousValidation {
@@ -381,14 +338,36 @@ func triggerValidation(uri string) {
 		if view != nil {
 			runValidation(context.Background(), uri, view.Snapshot())
 		}
-	} else {
-		select {
-		case validationChan <- uri:
-		default:
-			// Already triggered
-		}
+		return
 	}
+
+	valMu.Lock()
+	defer valMu.Unlock()
+
+	if timer, ok := valTimers[uri]; ok {
+		timer.Stop()
+	}
+
+	valTimers[uri] = time.AfterFunc(1000*time.Millisecond, func() {
+		valMu.Lock()
+		delete(valTimers, uri)
+		
+		// Cancel previous validation for this URI
+		if cancel, ok := valCancels[uri]; ok {
+			cancel()
+		}
+		
+		ctx, cancel := context.WithCancel(context.Background())
+		valCancels[uri] = cancel
+		valMu.Unlock()
+
+		view := GlobalSession.ViewOf(uri)
+		if view != nil {
+			runValidation(ctx, uri, view.Snapshot())
+		}
+	})
 }
+
 
 
 func RunServer() {
@@ -621,6 +600,15 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 	
 	p := parser.NewParser(params.TextDocument.Text)
 	config, _ := p.Parse()
+	newSnap.ParserErrors()[params.TextDocument.URI] = p.Errors()
+
+	// 1. Immediately publish parser errors
+	publishImmediateDiagnostics(params.TextDocument.URI, newSnap)
+
+	// 2. Clear diagnostic cache for this URI to force update on open
+	diagMu.Lock()
+	delete(lastPublished, params.TextDocument.URI)
+	diagMu.Unlock()
 
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
@@ -630,6 +618,7 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		triggerValidation(params.TextDocument.URI)
 	} else {
 		view.SetSnapshot(newSnap)
+		triggerValidation(params.TextDocument.URI)
 	}
 }
 
@@ -661,8 +650,12 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	path := uriToPath(uri)
 	p := parser.NewParser(text)
 	config, _ := p.Parse()
+	newSnap.ParserErrors()[uri] = p.Errors()
 
-	publishParserErrors(uri, p.Errors())
+	// Immediately publish parser errors
+	publishImmediateDiagnostics(uri, newSnap)
+
+	// Parser errors are now handled in runValidation to avoid blinking
 
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
@@ -672,7 +665,51 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		triggerValidation(uri)
 	} else {
 		view.SetSnapshot(newSnap)
+		triggerValidation(uri) // Still trigger validation to show parser errors
 	}
+}
+
+func HandleDidClose(params DidCloseTextDocumentParams) {
+	uri := params.TextDocument.URI
+	view := GlobalSession.ViewOf(uri)
+	if view == nil {
+		return
+	}
+
+	// 1. Cancel any pending validation
+	valMu.Lock()
+	if timer, ok := valTimers[uri]; ok {
+		timer.Stop()
+		delete(valTimers, uri)
+	}
+	if cancel, ok := valCancels[uri]; ok {
+		cancel()
+		delete(valCancels, uri)
+	}
+	valMu.Unlock()
+
+	// 2. Clear diagnostics in the client
+	notification := JsonRpcMessage{
+		Jsonrpc: "2.0",
+		Method:  "textDocument/publishDiagnostics",
+		Params: mustMarshal(PublishDiagnosticsParams{
+			URI:         uri,
+			Diagnostics: []LSPDiagnostic{},
+		}),
+	}
+	send(notification)
+
+	// 3. Clear cache
+	diagMu.Lock()
+	delete(lastPublished, uri)
+	diagMu.Unlock()
+
+	// 4. Remove from documents
+	oldSnap := view.Snapshot()
+	newSnap := oldSnap.Clone(context.Background())
+	delete(newSnap.Documents(), uri)
+	delete(newSnap.ParserErrors(), uri)
+	view.SetSnapshot(newSnap)
 }
 
 func applyContentChange(text string, change TextDocumentContentChangeEvent) string {
@@ -752,93 +789,17 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	}
 }
 
-func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
-	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
-	// Validator needs root path. View has it.
-	if snap.Tree() == nil || snap.Tree().Root == nil {
-		return 
-	}
-	
-	// We need the project root from the View.
-	// But snapshot doesn't expose View publicly? 
-	// Snapshot has unexported 'view'.
-	// But validator uses ProjectRoot mostly for schema loading or paths.
-	// We'll use the session logic.
-	
-	// Wait, validator.NewValidator takes `tree`, `projectRoot`, `schema`.
-	// We need to pass the snapshot's tree.
-	
-	v := validator.NewValidator(snap.Tree(), snap.View().Root(), nil) // Assuming we expose View()
-	v.ValidateProject(ctx)
-
-	if ctx.Err() != nil {
-		logger.Printf("Validation canceled")
+func publishImmediateDiagnostics(uri string, snap *cache.Snapshot) {
+	errs, ok := snap.ParserErrors()[uri]
+	if !ok {
 		return
 	}
 
-	logger.Printf("Validation complete. Diagnostics: %d", len(v.Diagnostics))
-
-	// Group diagnostics by file
-	fileDiags := make(map[string][]LSPDiagnostic)
-
-	// Collect all known files to ensure we clear diagnostics for fixed files
-	knownFiles := make(map[string]bool)
-	collectFiles(snap.Tree().Root, knownFiles)
-	for _, node := range snap.Tree().IsolatedFiles {
-		collectFiles(node, knownFiles)
-	}
-
-	// Initialize all known files with empty diagnostics
-	for f := range knownFiles {
-		fileDiags[f] = []LSPDiagnostic{}
-	}
-
-	for _, d := range v.Diagnostics {
-		severity := 1 // Error
-		levelStr := "ERROR"
-		if d.Level == validator.LevelWarning {
-			severity = 2 // Warning
-			levelStr = "WARNING"
-		}
-
-		diag := LSPDiagnostic{
-			Range: Range{
-				Start: Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1},
-				End:   Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1 + 10}, // Arbitrary length
-			},
-			Severity: severity,
-			Message:  fmt.Sprintf("%s: %s", levelStr, d.Message),
-			Source:   "mdt",
-		}
-
-		path := d.File
-		if path != "" {
-			fileDiags[path] = append(fileDiags[path], diag)
-		}
-	}
-
-	// Send diagnostics for all known files
-	for path, diags := range fileDiags {
-		fileURI := "file://" + path
-		notification := JsonRpcMessage{
-			Jsonrpc: "2.0",
-			Method:  "textDocument/publishDiagnostics",
-			Params: mustMarshal(PublishDiagnosticsParams{
-				URI:         fileURI,
-				Diagnostics: diags,
-			}),
-		}
-		send(notification)
-	}
-}
-
-func publishParserErrors(uri string, errors []error) {
 	diagnostics := []LSPDiagnostic{}
 
-	for _, err := range errors {
+	for _, err := range errs {
 		var line, col int
 		var msg string
-		// Try parsing "line:col: message"
 		n, _ := fmt.Sscanf(err.Error(), "%d:%d: ", &line, &col)
 		if n == 2 {
 			parts := strings.SplitN(err.Error(), ": ", 2)
@@ -846,7 +807,6 @@ func publishParserErrors(uri string, errors []error) {
 				msg = parts[1]
 			}
 		} else {
-			// Fallback
 			line = 1
 			col = 1
 			msg = err.Error()
@@ -864,6 +824,11 @@ func publishParserErrors(uri string, errors []error) {
 		diagnostics = append(diagnostics, diag)
 	}
 
+	// We bypass the lastPublished cache here because this is "partial" information.
+	// We want the full validation later to still be able to publish.
+	// Actually, to prevent blinking, we should update the cache if it's the same.
+	// But immediate diagnostics only contain parser errors, whereas full contains both.
+	
 	notification := JsonRpcMessage{
 		Jsonrpc: "2.0",
 		Method:  "textDocument/publishDiagnostics",
@@ -874,6 +839,123 @@ func publishParserErrors(uri string, errors []error) {
 	}
 	send(notification)
 }
+
+func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
+	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
+	if snap.Tree() == nil || snap.Tree().Root == nil {
+		return
+	}
+
+	// 1. Collect all diagnostics (Semantic + Parser)
+	fileDiags := make(map[string][]LSPDiagnostic)
+
+	// Collect all known files to ensure we clear diagnostics for fixed files
+	knownFiles := make(map[string]bool)
+	collectFiles(snap.Tree().Root, knownFiles)
+	for _, node := range snap.Tree().IsolatedFiles {
+		collectFiles(node, knownFiles)
+	}
+
+	// Initialize all known files with empty diagnostics
+	for f := range knownFiles {
+		fileDiags[f] = []LSPDiagnostic{}
+	}
+
+	// Add Parser errors from snapshot
+	for docURI, errs := range snap.ParserErrors() {
+		if len(errs) > 0 {
+			path := uriToPath(docURI)
+			for _, err := range errs {
+				var line, col int
+				var msg string
+				n, _ := fmt.Sscanf(err.Error(), "%d:%d: ", &line, &col)
+				if n == 2 {
+					parts := strings.SplitN(err.Error(), ": ", 2)
+					if len(parts) == 2 {
+						msg = parts[1]
+					}
+				} else {
+					line = 1
+					col = 1
+					msg = err.Error()
+				}
+
+				diag := LSPDiagnostic{
+					Range: Range{
+						Start: Position{Line: line - 1, Character: col - 1},
+						End:   Position{Line: line - 1, Character: col},
+					},
+					Severity: 1, // Error
+					Message:  msg,
+					Source:   "mdt-parser",
+				}
+				fileDiags[path] = append(fileDiags[path], diag)
+			}
+		}
+	}
+
+	// Semantic Validation
+	v := validator.NewValidator(snap.Tree(), snap.View().Root(), nil)
+	v.ValidateProject(ctx)
+
+	if ctx.Err() != nil {
+		logger.Printf("Validation canceled")
+		return
+	}
+
+	for _, d := range v.Diagnostics {
+		severity := 1 // Error
+		levelStr := "ERROR"
+		if d.Level == validator.LevelWarning {
+			severity = 2 // Warning
+			levelStr = "WARNING"
+		}
+
+		diag := LSPDiagnostic{
+			Range: Range{
+				Start: Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1},
+				End:   Position{Line: d.Position.Line - 1, Character: d.Position.Column - 1 + 10},
+			},
+			Severity: severity,
+			Message:  fmt.Sprintf("%s: %s", levelStr, d.Message),
+			Source:   "mdt",
+		}
+
+		path := d.File
+		if path != "" {
+			fileDiags[path] = append(fileDiags[path], diag)
+		}
+	}
+
+	// 2. Send diagnostics ONLY if they changed
+	diagMu.Lock()
+	defer diagMu.Unlock()
+
+	for path, diags := range fileDiags {
+		fileURI := "file://" + path
+		
+		// Simple hash (JSON representation)
+		data, _ := json.Marshal(diags)
+		hash := string(data)
+
+		if lastPublished[fileURI] == hash {
+			continue
+		}
+
+		lastPublished[fileURI] = hash
+
+		notification := JsonRpcMessage{
+			Jsonrpc: "2.0",
+			Method:  "textDocument/publishDiagnostics",
+			Params: mustMarshal(PublishDiagnosticsParams{
+				URI:         fileURI,
+				Diagnostics: diags,
+			}),
+		}
+		send(notification)
+	}
+}
+
 
 func collectFiles(node *index.ProjectNode, files map[string]bool) {
 	if node == nil {

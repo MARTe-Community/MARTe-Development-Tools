@@ -109,12 +109,45 @@ package schema
 
 ### Pragmas (Suppressing Warnings)
 
-Use comments starting with `//!` to control validation behavior:
+Use comments starting with `//!` to control validation behavior. Pragmas can be placed **locally** (above a specific field or object) or **globally** (at the top of the file to affect the whole project/file).
 
-- `//! unused: Reason` - Suppress "Unused GAM" or "Unused Signal" warnings.
-- `//! implicit: Reason` - Suppress "Implicitly Defined Signal" warnings.
-- `//! cast(DefinedType, UsageType)` - Allow type mismatch between definition and usage (e.g. `//!cast(uint32, int32)`).
-- `//! allow(unused)` - Global suppression for the file.
+Supported Pragmas:
+- `//! ignore(tag)` or `//! allow(tag)`: Suppress a specific diagnostic.
+- `//! cast(DefinedType, UsageType)`: Allow type mismatch between signal definition and usage (e.g., `//! cast(uint32, int32)`).
+
+#### Common Diagnostic Tags:
+| Tag | Level | Description |
+|-----|-------|-------------|
+| `unused_gam` | Warning | GAM is defined but not used in any thread. |
+| `unused_signal` | Warning | Signal is defined in DataSource but never referenced. |
+| `implicit_signal` | Warning | Signal is used in a GAM but not explicitly defined in the DataSource. |
+| `parent_mismatch` | Error | Object is placed under an invalid parent (validated via schema). |
+| `datasource_direction` | Error | Signal usage violates DataSource direction (IN/OUT/INOUT). |
+| `datasource_threading` | Error | Non-multithreaded DataSource used in multiple threads. |
+| `not_produced` | Error | INOUT Signal consumed before being produced in a thread. |
+| `not_consumed` | Warning | INOUT Signal produced but never consumed in a thread. |
+| `duplicate_field` | Error | Field is defined multiple times in the same node. |
+| `unknown_class` | Warning | Class name not found in the CUE schema. |
+| `schema_validation` | Error | General CUE schema violation (missing mandatory fields, wrong types). |
+| `unknown_reference` | Error | Identifier reference could not be resolved. |
+| `signal_type_mismatch` | Error | Signal has different types in different GAMs/DataSources. |
+| `variable_value_mismatch`| Error | Variable value does not match its declared type. |
+
+**Example Global Suppression:**
+```marte
+//! ignore(unused_gam)
+//! ignore(implicit_signal)
+#package MyProject
+...
+```
+
+**Example Local Suppression:**
+```marte
+//! ignore(parent_mismatch)
++InvalidParent = {
+    Class = "MyClass"
+}
+```
 
 ## Development
 

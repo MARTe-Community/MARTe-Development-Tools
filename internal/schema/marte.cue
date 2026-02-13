@@ -7,7 +7,7 @@ import "list"
 		Functions!: {
 			Class: "ReferenceContainer"
 			[_= !~"^Class$"]: {
-				#meta: type: "gam"
+				#meta: MetaType: "gam"
 				...
 			}
 		} // type: node
@@ -15,7 +15,7 @@ import "list"
 			Class:             "ReferenceContainer"
 			DefaultDataSource: string
 			[_= !~"^(Class|DefaultDataSource)$"]: {
-				#meta: type: "datasource"
+				#meta: MetaType: "datasource"
 				...
 			}
 		}
@@ -28,7 +28,7 @@ import "list"
 		} // type: node
 		Scheduler!: {
 			...
-			#meta: type: "scheduler"
+			#meta: MetaType: "scheduler"
 		}
 		...
 	}
@@ -65,19 +65,19 @@ import "list"
 	}
 	GAMScheduler: {
 		TimingDataSource: string // type: reference
-		#meta: type: "scheduler"
+		#meta: MetaType: "scheduler"
 		...
 	}
 	TimingDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	IOGAM: {
 		InputSignals: { [_]: { ByteSize: int, ... } }
 		OutputSignals: { [_]: { ByteSize: int, ... } }
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		
 		InputSize: list.Sum([for k, v in InputSignals { v.ByteSize }])
 		OutputSize: list.Sum([for k, v in OutputSignals { v.ByteSize }])
@@ -89,7 +89,7 @@ import "list"
 	}
 	ConstantGAM: {
 		...
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 	}
 	PIDGAM: {
 		Kp: float | int // type: float (allow int as it promotes)
@@ -98,7 +98,7 @@ import "list"
 		SamplingTime?: float | int
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	FileDataSource: {
@@ -106,44 +106,44 @@ import "list"
 		Format?:  string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	LoggerDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	DANStream: {
 		Timeout?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	EPICSCAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	EPICSCAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	EPICSPVAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	EPICSPVAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	SDNSubscriber: {
@@ -157,7 +157,7 @@ import "list"
 		IgnoreTimeoutError?: 0 | 1
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	SDNPublisher: {
@@ -167,7 +167,7 @@ import "list"
 		Topic?:     string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	UDPReceiver: {
@@ -175,14 +175,14 @@ import "list"
 		Address?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	UDPSender: {
 		Destination: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	FileReader: {
@@ -191,7 +191,7 @@ import "list"
 		Interpolate?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	FileWriter: {
@@ -200,7 +200,7 @@ import "list"
 		StoreOnTrigger?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	OrderedClass: {
@@ -209,17 +209,17 @@ import "list"
 		...
 	}
 	BaseLib2GAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	ConversionGAM: {
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	DoubleHandshakeGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	FilterGAM: {
@@ -228,7 +228,7 @@ import "list"
 		ResetInEachState?: _
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	HistogramGAM: {
@@ -236,32 +236,32 @@ import "list"
 		StateChangeResetName?: string
 		InputSignals?: {...}
 		OutputSignals?: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	Interleaved2FlatGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	FlattenedStructIOGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	MathExpressionGAM: {
 		Expression: string
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	MessageGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	MuxGAM: {
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	SimulinkWrapperGAM: {
@@ -269,34 +269,34 @@ import "list"
 		Symbol?: string
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	SSMGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	StatisticsGAM: {
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	TimeCorrectionGAM: {
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	TriggeredIOGAM: {
 		InputSignals: {...}
 		OutputSignals: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	WaveformGAM: {
 		InputSignals: {...}
 		OutputSignals: {...}
 		Triggers?: {...}
-		#meta: type: "gam"
+		#meta: MetaType: "gam"
 		...
 	}
 	DAN: {
@@ -314,13 +314,13 @@ import "list"
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	LinkDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	MDSReader: {
@@ -330,7 +330,7 @@ import "list"
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	MDSWriter: {
@@ -348,86 +348,86 @@ import "list"
 		Messages?: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI1588TimeStamp: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6259ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6259DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6259DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6368ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6368DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI6368DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI9157CircularFifoReader: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	NI9157MxiDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	OPCUADSInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	OPCUADSOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	RealTimeThreadAsyncBridge: {
 		#meta: direction:     "INOUT"
 		#meta: multithreaded: bool | true
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	RealTimeThreadSynchronisation: {...}
 	UARTDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 	BaseLib2Wrapper: {...}
@@ -439,7 +439,7 @@ import "list"
 	GAMDataSource: {
 		#meta: multithreaded: false
 		#meta: direction:     "INOUT"
-		#meta: type:          "datasource"
+		#meta: MetaType:          "datasource"
 		...
 	}
 }
@@ -447,25 +447,18 @@ import "list"
 #Meta: {
 	direction?:     "IN" | "OUT" | "INOUT"
 	multithreaded?: bool
-	...
+	MetaType?:      string
+	type?:          string // Keep for backward compatibility
+	Parent?: {
+		Name?:     string
+		Class?:    string
+		MetaType?: string
+	}
 }
 
-// Definition for any Object.
-// It must have a Class field.
-// Based on Class, it validates against #Classes.
 #Object: {
 	Class:    string
 	"#meta"?: #Meta
-	// Allow any other field by default (extensibility),
-	// unless #Classes definition is closed.
-	// We allow open structs now.
 	...
-
-	// Unify if Class is known.
-	// If Class is NOT in #Classes, this might fail or do nothing depending on CUE logic.
-	// Actually, `#Classes[Class]` fails if key is missing.
-	// This ensures we validate against known classes.
-	// If we want to allow unknown classes, we need a check.
-	// But spec implies validation should check known classes.
 	#Classes[Class]
 }

@@ -155,14 +155,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 		for _, frag := range node.Fragments {
 			for _, def := range frag.Definitions {
 				if f, ok := def.(*parser.Field); ok {
-					v.mu.Lock()
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("Invalid content in Signals container: Field '%s' is not allowed. Only Signal objects are allowed.", f.Name),
-						Position: f.Position,
-						File:     frag.File,
-					})
-					v.mu.Unlock()
+					v.report(node, "invalid_container_content", LevelError,
+						fmt.Sprintf("Invalid content in Signals container: Field '%s' is not allowed. Only Signal objects are allowed.", f.Name),
+						f.Position, frag.File)
 				}
 			}
 		}
@@ -174,14 +169,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 	for name, defs := range fields {
 		if len(defs) > 1 {
 			firstFile := v.getFileForField(defs[0].Raw, node)
-			v.mu.Lock()
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
-				Position: defs[1].Raw.Position,
-				File:     v.getFileForField(defs[1].Raw, node),
-			})
-			v.mu.Unlock()
+			v.report(node, "duplicate_field", LevelError,
+				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
+				defs[1].Raw.Position, v.getFileForField(defs[1].Raw, node))
 		}
 	}
 
@@ -213,14 +203,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 		if className == "" && !hasType {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
-			v.mu.Lock()
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Node %s is an object and must contain a 'Class' field (or be a Signal with 'Type')", node.RealName),
-				Position: pos,
-				File:     file,
-			})
-			v.mu.Unlock()
+			v.report(node, "missing_class", LevelError,
+				fmt.Sprintf("Node %s is an object and must contain a 'Class' field (or be a Signal with 'Type')", node.RealName),
+				pos, file)
 		}
 
 		if className == "RealTimeThread" {
@@ -264,14 +249,9 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 		// Treated as string literal for Class field
 		className = val.Value
 	default:
-		v.mu.Lock()
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
-			Position: f.Raw.Position,
-			File:     v.getFileForField(f.Raw, node),
-		})
-		v.mu.Unlock()
+		v.report(node, "invalid_class_field", LevelError,
+			fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
+			f.Raw.Position, v.getFileForField(f.Raw, node))
 		return
 	}
 
@@ -287,16 +267,9 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 		path := cue.ParsePath(fmt.Sprintf("#Classes.%s", lookupName))
 		if v.Schema.Value.LookupPath(path).Err() != nil {
 			// Unknown Class
-			if !v.isSuppressed("unknown_class", node) {
-				v.mu.Lock()
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelWarning,
-					Message:  fmt.Sprintf("Unknown Class '%s'", className),
-					Position: f.Raw.Position,
-					File:     v.getFileForField(f.Raw, node),
-				})
-				v.mu.Unlock()
-			}
+			v.report(node, "unknown_class", LevelWarning,
+				fmt.Sprintf("Unknown Class '%s'", className),
+				f.Raw.Position, v.getFileForField(f.Raw, node))
 		}
 	}
 }
@@ -310,26 +283,16 @@ func (v *Validator) validateTypeField(f index.EvaluatedField, node *index.Projec
 	case *parser.ReferenceValue:
 		typeName = val.Value
 	default:
-		v.mu.Lock()
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
-			Position: f.Raw.Position,
-			File:     v.getFileForField(f.Raw, node),
-		})
-		v.mu.Unlock()
+		v.report(node, "invalid_type_field", LevelError,
+			fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
+			f.Raw.Position, v.getFileForField(f.Raw, node))
 		return
 	}
 
 	if !isValidType(typeName) {
-		v.mu.Lock()
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Invalid Type '%s'", typeName),
-			Position: f.Raw.Position,
-			File:     v.getFileForField(f.Raw, node),
-		})
-		v.mu.Unlock()
+		v.report(node, "invalid_type", LevelError,
+			fmt.Sprintf("Invalid Type '%s'", typeName),
+			f.Raw.Position, v.getFileForField(f.Raw, node))
 	}
 }
 
@@ -344,14 +307,9 @@ func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, fil
 		// Non-quoted string: a reference -> Must resolve
 		target := v.resolveReference(t.Value, node, nil)
 		if target == nil {
-			v.mu.Lock()
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Unknown reference '%s'", t.Value),
-				Position: t.Position,
-				File:     file,
-			})
-			v.mu.Unlock()
+			v.report(node, "unknown_reference", LevelError,
+				fmt.Sprintf("Unknown reference '%s'", t.Value),
+				t.Position, file)
 		} else {
 			// Link reference
 			v.updateReferenceTarget(file, t.Position, target)
@@ -376,20 +334,72 @@ func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, fil
 }
 
 func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bool {
-	file := v.getNodeFile(node)
+	// Global suppression check
+	// Use an empty string if node is nil for file context, 
+	// but isGloballyAllowed should ideally have a file context.
+	file := ""
+	if node != nil {
+		file = v.getNodeFile(node)
+	}
+	
 	if v.isGloballyAllowed(warningType, file) {
 		return true
 	}
-	// Check local pragmas on the node
-	prefix1 := fmt.Sprintf("allow(%s)", warningType)
-	prefix2 := fmt.Sprintf("ignore(%s)", warningType)
-	for _, p := range node.Pragmas {
-		normalized := strings.ReplaceAll(p, " ", "")
-		if strings.HasPrefix(normalized, prefix1) || strings.HasPrefix(normalized, prefix2) {
+
+	// Legacy tag support
+	if warningType == "unused_gam" || warningType == "unused_signal" {
+		if v.isGloballyAllowed("unused", file) {
 			return true
 		}
 	}
+	if warningType == "implicit_signal" {
+		if v.isGloballyAllowed("implicit", file) {
+			return true
+		}
+	}
+	
+	if node == nil {
+		return false
+	}
+
+	// Check local pragmas on the node
+	checkTags := []string{warningType}
+	if warningType == "unused_gam" || warningType == "unused_signal" {
+		checkTags = append(checkTags, "unused")
+	}
+	if warningType == "implicit_signal" {
+		checkTags = append(checkTags, "implicit")
+	}
+
+	for _, tag := range checkTags {
+		prefix1 := fmt.Sprintf("allow(%s)", tag)
+		prefix2 := fmt.Sprintf("ignore(%s)", tag)
+		for _, p := range node.Pragmas {
+			normalized := strings.ReplaceAll(p, " ", "")
+			if strings.HasPrefix(normalized, prefix1) || strings.HasPrefix(normalized, prefix2) {
+				return true
+			}
+			// Special case for colon-separated pragmas //! unused: ...
+			if strings.HasPrefix(p, tag+":") {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+func (v *Validator) report(node *index.ProjectNode, tag string, level DiagnosticLevel, msg string, pos parser.Position, file string) {
+	if v.isSuppressed(tag, node) {
+		return
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.Diagnostics = append(v.Diagnostics, Diagnostic{
+		Level:    level,
+		Message:  msg,
+		Position: pos,
+		File:     file,
+	})
 }
 
 func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
@@ -425,20 +435,86 @@ func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
 		// Parse CUE error to diagnostic
 		v.reportCUEError(err, node)
 	}
+
+	// Check Parent constraints from #meta
+	meta := res.LookupPath(cue.ParsePath("#meta"))
+	if meta.Exists() {
+		v.validateParent(node, meta)
+	}
 }
+
+func (v *Validator) validateParent(node *index.ProjectNode, meta cue.Value) {
+	parentConstraint := meta.LookupPath(cue.ParsePath("Parent"))
+	if !parentConstraint.Exists() || parentConstraint.Err() != nil {
+		return
+	}
+
+	parent := node.Parent
+	if parent == nil {
+		// Root node has no parent. If there is a constraint, it might be an error.
+		// Usually only RealTimeApplication is root.
+		return
+	}
+
+	// Check Name
+	if nameVal := parentConstraint.LookupPath(cue.ParsePath("Name")); nameVal.Exists() {
+		expectedName, _ := nameVal.String()
+		if parent.RealName != expectedName && parent.Name != expectedName {
+			v.report(node, "parent_mismatch", LevelError,
+				fmt.Sprintf("Parent Name Mismatch: Node '%s' must have parent named '%s', but has '%s'", node.RealName, expectedName, parent.RealName),
+				v.getNodePosition(node), v.getNodeFile(node))
+		}
+	}
+
+	// Check Class
+	if classVal := parentConstraint.LookupPath(cue.ParsePath("Class")); classVal.Exists() {
+		expectedClass, _ := classVal.String()
+		parentClass := v.getNodeClass(parent)
+		if parentClass != expectedClass {
+			v.report(node, "parent_mismatch", LevelError,
+				fmt.Sprintf("Parent Class Mismatch: Node '%s' must have parent of class '%s', but has '%s'", node.RealName, expectedClass, parentClass),
+				v.getNodePosition(node), v.getNodeFile(node))
+		}
+	}
+
+	// Check MetaType
+	if typeVal := parentConstraint.LookupPath(cue.ParsePath("MetaType")); typeVal.Exists() {
+		expectedType, _ := typeVal.String()
+		parentMeta := v.getMetaType(parent)
+		if parentMeta != expectedType {
+			v.report(node, "parent_mismatch", LevelError,
+				fmt.Sprintf("Parent MetaType Mismatch: Node '%s' must have parent of type '%s', but has '%s'", node.RealName, expectedType, parentMeta),
+				v.getNodePosition(node), v.getNodeFile(node))
+		}
+	}
+}
+
+func (v *Validator) getMetaType(node *index.ProjectNode) string {
+	className := v.getNodeClass(node)
+	if className == "" {
+		return ""
+	}
+	if v.Schema == nil {
+		return ""
+	}
+
+	path := cue.ParsePath(fmt.Sprintf("#Classes.%s.#meta.MetaType", className))
+	val := v.Schema.Value.LookupPath(path)
+	if val.Exists() {
+		s, _ := val.String()
+		return s
+	}
+	return ""
+}
+
 
 func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
 	list := errors.Errors(err)
-	v.mu.Lock()
-	defer v.mu.Unlock()
 	for _, e := range list {
 		msg := e.Error()
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Schema Validation Error: %v", msg),
-			Position: v.getNodePosition(node),
-			File:     v.getNodeFile(node),
-		})
+		v.report(node, "schema_validation", LevelError,
+			fmt.Sprintf("Schema Validation Error: %v", msg),
+			v.getNodePosition(node), v.getNodeFile(node))
 	}
 }
 
@@ -449,7 +525,7 @@ func (v *Validator) nodeToMapWithDepth(node *index.ProjectNode, depth int) map[s
 	for name, defs := range fields {
 		if len(defs) > 0 {
 			// Use the last definition (duplicates checked elsewhere)
-			val := v.valueToInterface(defs[len(defs)-1].Value, node)
+			val := v.ValueToInterface(defs[len(defs)-1].Value, node)
 			// Strip namespace from Class field value for schema validation
 			if name == "Class" {
 				if s, ok := val.(string); ok {
@@ -477,7 +553,7 @@ func (v *Validator) nodeToMapWithDepth(node *index.ProjectNode, depth int) map[s
 }
 
 
-func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) interface{} {
+func (v *Validator) ValueToInterface(val parser.Value, ctx *index.ProjectNode) interface{} {
 	switch t := val.(type) {
 	case *parser.StringValue:
 		return t.Value
@@ -494,26 +570,26 @@ func (v *Validator) valueToInterface(val parser.Value, ctx *index.ProjectNode) i
 	case *parser.VariableReferenceValue:
 		name := strings.TrimLeft(t.Name, "@$")
 		if ov, ok := v.Overrides[name]; ok {
-			return v.valueToInterface(ov, ctx)
+			return v.ValueToInterface(ov, ctx)
 		}
 		if info := v.Tree.ResolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
-				return v.valueToInterface(info.Def.DefaultValue, ctx)
+				return v.ValueToInterface(info.Def.DefaultValue, ctx)
 			}
 		}
 		return nil
 	case *parser.ArrayValue:
 		var arr []interface{}
 		for _, e := range t.Elements {
-			arr = append(arr, v.valueToInterface(e, ctx))
+			arr = append(arr, v.ValueToInterface(e, ctx))
 		}
 		return arr
 	case *parser.BinaryExpression:
-		left := v.valueToInterface(t.Left, ctx)
-		right := v.valueToInterface(t.Right, ctx)
+		left := v.ValueToInterface(t.Left, ctx)
+		right := v.ValueToInterface(t.Right, ctx)
 		return v.evaluateBinary(left, t.Operator.Type, right)
 	case *parser.UnaryExpression:
-		val := v.valueToInterface(t.Right, ctx)
+		val := v.ValueToInterface(t.Right, ctx)
 		return v.evaluateUnary(t.Operator.Type, val)
 	}
 	return nil
@@ -617,12 +693,9 @@ func (v *Validator) evaluateUnary(op parser.TokenType, val interface{}) interfac
 func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]index.EvaluatedField) {
 	// ... (same as before)
 	if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Signal '%s' is missing mandatory field 'Type'", node.RealName),
-			Position: v.getNodePosition(node),
-			File:     v.getNodeFile(node),
-		})
+		v.report(node, "missing_signal_type", LevelError,
+			fmt.Sprintf("Signal '%s' is missing mandatory field 'Type'", node.RealName),
+			v.getNodePosition(node), v.getNodeFile(node))
 	} else {
 		typeVal := typeFields[0].Value
 		var typeStr string
@@ -632,22 +705,16 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 		case *parser.ReferenceValue:
 			typeStr = t.Value
 		default:
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Field 'Type' in Signal '%s' must be a type name", node.RealName),
-				Position: typeFields[0].Raw.Position,
-				File:     v.getFileForField(typeFields[0].Raw, node),
-			})
+			v.report(node, "invalid_signal_type", LevelError,
+				fmt.Sprintf("Field 'Type' in Signal '%s' must be a type name", node.RealName),
+				typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, node))
 			return
 		}
 
 		if !isValidType(typeStr) {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeStr, node.RealName),
-				Position: typeFields[0].Raw.Position,
-				File:     v.getFileForField(typeFields[0].Raw, node),
-			})
+			v.report(node, "invalid_signal_type", LevelError,
+				fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeStr, node.RealName),
+				typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, node))
 		}
 	}
 	
@@ -689,12 +756,9 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 
 	dsNode := v.resolveReference(dsName, signalNode, isDataSource)
 	if dsNode == nil {
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Unknown DataSource '%s' referenced in signal '%s'", dsName, signalNode.RealName),
-			Position: v.getNodePosition(signalNode),
-			File:     v.getNodeFile(signalNode),
-		})
+		v.report(signalNode, "unknown_datasource", LevelError,
+			fmt.Sprintf("Unknown DataSource '%s' referenced in signal '%s'", dsName, signalNode.RealName),
+			v.getNodePosition(signalNode), v.getNodeFile(signalNode))
 		return
 	}
 
@@ -717,20 +781,14 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			dsDir, err := val.String()
 			if err == nil && dsDir != "" {
 				if direction == "Input" && dsDir == "OUT" {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("DataSource '%s' (Class %s) is Output-only but referenced in InputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
-						Position: v.getNodePosition(signalNode),
-						File:     v.getNodeFile(signalNode),
-					})
+					v.report(signalNode, "datasource_direction", LevelError,
+						fmt.Sprintf("DataSource '%s' (Class %s) is Output-only but referenced in InputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
+						v.getNodePosition(signalNode), v.getNodeFile(signalNode))
 				}
 				if direction == "Output" && dsDir == "IN" {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("DataSource '%s' (Class %s) is Input-only but referenced in OutputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
-						Position: v.getNodePosition(signalNode),
-						File:     v.getNodeFile(signalNode),
-					})
+					v.report(signalNode, "datasource_direction", LevelError,
+						fmt.Sprintf("DataSource '%s' (Class %s) is Input-only but referenced in OutputSignals of GAM '%s'", dsName, dsClass, gamNode.RealName),
+						v.getNodePosition(signalNode), v.getNodeFile(signalNode))
 				}
 			}
 		}
@@ -760,42 +818,21 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 
 	if targetNode == nil {
-		suppressed := v.isGloballyAllowed("implicit", v.getNodeFile(signalNode))
-		if !suppressed {
-			for _, p := range signalNode.Pragmas {
-				if strings.HasPrefix(p, "implicit:") || strings.HasPrefix(p, "ignore(implicit)") {
-					suppressed = true
-					break
-				}
-			}
-		}
-
-		if !suppressed {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelWarning,
-				Message:  fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
-				Position: v.getNodePosition(signalNode),
-				File:     v.getNodeFile(signalNode),
-			})
-		}
+		v.report(signalNode, "implicit_signal", LevelWarning,
+			fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
+			v.getNodePosition(signalNode), v.getNodeFile(signalNode))
 
 		if typeFields, ok := fields["Type"]; !ok || len(typeFields) == 0 {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Implicit signal '%s' must define Type", targetSignalName),
-				Position: v.getNodePosition(signalNode),
-				File:     v.getNodeFile(signalNode),
-			})
+			v.report(signalNode, "implicit_signal_missing_type", LevelError,
+				fmt.Sprintf("Implicit signal '%s' must define Type", targetSignalName),
+				v.getNodePosition(signalNode), v.getNodeFile(signalNode))
 		} else {
 			// Check Type validity even for implicit
 			typeVal := v.getFieldValue(typeFields[0], signalNode)
 			if !isValidType(typeVal) {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					Position: typeFields[0].Raw.Position,
-					File:     v.getNodeFile(signalNode),
-				})
+				v.report(signalNode, "invalid_signal_type", LevelError,
+					fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
+					typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, signalNode))
 			}
 		}
 	} else {
@@ -824,12 +861,9 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
 			typeVal := v.getFieldValue(typeFields[0], signalNode)
 			if !isValidType(typeVal) {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					Position: typeFields[0].Raw.Position,
-					File:     v.getNodeFile(signalNode),
-				})
+				v.report(signalNode, "invalid_signal_type", LevelError,
+					fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
+					typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, signalNode))
 			}
 		}
 	}
@@ -854,16 +888,13 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			ctx := v.Schema.Context
 			typeVal := ctx.CompileString(typeStr)
 			if typeVal.Err() == nil {
-				valInterface := v.valueToInterface(valField[0].Value, signalNode)
+				valInterface := v.ValueToInterface(valField[0].Value, signalNode)
 				valVal := ctx.Encode(valInterface)
 				res := typeVal.Unify(valVal)
 				if err := res.Validate(cue.Concrete(true)); err != nil {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("Value initialization mismatch for signal '%s': %v", signalNode.RealName, err),
-						Position: valField[0].Raw.Position,
-						File:     v.getNodeFile(signalNode),
-					})
+					v.report(signalNode, "signal_value_mismatch", LevelError,
+						fmt.Sprintf("Value initialization mismatch for signal '%s': %v", signalNode.RealName, err),
+						valField[0].Raw.Position, v.getNodeFile(signalNode))
 				}
 			}
 		}
@@ -909,8 +940,8 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 			totalElements = 1
 			for _, elem := range arr.Elements {
 				if inner, ok := elem.(*parser.ArrayValue); ok && len(inner.Elements) == 2 {
-					start := v.valueToInterface(inner.Elements[0], node)
-					stop := v.valueToInterface(inner.Elements[1], node)
+					start := v.ValueToInterface(inner.Elements[0], node)
+					stop := v.ValueToInterface(inner.Elements[1], node)
 
 					var iStart, iStop int64
 					if s, ok := start.(int64); ok {
@@ -934,7 +965,7 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 		// Base elements calculation
 		numElements := int64(1)
 		if neFields, ok := fields["NumberOfElements"]; ok && len(neFields) > 0 {
-			val := v.valueToInterface(neFields[0].Value, node)
+			val := v.ValueToInterface(neFields[0].Value, node)
 			if i, ok := val.(int64); ok {
 				numElements = i
 			} else if i, ok := val.(int); ok {
@@ -942,7 +973,7 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 			}
 		} else if node.Target != nil {
 			if neFields, ok := node.Target.Fields["NumberOfElements"]; ok && len(neFields) > 0 {
-				val := v.valueToInterface(neFields[0].Value, node.Target)
+				val := v.ValueToInterface(neFields[0].Value, node.Target)
 				if i, ok := val.(int64); ok {
 					numElements = i
 				} else if i, ok := val.(int); ok {
@@ -957,7 +988,7 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 
 		numDimensions := int64(1)
 		if ndFields, ok := fields["NumberOfDimensions"]; ok && len(ndFields) > 0 {
-			val := v.valueToInterface(ndFields[0].Value, node)
+			val := v.ValueToInterface(ndFields[0].Value, node)
 			if i, ok := val.(int64); ok {
 				numDimensions = i
 			} else if i, ok := val.(int); ok {
@@ -965,7 +996,7 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 			}
 		} else if node.Target != nil {
 			if ndFields, ok := node.Target.Fields["NumberOfDimensions"]; ok && len(ndFields) > 0 {
-				val := v.valueToInterface(ndFields[0].Value, node.Target)
+				val := v.ValueToInterface(ndFields[0].Value, node.Target)
 				if i, ok := val.(int64); ok {
 					numDimensions = i
 				} else if i, ok := val.(int); ok {
@@ -982,7 +1013,7 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 
 	// 2. Check for Samples multiplier
 	if sampleFields, ok := fields["Samples"]; ok && len(sampleFields) > 0 {
-		val := v.valueToInterface(sampleFields[0].Value, node)
+		val := v.ValueToInterface(sampleFields[0].Value, node)
 		var samples int64
 		if i, ok := val.(int64); ok {
 			samples = i
@@ -1014,7 +1045,7 @@ func (v *Validator) validateByteSize(node *index.ProjectNode, fields map[string]
 
 	for _, fs := range sizeFields {
 		if len(fs) > 0 {
-			val := v.valueToInterface(fs[0].Value, node)
+			val := v.ValueToInterface(fs[0].Value, node)
 			var definedSize int64
 			if i, ok := val.(int64); ok {
 				definedSize = i
@@ -1025,12 +1056,9 @@ func (v *Validator) validateByteSize(node *index.ProjectNode, fields map[string]
 			}
 
 			if definedSize != expectedSize {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelError,
-					Message:  fmt.Sprintf("Size mismatch for signal '%s': defined %d, expected %d", node.RealName, definedSize, expectedSize),
-					Position: fs[0].Raw.Position,
-					File:     v.getNodeFile(node),
-				})
+				v.report(node, "signal_size_mismatch", LevelError,
+					fmt.Sprintf("Size mismatch for signal '%s': defined %d, expected %d", node.RealName, definedSize, expectedSize),
+					fs[0].Raw.Position, v.getNodeFile(node))
 			}
 		}
 	}
@@ -1067,12 +1095,9 @@ func (v *Validator) checkSignalProperty(gamSig, dsSig *index.ProjectNode, prop s
 			}
 		}
 
-		v.Diagnostics = append(v.Diagnostics, Diagnostic{
-			Level:    LevelError,
-			Message:  fmt.Sprintf("Signal '%s' property '%s' mismatch: defined '%s', referenced '%s'", gamSig.RealName, prop, dsVal, gamVal),
-			Position: v.getNodePosition(gamSig),
-			File:     v.getNodeFile(gamSig),
-		})
+		v.report(gamSig, "signal_property_mismatch", LevelError,
+			fmt.Sprintf("Signal '%s' property '%s' mismatch: defined '%s', referenced '%s'", gamSig.RealName, prop, dsVal, gamVal),
+			v.getNodePosition(gamSig), v.getNodeFile(gamSig))
 	}
 }
 
@@ -1120,7 +1145,7 @@ func (v *Validator) getFields(node *index.ProjectNode) map[string][]index.Evalua
 }
 
 func (v *Validator) getFieldValue(f index.EvaluatedField, ctx *index.ProjectNode) string {
-	res := v.valueToInterface(f.Value, ctx)
+	res := v.ValueToInterface(f.Value, ctx)
 	if res == nil {
 		return ""
 	}
@@ -1201,23 +1226,9 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 	// Heuristic for GAM
 	if isGAM(node) {
 		if !referenced[node] {
-			suppress := v.isGloballyAllowed("unused", v.getNodeFile(node))
-			if !suppress {
-				for _, p := range node.Pragmas {
-					if strings.HasPrefix(p, "unused:") || strings.HasPrefix(p, "ignore(unused)") {
-						suppress = true
-						break
-					}
-				}
-			}
-			if !suppress {
-				v.Diagnostics = append(v.Diagnostics, Diagnostic{
-					Level:    LevelWarning,
-					Message:  fmt.Sprintf("Unused GAM: %s is defined but not referenced in any thread or scheduler", node.RealName),
-					Position: v.getNodePosition(node),
-					File:     v.getNodeFile(node),
-				})
-			}
+			v.report(node, "unused_gam", LevelWarning,
+				fmt.Sprintf("Unused GAM: %s is defined but not referenced in any thread or scheduler", node.RealName),
+				v.getNodePosition(node), v.getNodeFile(node))
 		}
 	}
 
@@ -1226,24 +1237,9 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 		if signalsNode, ok := node.Children["Signals"]; ok {
 			for _, signal := range signalsNode.Children {
 				if !referenced[signal] {
-					if v.isGloballyAllowed("unused", v.getNodeFile(signal)) {
-						continue
-					}
-					suppress := false
-					for _, p := range signal.Pragmas {
-						if strings.HasPrefix(p, "unused:") || strings.HasPrefix(p, "ignore(unused)") {
-							suppress = true
-							break
-						}
-					}
-					if !suppress {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelWarning,
-							Message:  fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
-							Position: v.getNodePosition(signal),
-							File:     v.getNodeFile(signal),
-						})
-					}
+					v.report(signal, "unused_signal", LevelWarning,
+						fmt.Sprintf("Unused Signal: %s is defined in DataSource %s but never referenced", signal.RealName, node.RealName),
+						v.getNodePosition(signal), v.getNodeFile(signal))
 				}
 			}
 		}
@@ -1302,20 +1298,14 @@ func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[stri
 				if ref, ok := elem.(*parser.ReferenceValue); ok {
 					target := v.resolveReference(ref.Value, node, isGAM)
 					if target == nil {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelError,
-							Message:  fmt.Sprintf("Function '%s' not found or is not a valid GAM", ref.Value),
-							Position: ref.Position,
-							File:     v.getNodeFile(node),
-						})
+						v.report(node, "invalid_function", LevelError,
+							fmt.Sprintf("Function '%s' not found or is not a valid GAM", ref.Value),
+							ref.Position, v.getNodeFile(node))
 					}
 				} else {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  "Functions array must contain references",
-						Position: f.Raw.Position,
-						File:     v.getNodeFile(node),
-					})
+					v.report(node, "invalid_function", LevelError,
+						"Functions array must contain references",
+						f.Raw.Position, v.getNodeFile(node))
 				}
 			}
 		}
@@ -1421,12 +1411,9 @@ func (v *Validator) checkAppDataSourceThreading(ctx context.Context, appNode *in
 					if existingThread, ok := dsUsage[ds]; ok {
 						if existingThread != thread.RealName {
 							if !v.isMultithreaded(ds) {
-								v.Diagnostics = append(v.Diagnostics, Diagnostic{
-									Level:    LevelError,
-									Message:  fmt.Sprintf("DataSource '%s' is not multithreaded but used in multiple threads (%s, %s) in state '%s'", ds.RealName, existingThread, thread.RealName, state.RealName),
-									Position: v.getNodePosition(gam),
-									File:     v.getNodeFile(gam),
-								})
+								v.report(gam, "datasource_threading", LevelError,
+									fmt.Sprintf("DataSource '%s' is not multithreaded but used in multiple threads (%s, %s) in state '%s'", ds.RealName, existingThread, thread.RealName, state.RealName),
+									v.getNodePosition(gam), v.getNodeFile(gam))
 							}
 						}
 					} else {
@@ -1535,7 +1522,6 @@ func (v *Validator) checkAppINOUTOrdering(ctx context.Context, appNode *index.Pr
 		return
 	}
 
-	suppress := v.isGloballyAllowed("not_consumed", v.getNodeFile(appNode))
 	for _, state := range statesNode.Children {
 		var threads []*index.ProjectNode
 		for _, child := range state.Children {
@@ -1561,34 +1547,20 @@ func (v *Validator) checkAppINOUTOrdering(ctx context.Context, appNode *index.Pr
 				v.processGAMSignalsForOrdering(gam, "InputSignals", producedSignals, consumedSignals, true, thread, state)
 				v.processGAMSignalsForOrdering(gam, "OutputSignals", producedSignals, consumedSignals, false, thread, state)
 			}
-			if !suppress {
-				// Check for produced but not consumed
-				for ds, signals := range producedSignals {
-					for sigName, producers := range signals {
-						consumed := false
-						if cSet, ok := consumedSignals[ds]; ok {
-							if cSet[sigName] {
-								consumed = true
-							}
+			// Check for produced but not consumed
+			for ds, signals := range producedSignals {
+				for sigName, producers := range signals {
+					consumed := false
+					if cSet, ok := consumedSignals[ds]; ok {
+						if cSet[sigName] {
+							consumed = true
 						}
-						if !consumed {
-							for _, prod := range producers {
-								locally_suppressed := false
-								for _, p := range prod.Pragmas {
-									if strings.HasPrefix(p, "not_consumed:") || strings.HasPrefix(p, "ignore(not_consumed)") {
-										locally_suppressed = true
-										break
-									}
-								}
-								if !locally_suppressed {
-									v.Diagnostics = append(v.Diagnostics, Diagnostic{
-										Level:    LevelWarning,
-										Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
-										Position: v.getNodePosition(prod),
-										File:     v.getNodeFile(prod),
-									})
-								}
-							}
+					}
+					if !consumed {
+						for _, prod := range producers {
+							v.report(prod, "not_consumed", LevelWarning,
+								fmt.Sprintf("INOUT Signal '%s' (DS '%s') is produced in thread '%s' but never consumed in the same thread.", sigName, ds.RealName, thread.RealName),
+								v.getNodePosition(prod), v.getNodeFile(prod))
 						}
 					}
 				}
@@ -1602,7 +1574,6 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 	if container == nil {
 		return
 	}
-	not_produced_suppress := v.isGloballyAllowed("not_produced", v.getNodeFile(gam))
 	for _, sig := range container.Children {
 		fields := v.getFields(sig)
 		var dsNode *index.ProjectNode
@@ -1651,31 +1622,19 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 				produced[dsNode][sigName] = append(produced[dsNode][sigName], sig)
 			}
 
-			if !not_produced_suppress {
-				isProduced := false
-				if set, ok := produced[dsNode]; ok {
-					if len(set[sigName]) > 0 {
-						isProduced = true
-					}
+			isProduced := false
+			if set, ok := produced[dsNode]; ok {
+				if len(set[sigName]) > 0 {
+					isProduced = true
 				}
-				locally_suppressed := false
-				for _, p := range sig.Pragmas {
-					if strings.HasPrefix(p, "not_produced:") || strings.HasPrefix(p, "ignore(not_produced)") {
-						locally_suppressed = true
-						break
-					}
-				}
-
-				if !isProduced && !locally_suppressed {
-					v.Diagnostics = append(v.Diagnostics, Diagnostic{
-						Level:    LevelError,
-						Message:  fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
-						Position: v.getNodePosition(sig),
-						File:     v.getNodeFile(sig),
-					})
-				}
-
 			}
+
+			if !isProduced {
+				v.report(sig, "not_produced", LevelError,
+					fmt.Sprintf("INOUT Signal '%s' (DS '%s') is consumed by GAM '%s' in thread '%s' (State '%s') before being produced by any previous GAM.", sigName, dsNode.RealName, gam.RealName, thread.RealName, state.RealName),
+					v.getNodePosition(sig), v.getNodeFile(sig))
+			}
+
 			if consumed[dsNode] == nil {
 				consumed[dsNode] = make(map[string]bool)
 			}
@@ -1786,12 +1745,9 @@ func (v *Validator) CheckSignalConsistency(ctx context.Context) {
 					firstNode = u
 				} else {
 					if typeVal != firstType {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:   LevelError,
-							Message: fmt.Sprintf("Signal Type Mismatch: Signal '%s' (in DS '%s') is defined as '%s' in '%s' but as '%s' in '%s'", sigName, ds.RealName, firstType, firstNode.Parent.Parent.RealName, typeVal, u.Parent.Parent.RealName),
-							Position: v.getNodePosition(u),
-							File:     v.getNodeFile(u),
-						})
+						v.report(u, "signal_type_mismatch", LevelError,
+							fmt.Sprintf("Signal Type Mismatch: Signal '%s' (in DS '%s') is defined as '%s' in '%s' but as '%s' in '%s'", sigName, ds.RealName, firstType, firstNode.Parent.Parent.RealName, typeVal, u.Parent.Parent.RealName),
+							v.getNodePosition(u), v.getNodeFile(u))
 					}
 				}
 			}
@@ -1814,50 +1770,38 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 			for _, def := range frag.Definitions {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if prevPos, exists := seen[vdef.Name]; exists {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelError,
-							Message:  fmt.Sprintf("Duplicate variable definition: '%s' was already defined at %d:%d", vdef.Name, prevPos.Line, prevPos.Column),
-							Position: vdef.Position,
-							File:     frag.File,
-						})
+						v.report(node, "duplicate_variable", LevelError,
+							fmt.Sprintf("Duplicate variable definition: '%s' was already defined at %d:%d", vdef.Name, prevPos.Line, prevPos.Column),
+							vdef.Position, frag.File)
 					}
 					seen[vdef.Name] = vdef.Position
 
 					if vdef.IsConst && vdef.DefaultValue == nil {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelError,
-							Message:  fmt.Sprintf("Constant variable '%s' must have an initial value", vdef.Name),
-							Position: vdef.Position,
-							File:     frag.File,
-						})
+						v.report(node, "missing_variable_value", LevelError,
+							fmt.Sprintf("Constant variable '%s' must have an initial value", vdef.Name),
+							vdef.Position, frag.File)
 						continue
 					}
 
 					// Compile Type
 					typeVal := ctx_cue.CompileString(vdef.TypeExpr)
 					if typeVal.Err() != nil {
-						v.Diagnostics = append(v.Diagnostics, Diagnostic{
-							Level:    LevelError,
-							Message:  fmt.Sprintf("Invalid type expression for variable '%s': %v", vdef.Name, typeVal.Err()),
-							Position: vdef.Position,
-							File:     frag.File,
-						})
+						v.report(node, "invalid_variable_type", LevelError,
+							fmt.Sprintf("Invalid type expression for variable '%s': %v", vdef.Name, typeVal.Err()),
+							vdef.Position, frag.File)
 						continue
 					}
 
 					if vdef.DefaultValue != nil {
-						valInterface := v.valueToInterface(vdef.DefaultValue, node)
+						valInterface := v.ValueToInterface(vdef.DefaultValue, node)
 						valVal := ctx_cue.Encode(valInterface)
 
 						// Unify
 						res := typeVal.Unify(valVal)
 						if err := res.Validate(cue.Concrete(true)); err != nil {
-							v.Diagnostics = append(v.Diagnostics, Diagnostic{
-								Level:    LevelError,
-								Message:  fmt.Sprintf("Variable '%s' value mismatch: %v", vdef.Name, err),
-								Position: vdef.Position,
-								File:     frag.File,
-							})
+							v.report(node, "variable_value_mismatch", LevelError,
+								fmt.Sprintf("Variable '%s' value mismatch: %v", vdef.Name, err),
+								vdef.Position, frag.File)
 						}
 					}
 				}
@@ -1873,12 +1817,9 @@ func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
 			return
 		}
 		if ref.IsVariable && ref.TargetVariable == nil {
-			v.Diagnostics = append(v.Diagnostics, Diagnostic{
-				Level:    LevelError,
-				Message:  fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
-				Position: ref.Position,
-				File:     ref.File,
-			})
+			v.report(nil, "unresolved_variable", LevelError,
+				fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
+				ref.Position, ref.File)
 		}
 	}
 }

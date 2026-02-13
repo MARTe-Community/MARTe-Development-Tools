@@ -81,9 +81,10 @@ func (s *Session) CreateView(id, root string) *View {
 	}
 	// Initialize empty snapshot
 	v.snapshot.Store(&Snapshot{
-		view:      v,
-		tree:      index.NewProjectTree(),
-		documents: make(map[string]string),
+		view:         v,
+		tree:         index.NewProjectTree(),
+		documents:    make(map[string]string),
+		parserErrors: make(map[string][]error),
 	})
 	
 	s.views = append(s.views, v)
@@ -116,6 +117,7 @@ type Snapshot struct {
 	tree         *index.ProjectTree
 	schema       *schema.Schema
 	documents    map[string]string
+	parserErrors map[string][]error
 	refCount     sync.WaitGroup // To track active usages? (Simplified: Go GC handles memory, we just need consistency)
 }
 
@@ -131,6 +133,10 @@ func (s *Snapshot) Documents() map[string]string {
 	return s.documents
 }
 
+func (s *Snapshot) ParserErrors() map[string][]error {
+	return s.parserErrors
+}
+
 func (s *Snapshot) Schema() *schema.Schema {
 	return s.schema
 }
@@ -139,13 +145,17 @@ func (s *Snapshot) Schema() *schema.Schema {
 // This is used when modifying the state.
 func (s *Snapshot) Clone(ctx context.Context) *Snapshot {
 	newSnap := &Snapshot{
-		view:      s.view,
-		tree:      s.tree.Clone(), // This is the heavy part
-		schema:    s.schema,       // Schema is likely static or reloaded separately
-		documents: make(map[string]string),
+		view:         s.view,
+		tree:         s.tree.Clone(), // This is the heavy part
+		schema:       s.schema,       // Schema is likely static or reloaded separately
+		documents:    make(map[string]string),
+		parserErrors: make(map[string][]error),
 	}
 	for k, v := range s.documents {
 		newSnap.documents[k] = v
+	}
+	for k, v := range s.parserErrors {
+		newSnap.parserErrors[k] = v
 	}
 	return newSnap
 }
