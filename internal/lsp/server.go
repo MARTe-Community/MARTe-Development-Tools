@@ -375,6 +375,9 @@ func RunServer() {
 	
 	GlobalSession = cache.NewSession("default")
 
+	// Start Live Visualizer
+	StartVisualizer(8085)
+
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		msg, err := readMessage(reader)
@@ -614,6 +617,9 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences()
 		newSnap.Tree().ResolveFields()
+		if GlobalVisualizer != nil {
+			GlobalVisualizer.SetTree(newSnap.Tree())
+		}
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	} else {
@@ -661,6 +667,9 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences()
 		newSnap.Tree().ResolveFields()
+		if GlobalVisualizer != nil {
+			GlobalVisualizer.SetTree(newSnap.Tree())
+		}
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
 	} else {
@@ -974,6 +983,17 @@ func mustMarshal(v any) json.RawMessage {
 	return b
 }
 
+func updateVisualizer(tree *index.ProjectTree, path string, line, col int) {
+	if GlobalVisualizer == nil {
+		return
+	}
+	GlobalVisualizer.SetTree(tree)
+	container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+	if container != nil {
+		GlobalVisualizer.SetFocus(container)
+	}
+}
+
 func HandleHover(params HoverParams) *Hover {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
 	if view == nil { return nil }
@@ -983,6 +1003,8 @@ func HandleHover(params HoverParams) *Hover {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
+
+	updateVisualizer(tree, path, line, col)
 
 	res := tree.Query(path, line, col)
 	if res == nil {
@@ -1101,6 +1123,9 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	
 	uri := params.TextDocument.URI
 	path := uriToPath(uri)
+	
+	updateVisualizer(tree, path, params.Position.Line+1, params.Position.Character+1)
+
 	text, ok := snap.Documents()[uri]
 	if !ok {
 		return nil
@@ -1546,6 +1571,8 @@ func HandleDefinition(params DefinitionParams) any {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
+
+	updateVisualizer(tree, path, line, col)
 
 	res := tree.Query(path, line, col)
 	if res == nil {

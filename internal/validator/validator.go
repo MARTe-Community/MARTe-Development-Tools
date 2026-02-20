@@ -75,6 +75,24 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	return v
 }
 
+func (v *Validator) ensureActiveNodes() {
+	v.muActive.Lock()
+	if len(v.activeNodes) > 0 {
+		v.muActive.Unlock()
+		return
+	}
+	v.muActive.Unlock()
+
+	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
+	ctx := context.Background()
+	if v.Tree.Root != nil {
+		v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
+	}
+	for _, node := range v.Tree.IsolatedFiles {
+		v.collectActiveNodes(ctx, node, evalCtx)
+	}
+}
+
 func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
 	if ctx.Err() != nil {
 		return
@@ -140,12 +158,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
 
 	// Phase 1: Collect Active Nodes
-	if v.Tree.Root != nil {
-		v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
-	}
-	for _, node := range v.Tree.IsolatedFiles {
-		v.collectActiveNodes(ctx, node, evalCtx)
-	}
+	v.ensureActiveNodes()
 
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 4 {
@@ -1400,6 +1413,7 @@ func isValidType(t string) bool {
 }
 
 func (v *Validator) CheckUnused(ctx context.Context) {
+	v.ensureActiveNodes()
 	referencedNodes := make(map[*index.ProjectNode]bool)
 	for _, ref := range v.Tree.References {
 		if !v.isPositionActive(ref.File, ref.Position) {
@@ -1977,6 +1991,7 @@ func (v *Validator) CheckSignalConsistency(ctx context.Context) {
 }
 
 func (v *Validator) CheckVariables(ctx context.Context) {
+	v.ensureActiveNodes()
 	if v.Schema == nil {
 		return
 	}
@@ -2039,6 +2054,7 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 	v.Tree.Walk(checkNodeVars)
 }
 func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
+	v.ensureActiveNodes()
 	for _, ref := range v.Tree.References {
 		if ctx.Err() != nil {
 			return
