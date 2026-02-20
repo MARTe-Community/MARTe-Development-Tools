@@ -60,11 +60,10 @@ func fixComment(text string) string {
 }
 
 func (f *Formatter) formatConfig(config *parser.Configuration) {
-	lastLine := 0
 	if config.Package != nil {
-		f.flushCommentsBefore(config.Package.Position, 0, false) // Package comments usually detached unless specifically doc
+		f.flushCommentsBefore(config.Package.Position, 0, false)
 		fmt.Fprintf(f.writer, "#package %s", config.Package.URI)
-		lastLine = config.Package.Position.Line
+		lastLine := config.Package.Position.Line
 		if f.hasTrailingComment(lastLine) {
 			fmt.Fprintf(f.writer, " %s", f.popComment())
 		}
@@ -72,24 +71,7 @@ func (f *Formatter) formatConfig(config *parser.Configuration) {
 		fmt.Fprintln(f.writer)
 	}
 
-	for _, def := range config.Definitions {
-		pos := def.Pos()
-		peek := f.peekPosition()
-		if peek.Line > 0 && peek.Line < pos.Line {
-			pos = peek
-		}
-
-		if lastLine > 0 && pos.Line > lastLine+1 {
-			fmt.Fprintln(f.writer)
-		}
-
-		f.flushCommentsBefore(def.Pos(), 0, true) // Stick to definition
-		lastLine = f.formatDefinition(def, 0)
-		if f.hasTrailingComment(lastLine) {
-			fmt.Fprintf(f.writer, " %s", f.popComment())
-		}
-		fmt.Fprintln(f.writer)
-	}
+	f.formatBlock(config.Definitions, 0)
 
 	f.flushRemainingComments(0)
 }
@@ -126,16 +108,75 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 			return endLine
 		}
 		return d.Position.Line
+	case *parser.IfBlock:
+		fmt.Fprintf(f.writer, "%s#if ", indentStr)
+		f.formatValue(d.Condition, indent)
+		if f.hasTrailingComment(d.Position.Line) {
+			fmt.Fprintf(f.writer, " %s", f.popComment())
+		}
+		fmt.Fprintln(f.writer)
+		f.formatBlock(d.Then, indent+1)
+		if len(d.Else) > 0 {
+			fmt.Fprintf(f.writer, "%s#else\n", indentStr)
+			f.formatBlock(d.Else, indent+1)
+		}
+		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		return d.EndPosition.Line
+	case *parser.ForeachBlock:
+		fmt.Fprintf(f.writer, "%s#foreach ", indentStr)
+		if d.KeyVar != "" {
+			fmt.Fprintf(f.writer, "%s, ", d.KeyVar)
+		}
+		fmt.Fprintf(f.writer, "%s in ", d.ValueVar)
+		f.formatValue(d.Iterable, indent)
+		if f.hasTrailingComment(d.Position.Line) {
+			fmt.Fprintf(f.writer, " %s", f.popComment())
+		}
+		fmt.Fprintln(f.writer)
+		f.formatBlock(d.Body, indent+1)
+		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		return d.EndPosition.Line
+	case *parser.TemplateDefinition:
+		fmt.Fprintf(f.writer, "%s#template %s(", indentStr, d.Name)
+		for i, p := range d.Parameters {
+			if i > 0 {
+				fmt.Fprint(f.writer, ", ")
+			}
+			fmt.Fprintf(f.writer, "%s: %s", p.Name, p.TypeExpr)
+			if p.DefaultValue != nil {
+				fmt.Fprint(f.writer, " = ")
+				f.formatValue(p.DefaultValue, indent)
+			}
+		}
+		fmt.Fprint(f.writer, ")")
+		if f.hasTrailingComment(d.Position.Line) {
+			fmt.Fprintf(f.writer, " %s", f.popComment())
+		}
+		fmt.Fprintln(f.writer)
+		f.formatBlock(d.Body, indent+1)
+		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		return d.EndPosition.Line
+	case *parser.TemplateInstantiation:
+		fmt.Fprintf(f.writer, "%s#use %s %s(", indentStr, d.Template, d.Name)
+		for i, arg := range d.Arguments {
+			if i > 0 {
+				fmt.Fprint(f.writer, ", ")
+			}
+			fmt.Fprintf(f.writer, "%s = ", arg.Name)
+			f.formatValue(arg.Value, indent)
+		}
+		fmt.Fprint(f.writer, ")")
+		return d.Position.Line
 	}
 	return 0
 }
 
-func (f *Formatter) formatSubnode(sub parser.Subnode, indent int) {
-	lastLine := sub.Position.Line
-	for _, def := range sub.Definitions {
+func (f *Formatter) formatBlock(defs []parser.Definition, indent int) {
+	lastLine := 0
+	for _, def := range defs {
 		pos := def.Pos()
 		peek := f.peekPosition()
-		if peek.Line > 0 && peek.Line < pos.Line && peek.Line > lastLine {
+		if peek.Line > 0 && peek.Line < pos.Line && (lastLine == 0 || peek.Line > lastLine) {
 			pos = peek
 		}
 
@@ -143,14 +184,18 @@ func (f *Formatter) formatSubnode(sub parser.Subnode, indent int) {
 			fmt.Fprintln(f.writer)
 		}
 
-		f.flushCommentsBefore(def.Pos(), indent, true) // Stick to definition
+		f.flushCommentsBefore(def.Pos(), indent, true)
 		lastLine = f.formatDefinition(def, indent)
 		if f.hasTrailingComment(lastLine) {
 			fmt.Fprintf(f.writer, " %s", f.popComment())
 		}
 		fmt.Fprintln(f.writer)
 	}
-	f.flushCommentsBefore(sub.EndPosition, indent, false)
+}
+
+func (f *Formatter) formatSubnode(sub parser.Subnode, indent int) {
+	f.formatBlock(sub.Definitions, indent)
+	f.flushCommentsBefore(sub.EndPosition, indent-1, false)
 }
 
 func (f *Formatter) formatValue(val parser.Value, indent int) int {

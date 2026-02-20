@@ -196,6 +196,9 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int)
 	for _, name := range childNames {
 		if !written[name] {
 			child := node.Children[name]
+			if child.IsConditional {
+				continue
+			}
 			b.writeNodeContent(f, child, indent)
 		}
 	}

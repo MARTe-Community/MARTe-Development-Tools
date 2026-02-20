@@ -541,24 +541,29 @@ func (p *Parser) parseValue() (Value, bool) {
 
 func getPrecedence(t Token) int {
 	switch t.Type {
-	case TokenStar, TokenSlash, TokenPercent:
-		return 5
-	case TokenPlus, TokenMinus:
-		return 4
-	case TokenConcat:
-		return 3
 	case TokenSymbol:
-		if t.Value == "<" || t.Value == ">" || t.Value == "<=" || t.Value == ">=" || t.Value == "==" || t.Value == "!=" {
+		switch t.Value {
+		case "||":
+			return 1
+		case "&&":
 			return 2
+		case "==", "!=":
+			return 3
+		case "<", ">", "<=", ">=":
+			return 4
 		}
-		return 0
-	case TokenAmpersand:
-		return 1 // Bitwise AND
 	case TokenPipe, TokenCaret:
-		return 1 // Bitwise OR/XOR
-	default:
-		return 0
+		return 5 // Bitwise OR/XOR
+	case TokenAmpersand:
+		return 6 // Bitwise AND
+	case TokenPlus, TokenMinus:
+		return 7
+	case TokenStar, TokenSlash, TokenPercent:
+		return 8
+	case TokenConcat:
+		return 9
 	}
+	return 0
 }
 
 func (p *Parser) parseExpression(minPrecedence int) (Value, bool) {

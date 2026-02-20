@@ -8,97 +8,108 @@
 // 1. Template Definition
 // Defines a reusable DAQ Channel with parameters
 #template DAQChannel(ID: int, Gain: float = 1.0)
-    "+Channel_" .. @ID = {
-        Class = "AnalogInput"
-        Gain = @Gain
-        Offset = 0.0
-        Trigger = "Internal"
-    }
+  ("+Channel_" .. @ID) = {
+    Class = "AnalogInput"
+    Gain = @Gain
+    Offset = 0.0
+    Trigger = "Internal"
+  }
 #end
 
 // 2. Conditional and Loop usage
 +System = {
-    Class = "RealTimeApplication"
-    
-    +Data = {
-        Class = "ReferenceContainer"
-        DefaultDataSource = DDB
-        +DDB = {
-            Class = "GAMDataSource"
-            Signals = {
-                Status = { Type = uint32 }
-            }
+  Class = "RealTimeApplication"
+
+  +Data = {
+    Class = "ReferenceContainer"
+    DefaultDataSource = DDB
+    +DDB = {
+      Class = "GAMDataSource"
+      Signals = {
+        Status = {
+          Type = uint32
         }
-        +Logger = {
-            Class = LoggerDataSource
+      }
+    }
+    +Logger = {
+      Class = LoggerDataSource
+    }
+    +Timing = {
+      Class = TimingDataSource
+    }
+  }
+
+  +Hardware = {
+    Class = "ReferenceContainer"
+
+    // 3. For loop instantiation
+    // Automatically creates multiple channels based on NumChannels variable
+    #foreach ChIdx in { 1, 2, 3, 4 }
+      #if (@ChIdx <= @NumChannels)
+        #use DAQChannel Ch(ID = @ChIdx, Gain = (2.5 * @ChIdx))
+      #end
+    #end
+  }
+
+  +Functions = {
+    Class = "ReferenceContainer"
+
+    // 4. Conditional blocks
+    #if @EnableExtraDiagnostics
+      +DiagnosticGAM = {
+        Class = "IOGAM"
+        InputSignals = {
+          Status = {
+            DataSource = "DDB"
+            Type = "uint32"
+            Value = 1
+          }
         }
-        +Timing = {
-          Class = TimingDataSource
+        OutputSignals = {
+          StatusLog = {
+            DataSource = Logger
+            Type = uint32
+          }
         }
-    }
+      }
+    #else
+      +SimpleGAM = {
+        Class = "IOGAM"
+      }
+    #end
+  }
 
-    +Hardware = {
-        Class = "ReferenceContainer"
-
-        // 3. For loop instantiation
-        // Automatically creates multiple channels based on NumChannels variable
-        #foreach ChIdx in { 1 2 3 4 }
-            #if @ChIdx <= @NumChannels
-                #use DAQChannel Ch (ID = @ChIdx, Gain = 2.5 * @ChIdx)
-            #end
-        #end
-    }
-
-    +Functions = {
-        Class = "ReferenceContainer"
-
-        // 4. Conditional blocks
-        #if @EnableExtraDiagnostics
-            +DiagnosticGAM = {
-                Class = "IOGAM"
-                InputSignals = {
-                    Status = {
-                        DataSource = "DDB"
-                        Type = "uint32"
-                        Value = 1
-                    }
-                }
-                OutputSignals = {
-                   StatusLog = {
-                    DataSource = Logger
-                    Type = uint32
-                }
-                }
-            }
-        #else
-            +SimpleGAM = {
-                Class = "IOGAM"
-            }
-        #end
-    }
-
-    +States = {
-        Class = "ReferenceContainer"
-        +State1 = {
-            Class = "RealTimeState"
-            Threads = {
-                +Thread1 = {
-                    Class = "RealTimeThread"
-                    #if @EnableExtraDiagnostics
-                        Functions = { DiagnosticGAM }
-                    #else
-                        Functions = { SimpleGAM }
-                    #end
-                }
-            }
+  +States = {
+    Class = "ReferenceContainer"
+    +State1 = {
+      Class = "RealTimeState"
+      Threads = {
+        +Thread1 = {
+          Class = "RealTimeThread"
+          #if @EnableExtraDiagnostics
+            Functions = { DiagnosticGAM }
+          #else
+            Functions = { SimpleGAM }
+          #end
         }
+      }
     }
+  }
 
-    +Scheduler = {
-        Class = "GAMScheduler"
-        TimingDataSource = Timing
-    }
+  +Scheduler = {
+    Class = "GAMScheduler"
+    TimingDataSource = Timing
+  }
 }
 
 // 5. Direct Template usage outside a container
-#use DAQChannel MasterClock (ID = 0, Gain = 1.0)
+#use DAQChannel MasterClock(ID = 0, Gain = 1.0)
+#var x: bool = false
+
+#if @x
+  +T = {
+    Class = ReferenceContainer
+  }
+#end
+
+x = T

@@ -140,9 +140,10 @@ type ProjectNode struct {
 	Parent    *ProjectNode
 	Metadata  map[string]string // Store extra info like Class, Type, Size
 	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
-	Pragmas   []string
-	Variables map[string]VariableInfo
-	Fields    map[string][]EvaluatedField
+	Pragmas       []string
+	Variables     map[string]VariableInfo
+	Fields        map[string][]EvaluatedField
+	IsConditional bool
 }
 
 type EvaluatedField struct {
@@ -697,16 +698,18 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
-					Name:      norm,
-					RealName:  objName,
-					Children:  make(map[string]*ProjectNode),
-					Parent:    node,
-					Metadata:  make(map[string]string),
-					Variables: make(map[string]VariableInfo),
-					Fields:    make(map[string][]EvaluatedField),
+					Name:          norm,
+					RealName:      objName,
+					Children:      make(map[string]*ProjectNode),
+					Parent:        node,
+					Metadata:      make(map[string]string),
+					Variables:     make(map[string]VariableInfo),
+					Fields:        make(map[string][]EvaluatedField),
+					IsConditional: true,
 				}
 			}
 			child := node.Children[norm]
+			child.IsConditional = true
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -999,6 +1002,8 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 				}
 				result = append(result, EvaluatedDefinition{Def: obj, Ctx: templateCtx, File: file})
 			}
+		case *parser.TemplateDefinition:
+			// Skip template definitions during evaluation
 		case *parser.VariableDefinition:
 			if d.DefaultValue != nil {
 				ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
@@ -1307,12 +1312,17 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 	}
 
 	for _, frag := range node.Fragments {
-		if frag.File == file && frag.IsObject {
-			start := frag.ObjectPos
-			end := frag.EndPos
+		if frag.File == file {
+			if frag.IsObject {
+				start := frag.ObjectPos
+				end := frag.EndPos
 
-			if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
-				(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
+				if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
+					(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
+					return node
+				}
+			} else {
+				// Package-level fragment matches if not inside any child object
 				return node
 			}
 		}
