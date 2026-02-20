@@ -168,10 +168,10 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 	// 1. Check for duplicate fields (Go logic)
 	for name, defs := range fields {
 		if len(defs) > 1 {
-			firstFile := v.getFileForField(defs[0].Raw, node)
+			firstFile := defs[0].File
 			v.report(node, "duplicate_field", LevelError,
 				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
-				defs[1].Raw.Position, v.getFileForField(defs[1].Raw, node))
+				defs[1].Raw.Position, defs[1].File)
 		}
 	}
 
@@ -251,7 +251,7 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 	default:
 		v.report(node, "invalid_class_field", LevelError,
 			fmt.Sprintf("Class field must be a string (quoted or identifier), got %T", f.Value),
-			f.Raw.Position, v.getFileForField(f.Raw, node))
+			f.Raw.Position, f.File)
 		return
 	}
 
@@ -269,7 +269,7 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 			// Unknown Class
 			v.report(node, "unknown_class", LevelWarning,
 				fmt.Sprintf("Unknown Class '%s'", className),
-				f.Raw.Position, v.getFileForField(f.Raw, node))
+				f.Raw.Position, f.File)
 		}
 	}
 }
@@ -285,20 +285,19 @@ func (v *Validator) validateTypeField(f index.EvaluatedField, node *index.Projec
 	default:
 		v.report(node, "invalid_type_field", LevelError,
 			fmt.Sprintf("Type field must be a valid type string, got %T", f.Value),
-			f.Raw.Position, v.getFileForField(f.Raw, node))
+			f.Raw.Position, f.File)
 		return
 	}
 
 	if !isValidType(typeName) {
 		v.report(node, "invalid_type", LevelError,
 			fmt.Sprintf("Invalid Type '%s'", typeName),
-			f.Raw.Position, v.getFileForField(f.Raw, node))
+			f.Raw.Position, f.File)
 	}
 }
 
 func (v *Validator) validateGenericField(f index.EvaluatedField, node *index.ProjectNode) {
-	file := v.getFileForField(f.Raw, node)
-	v.validateValue(f.Value, node, file)
+	v.validateValue(f.Value, node, f.File)
 }
 
 func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, file string) {
@@ -707,14 +706,14 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 		default:
 			v.report(node, "invalid_signal_type", LevelError,
 				fmt.Sprintf("Field 'Type' in Signal '%s' must be a type name", node.RealName),
-				typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, node))
+				typeFields[0].Raw.Position, typeFields[0].File)
 			return
 		}
 
 		if !isValidType(typeStr) {
 			v.report(node, "invalid_signal_type", LevelError,
 				fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeStr, node.RealName),
-				typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, node))
+				typeFields[0].Raw.Position, typeFields[0].File)
 		}
 	}
 	
@@ -832,7 +831,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			if !isValidType(typeVal) {
 				v.report(signalNode, "invalid_signal_type", LevelError,
 					fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, signalNode))
+					typeFields[0].Raw.Position, typeFields[0].File)
 			}
 		}
 	} else {
@@ -863,7 +862,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			if !isValidType(typeVal) {
 				v.report(signalNode, "invalid_signal_type", LevelError,
 					fmt.Sprintf("Invalid Type '%s' for Signal '%s'", typeVal, signalNode.RealName),
-					typeFields[0].Raw.Position, v.getFileForField(typeFields[0].Raw, signalNode))
+					typeFields[0].Raw.Position, typeFields[0].File)
 			}
 		}
 	}
@@ -1174,17 +1173,6 @@ func isValidType(t string) bool {
 		return true
 	}
 	return false
-}
-
-func (v *Validator) getFileForField(f *parser.Field, node *index.ProjectNode) string {
-	for _, frag := range node.Fragments {
-		for _, def := range frag.Definitions {
-			if def == f {
-				return frag.File
-			}
-		}
-	}
-	return ""
 }
 
 func (v *Validator) CheckUnused(ctx context.Context) {

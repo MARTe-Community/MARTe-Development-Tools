@@ -52,13 +52,19 @@ The LSP server should provide the following capabilities:
     - Auto-inserts: `SIGNAL_NAME = { DataSource = DATASOURCE_NAME }`.
 - **Rename Symbol**: Rename an object, field, or reference across the entire project scope.
   - Supports renaming of Definitions (`+Name` or `Name`), preserving any modifiers (`+`/`$`).
+  - Supports renaming of loop variables (`#foreach`) and template parameters (`#template`).
   - Updates all references to the renamed symbol, including qualified references (e.g., `Pkg.Name`).
 - **Inlay Hints**: Provide real-time contextual information inline.
   - **Signal Metadata**: Displays `::TYPE[ELEMENTSxDIMENSIONS]` next to signal names.
   - **Object Class**: Displays `CLASS::` before object references.
   - **Evaluation**: Displays results of expressions (` => RESULT`) and variable references (`(=> VALUE)`).
-- **Code Snippets**: Provide snippets for common patterns (e.g., `+Object = { ... }`).
-- **Formatting**: Format the document using the same rules and engine as the `fmt` command.
+  - **Loop Progress**: Displays loop variable values in `#foreach` blocks.
+- **Diagnostics**:
+  - Validates `#if` conditions and `#foreach` arrays.
+  - Checks for template parameter count and type mismatches during `#use`.
+  - Ensures static object name consistency within logical blocks.
+- **Code Snippets**: Provide snippets for common patterns (e.g., `+Object = { ... }`, `#if`, `#foreach`, `#template`).
+- **Formatting**: Format the document using the same rules and engine as the `fmt` command. Supports proper indentation for nested logic blocks.
 
 ## Build System & File Structure
 
@@ -88,16 +94,16 @@ The LSP server should provide the following capabilities:
 - `comment` : `//.*`
 - `configuration`: `(definition | macro)+`
 - `definition`: `field = value | node = subnode`
-- `macro`: `package | variable | constant`
+- `macro`: `package | variable | constant | if_block | foreach_block | template_def | template_use`
 - `field`: `[a-zA-Z][a-zA-Z0-9_\-]*`
-- `node`: `[+$][a-zA-Z][a-zA-Z0-9_\-]*`
+- `node`: `[+$][a-zA-Z][a-zA-Z0-9_\-]* | expression`
 - `subnode`: `{ (definition | macro)+ }`
 - `value`: `expression`
 - `expression`: `atom | binary_expr | unary_expr`
 - `atom`: `string | int | float | bool | reference | array | "(" expression ")"`
 - `binary_expr`: `expression operator expression`
 - `unary_expr`: `unary_operator expression`
-- `operator`: `+ | - | * | / | % | & | | | ^ | ..`
+- `operator`: `+ | - | * | / | % | & | | | ^ | .. | < | > | <= | >= | == | !=`
 - `unary_operator`: `- | !`
 - `int`: `/-?[0-9]+|0b[01]+|0x[0-9a-fA-F]+`
 - `float`: `-?[0-9]+\.[0-9]+|-?[0-9]+\.?[0-9]*[eE][+-]?[0-9]+`
@@ -111,6 +117,14 @@ The LSP server should provide the following capabilities:
 - `package` : `#package URI`
 - `variable`: `#var NAME: TYPE [= expression]`
 - `constant`: `#let NAME: TYPE = expression`
+- `if_block`: `#if expression configuration [#else configuration] #end`
+- `foreach_block`: `#foreach NAME in expression configuration #end`
+- `template_def`: `#template NAME "(" [param_list] ")" configuration #end`
+- `template_use`: `#use TEMPLATE_NAME INSTANCE_NAME "(" [arg_list] ")"`
+- `param_list`: `param ["," param_list]`
+- `param`: `NAME ":" TYPE ["=" expression]`
+- `arg_list`: `arg ["," arg_list]`
+- `arg`: `NAME "=" expression`
 - `URI`: `PROJECT | PROJECT.PRJ_SUB_URI`
 - `PRJ_SUB_URI`: `NODE | NODE.PRJ_SUB_URI`
 - `docstring` : `//#.*`
@@ -123,8 +137,12 @@ The LSP server should provide the following capabilities:
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
 - **Variables (`#var`)**: Define overrideable parameters. Can be overridden via CLI (`-vVAR=VAL`).
 - **Constants (`#let`)**: Define fixed parameters. **Cannot** be overridden externally. Must have an initial value.
-- **Expressions**: Evaluated during build and displayed evaluated in LSP hover documentation.
-- **Docstrings (`//#`)**: Associated with the following definition (Node, Field, Variable, or Constant).
+- **Conditional Blocks (`#if`)**: Code within the `#if` or `#else` blocks is conditionally processed during build and indexed by the LSP.
+- **Loops (`#foreach`)**: Iterates over an array value. The loop variable is locally scoped within the block.
+- **Templates (`#template`)**: Define reusable configuration blocks with parameters.
+- **Template Instantiation (`#use`)**: Instantiates a template with specific arguments. The `INSTANCE_NAME` is used as a local namespace for the template's output.
+- **Expressions**: Evaluated during build and displayed evaluated in LSP hover documentation. Supports dynamic node names via string concatenation and evaluation.
+- **Docstrings (`//#`)**: Associated with the following definition (Node, Field, Variable, Constant, or Template).
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored. Supported pragmas:
   - `//!unused: REASON` or `//!ignore(unused): REASON` - Suppress "Unused GAM" or "Unused Signal" warnings.
   - `//!implicit: REASON` or `//!ignore(implicit): REASON` - Suppress "Implicitly Defined Signal" warnings.

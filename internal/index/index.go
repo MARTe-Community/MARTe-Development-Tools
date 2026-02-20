@@ -147,6 +147,7 @@ type ProjectNode struct {
 type EvaluatedField struct {
 	Raw   *parser.Field
 	Value parser.Value
+	File  string
 }
 
 type Fragment struct {
@@ -263,7 +264,7 @@ func (pt *ProjectTree) removeFileFromNode(node *ProjectNode, file string) {
 			switch d := def.(type) {
 			case *parser.Field:
 				pt.extractFieldMetadata(node, d)
-				node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
+				node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: frag.File})
 			case *parser.VariableDefinition:
 				node.Variables[d.Name] = VariableInfo{
 					Def:  d,
@@ -442,7 +443,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
 			pt.IndexValue(file, d.Value)
-			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
+			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: file})
 		case *parser.VariableDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
@@ -450,6 +451,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
+			pt.IndexExpressionVariables(file, d.Name)
 			objName := pt.valToString(d.Name)
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
@@ -481,6 +483,51 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			}
 
 			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas)
+		case *parser.IfBlock:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.IndexValue(file, d.Condition)
+			pt.indexNestedDefinitions(node, file, d.Then, config.Comments, config.Pragmas)
+			pt.indexNestedDefinitions(node, file, d.Else, config.Comments, config.Pragmas)
+		case *parser.ForeachBlock:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.IndexValue(file, d.Iterable)
+			// Add loop variables to index
+			if d.KeyVar != "" {
+				node.Variables[d.KeyVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
+					File: file,
+				}
+			}
+			if d.ValueVar != "" {
+				node.Variables[d.ValueVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.ValueVar, Position: d.Position, TypeExpr: "loop value"},
+					File: file,
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas)
+		case *parser.TemplateDefinition:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			// Template params
+			for _, p := range d.Parameters {
+				node.Variables[p.Name] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
+					File: file,
+				}
+				if p.DefaultValue != nil {
+					pt.IndexValue(file, p.DefaultValue)
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas)
+		case *parser.TemplateInstantiation:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+				Name:     d.Template,
+				Position: d.Position,
+				File:     file,
+			})
+			for _, arg := range d.Arguments {
+				pt.IndexValue(file, arg.Value)
+			}
 		default:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 		}
@@ -513,7 +560,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			frag.DefinitionDocs[d] = subDoc
 			pt.IndexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
-			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value})
+			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: file})
 		case *parser.VariableDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
@@ -521,6 +568,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
+			pt.IndexExpressionVariables(file, d.Name)
 			objName := pt.valToString(d.Name)
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
@@ -552,12 +600,143 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			}
 
 			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas)
+		case *parser.IfBlock:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.IndexValue(file, d.Condition)
+			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas)
+		case *parser.ForeachBlock:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.IndexValue(file, d.Iterable)
+			if d.KeyVar != "" {
+				node.Variables[d.KeyVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
+					File: file,
+				}
+			}
+			if d.ValueVar != "" {
+				node.Variables[d.ValueVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.ValueVar, Position: d.Position, TypeExpr: "loop value"},
+					File: file,
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+		case *parser.TemplateDefinition:
+			frag.Definitions = append(frag.Definitions, d)
+			for _, p := range d.Parameters {
+				node.Variables[p.Name] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
+					File: file,
+				}
+				if p.DefaultValue != nil {
+					pt.IndexValue(file, p.DefaultValue)
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+		case *parser.TemplateInstantiation:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+				Name:     d.Template,
+				Position: d.Position,
+				File:     file,
+			})
+			for _, arg := range d.Arguments {
+				pt.IndexValue(file, arg.Value)
+			}
 		default:
 			frag.Definitions = append(frag.Definitions, d)
 		}
 	}
 
 	node.Fragments = append(node.Fragments, frag)
+}
+
+func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, defs []parser.Definition, comments []parser.Comment, pragmas []parser.Pragma) {
+	for _, def := range defs {
+		doc := pt.findDoc(comments, def.Pos())
+		subPragmas := pt.findPragmas(pragmas, def.Pos())
+
+		switch d := def.(type) {
+		case *parser.Field:
+			pt.IndexValue(file, d.Value)
+			pt.extractFieldMetadata(node, d)
+			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: file})
+		case *parser.VariableDefinition:
+			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
+		case *parser.ObjectNode:
+			pt.IndexExpressionVariables(file, d.Name)
+			objName := pt.valToString(d.Name)
+			norm := NormalizeName(objName)
+			if _, ok := node.Children[norm]; !ok {
+				node.Children[norm] = &ProjectNode{
+					Name:      norm,
+					RealName:  objName,
+					Children:  make(map[string]*ProjectNode),
+					Parent:    node,
+					Metadata:  make(map[string]string),
+					Variables: make(map[string]VariableInfo),
+					Fields:    make(map[string][]EvaluatedField),
+				}
+			}
+			child := node.Children[norm]
+			if child.RealName == norm && objName != norm {
+				child.RealName = objName
+			}
+			pt.addToNodeMap(child)
+
+			if doc != "" {
+				if child.Doc != "" {
+					child.Doc += "\n\n"
+				}
+				child.Doc += doc
+			}
+
+			if len(subPragmas) > 0 {
+				child.Pragmas = append(child.Pragmas, subPragmas...)
+			}
+
+			pt.addObjectFragment(child, file, d, doc, comments, pragmas)
+		case *parser.IfBlock:
+			pt.IndexValue(file, d.Condition)
+			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas)
+		case *parser.ForeachBlock:
+			pt.IndexValue(file, d.Iterable)
+			if d.KeyVar != "" {
+				node.Variables[d.KeyVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
+					File: file,
+				}
+			}
+			if d.ValueVar != "" {
+				node.Variables[d.ValueVar] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: d.ValueVar, Position: d.Position, TypeExpr: "loop value"},
+					File: file,
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+		case *parser.TemplateDefinition:
+			for _, p := range d.Parameters {
+				node.Variables[p.Name] = VariableInfo{
+					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
+					File: file,
+				}
+				if p.DefaultValue != nil {
+					pt.IndexValue(file, p.DefaultValue)
+				}
+			}
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+		case *parser.TemplateInstantiation:
+			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+				Name:     d.Template,
+				Position: d.Position,
+				File:     file,
+			})
+			for _, arg := range d.Arguments {
+				pt.IndexValue(file, arg.Value)
+			}
+		}
+	}
 }
 
 func (pt *ProjectTree) findDoc(comments []parser.Comment, pos parser.Position) string {
@@ -651,6 +830,30 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 	case *parser.ArrayValue:
 		for _, elem := range v.Elements {
 			pt.IndexValue(file, elem)
+		}
+	}
+}
+
+func (pt *ProjectTree) IndexExpressionVariables(file string, val parser.Value) {
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(v.Name, "@")
+		ref := Reference{
+			Name:       name,
+			Position:   v.Position,
+			File:       file,
+			IsVariable: true,
+		}
+		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
+		pt.References = append(pt.References, ref)
+	case *parser.BinaryExpression:
+		pt.IndexExpressionVariables(file, v.Left)
+		pt.IndexExpressionVariables(file, v.Right)
+	case *parser.UnaryExpression:
+		pt.IndexExpressionVariables(file, v.Right)
+	case *parser.ArrayValue:
+		for _, e := range v.Elements {
+			pt.IndexExpressionVariables(file, e)
 		}
 	}
 }
