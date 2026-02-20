@@ -128,6 +128,7 @@ type Reference struct {
 	File           string
 	Target         *ProjectNode
 	TargetVariable *parser.VariableDefinition
+	TargetTemplate *parser.TemplateDefinition
 	IsVariable     bool
 }
 
@@ -185,6 +186,8 @@ type Fragment struct {
 	Doc            string // Documentation for this fragment (if object)
 	Pragmas        []string
 	DefinitionDocs map[parser.Definition]string
+	IsConditional  bool
+	Source         *parser.ObjectNode
 }
 
 func NewProjectTree() *ProjectTree {
@@ -438,6 +441,9 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 }
 
 func (pt *ProjectTree) addToNodeMap(n *ProjectNode) {
+	if pt.NodeMap == nil {
+		pt.NodeMap = make(map[string][]*ProjectNode)
+	}
 	add := func(name string) {
 		if name == "" {
 			return
@@ -493,6 +499,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				}
 			}
 			child := node.Children[norm]
+			child.IsConditional = false
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -509,7 +516,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				child.Pragmas = append(child.Pragmas, pragmas...)
 			}
 
-			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas)
+			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas, false)
 		case *parser.IfBlock:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.IndexValue(file, d.Condition)
@@ -566,7 +573,10 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 	}
 }
 
-func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment, pragmas []parser.Pragma) {
+func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment, pragmas []parser.Pragma, conditional bool) {
+	if !conditional {
+		node.IsConditional = false
+	}
 	selfPragmas := pt.findPragmas(pragmas, obj.Position)
 	frag := &Fragment{
 		File:           file,
@@ -576,6 +586,8 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		Doc:            doc,
 		Pragmas:        selfPragmas,
 		DefinitionDocs: make(map[parser.Definition]string),
+		IsConditional:  conditional,
+		Source:         obj,
 	}
 
 	for _, def := range obj.Subnode.Definitions {
@@ -601,13 +613,14 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
-					Name:      norm,
-					RealName:  objName,
-					Children:  make(map[string]*ProjectNode),
-					Parent:    node,
-					Metadata:  make(map[string]string),
-					Variables: make(map[string]VariableInfo),
-					Fields:    make(map[string][]EvaluatedField),
+					Name:          norm,
+					RealName:      objName,
+					Children:      make(map[string]*ProjectNode),
+					Parent:        node,
+					Metadata:      make(map[string]string),
+					Variables:     make(map[string]VariableInfo),
+					Fields:        make(map[string][]EvaluatedField),
+					IsConditional: true,
 				}
 			}
 			child := node.Children[norm]
@@ -627,7 +640,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				child.Pragmas = append(child.Pragmas, subPragmas...)
 			}
 
-			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas)
+			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas, false)
 		case *parser.IfBlock:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.IndexValue(file, d.Condition)
@@ -726,7 +739,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 				child.Pragmas = append(child.Pragmas, subPragmas...)
 			}
 
-			pt.addObjectFragment(child, file, d, doc, comments, pragmas)
+			pt.addObjectFragment(child, file, d, doc, comments, pragmas, true)
 		case *parser.IfBlock:
 			pt.IndexValue(file, d.Condition)
 			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas)
@@ -929,6 +942,8 @@ func (pt *ProjectTree) ResolveReferences() {
 
 			if v := pt.resolveVariable(container, ref.Name); v != nil {
 				ref.TargetVariable = v.Def
+			} else if t, ok := pt.Templates[ref.Name]; ok {
+				ref.TargetTemplate = t
 			} else {
 				ref.Target = pt.resolveName(container, ref.Name, nil)
 			}
@@ -1006,7 +1021,10 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 			// Skip template definitions during evaluation
 		case *parser.VariableDefinition:
 			if d.DefaultValue != nil {
-				ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
+				existing := ctx.Resolve(d.Name)
+				if existing == nil {
+					ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
+				}
 			}
 		default:
 			result = append(result, EvaluatedDefinition{Def: d, Ctx: ctx, File: file})

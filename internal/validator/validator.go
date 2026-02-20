@@ -31,20 +31,25 @@ type Diagnostic struct {
 }
 
 type Validator struct {
-	Diagnostics []Diagnostic
-	Tree        *index.ProjectTree
-	Schema      *schema.Schema
-	Overrides   map[string]parser.Value
-	Variables   map[string]parser.Value
-	mu          sync.Mutex
+	Diagnostics     []Diagnostic
+	Tree            *index.ProjectTree
+	Schema          *schema.Schema
+	Overrides       map[string]parser.Value
+	Variables       map[string]parser.Value
+	mu              sync.Mutex
+	activeNodes     map[*index.ProjectNode]bool
+	activeFragments map[*index.Fragment]bool
+	muActive        sync.Mutex
 }
 
 func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[string]string) *Validator {
 	v := &Validator{
-		Tree:      tree,
-		Schema:    schema.LoadFullSchema(projectRoot),
-		Overrides: make(map[string]parser.Value),
-		Variables: make(map[string]parser.Value),
+		Tree:            tree,
+		Schema:          schema.LoadFullSchema(projectRoot),
+		Overrides:       make(map[string]parser.Value),
+		Variables:       make(map[string]parser.Value),
+		activeNodes:     make(map[*index.ProjectNode]bool),
+		activeFragments: make(map[*index.Fragment]bool),
 	}
 
 	for name, valStr := range overrides {
@@ -70,6 +75,60 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	return v
 }
 
+func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
+	if ctx.Err() != nil {
+		return
+	}
+	v.muActive.Lock()
+	v.activeNodes[node] = true
+	for _, frag := range node.Fragments {
+		if !frag.IsConditional {
+			v.activeFragments[frag] = true
+		}
+	}
+	v.muActive.Unlock()
+
+	var evaluated []index.EvaluatedDefinition
+	for _, frag := range node.Fragments {
+		v.muActive.Lock()
+		active := v.activeFragments[frag]
+		v.muActive.Unlock()
+		if active {
+			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+		}
+	}
+
+	written := make(map[string]bool)
+	for _, ed := range evaluated {
+		if obj, ok := ed.Def.(*parser.ObjectNode); ok {
+			objName := v.ValueToString(obj.Name, ed.Ctx)
+			norm := index.NormalizeName(objName)
+			if child, ok := node.Children[norm]; ok {
+				// Activate this specific fragment of the child
+				v.muActive.Lock()
+				for _, f := range child.Fragments {
+					if f.Source == obj {
+						v.activeFragments[f] = true
+						break
+					}
+				}
+				v.muActive.Unlock()
+
+				if !written[norm] {
+					v.collectActiveNodes(ctx, child, ed.Ctx)
+					written[norm] = true
+				}
+			}
+		}
+	}
+
+	for name, child := range node.Children {
+		if !written[name] && !child.IsConditional {
+			v.collectActiveNodes(ctx, child, evalCtx)
+		}
+	}
+}
+
 func (v *Validator) ValidateProject(ctx context.Context) {
 	if v.Tree == nil {
 		return
@@ -78,14 +137,22 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	v.Tree.ResolveFields()
 	v.Tree.ResolveReferences()
 
+	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
+
+	// Phase 1: Collect Active Nodes
+	if v.Tree.Root != nil {
+		v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
+	}
+	for _, node := range v.Tree.IsolatedFiles {
+		v.collectActiveNodes(ctx, node, evalCtx)
+	}
+
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 4 {
 		numWorkers = 4
 	}
 	tasks := make(chan *index.ProjectNode, 100)
 	var wg sync.WaitGroup
-
-	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
 
 	for i := 0; i < numWorkers; i++ {
 		go func() {
@@ -180,7 +247,12 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 
 	var evaluated []index.EvaluatedDefinition
 	for _, frag := range node.Fragments {
-		evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+		v.muActive.Lock()
+		active := v.activeFragments[frag]
+		v.muActive.Unlock()
+		if active {
+			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+		}
 	}
 
 	fields := v.extractFields(evaluated)
@@ -253,6 +325,15 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		v.validateDataSource(node)
 	}
 
+	// 7. Template Use Validation
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if inst, ok := def.(*parser.TemplateInstantiation); ok {
+				v.checkTemplateUse(inst, frag.File)
+			}
+		}
+	}
+
 	// 3. CUE Validation
 	if className != "" && v.Schema != nil {
 		v.validateWithCUE(node, className)
@@ -278,6 +359,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	// Recursively validate remaining static children (e.g. packages)
 	for name, child := range node.Children {
 		if !written[name] {
+			if child.IsConditional {
+				continue
+			}
 			v.validateNode(ctx, child, evalCtx)
 		}
 	}
@@ -300,6 +384,15 @@ func (v *Validator) validateDynamicObject(ctx context.Context, obj *parser.Objec
 			v.report(nil, "duplicate_field", LevelError,
 				fmt.Sprintf("Duplicate Field Definition in dynamic object: '%s'", name),
 				defs[1].Raw.Position, defs[1].File)
+		}
+		for _, f := range defs {
+			if name == "Class" {
+				v.validateClassField(f, nil)
+			} else if name == "Type" {
+				v.validateTypeField(f, nil)
+			} else {
+				v.validateGenericField(f, nil)
+			}
 		}
 	}
 
@@ -472,6 +565,37 @@ func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bo
 			// Special case for colon-separated pragmas //! unused: ...
 			if strings.HasPrefix(p, tag+":") {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+func (v *Validator) isPositionActive(file string, pos parser.Position) bool {
+	node := v.Tree.GetNodeContaining(file, pos)
+	if node == nil {
+		return false
+	}
+	// Root or package node might have multiple fragments in the same file.
+	// We need to find the one that contains the position.
+	for _, frag := range node.Fragments {
+		if frag.File == file {
+			if frag.IsObject {
+				start := frag.ObjectPos
+				end := frag.EndPos
+				if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
+					(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
+					v.muActive.Lock()
+					active := v.activeFragments[frag]
+					v.muActive.Unlock()
+					return active
+				}
+			} else {
+				// Non-object fragment (package level)
+				v.muActive.Lock()
+				active := v.activeFragments[frag]
+				v.muActive.Unlock()
+				return active
 			}
 		}
 	}
@@ -1243,7 +1367,16 @@ func (v *Validator) getFieldValue(f index.EvaluatedField, ctx *index.ProjectNode
 }
 
 func (v *Validator) resolveReference(name string, ctx *index.ProjectNode, predicate func(*index.ProjectNode) bool) *index.ProjectNode {
-	return v.Tree.ResolveName(ctx, name, predicate)
+	target := v.Tree.ResolveName(ctx, name, predicate)
+	if target != nil {
+		v.muActive.Lock()
+		active := v.activeNodes[target]
+		v.muActive.Unlock()
+		if !active {
+			return nil
+		}
+	}
+	return target
 }
 
 func (v *Validator) getNodeClass(node *index.ProjectNode) string {
@@ -1269,6 +1402,9 @@ func isValidType(t string) bool {
 func (v *Validator) CheckUnused(ctx context.Context) {
 	referencedNodes := make(map[*index.ProjectNode]bool)
 	for _, ref := range v.Tree.References {
+		if !v.isPositionActive(ref.File, ref.Position) {
+			continue
+		}
 		if ref.Target != nil {
 			referencedNodes[ref.Target] = true
 		}
@@ -1300,6 +1436,12 @@ func (v *Validator) collectTargetUsage(node *index.ProjectNode, referenced map[*
 
 func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.ProjectNode, referenced map[*index.ProjectNode]bool) {
 	if ctx.Err() != nil {
+		return
+	}
+	v.muActive.Lock()
+	active := v.activeNodes[node]
+	v.muActive.Unlock()
+	if !active {
 		return
 	}
 	// Heuristic for GAM
@@ -1846,6 +1988,12 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 		}
 		seen := make(map[string]parser.Position)
 		for _, frag := range node.Fragments {
+			v.muActive.Lock()
+			active := v.activeFragments[frag]
+			v.muActive.Unlock()
+			if !active {
+				continue
+			}
 			for _, def := range frag.Definitions {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if prevPos, exists := seen[vdef.Name]; exists {
@@ -1895,10 +2043,51 @@ func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if !v.isPositionActive(ref.File, ref.Position) {
+			continue
+		}
 		if ref.IsVariable && ref.TargetVariable == nil {
 			v.report(nil, "unresolved_variable", LevelError,
 				fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
 				ref.Position, ref.File)
+		}
+	}
+}
+
+func (v *Validator) checkTemplateUse(inst *parser.TemplateInstantiation, file string) {
+	tdef, ok := v.Tree.Templates[inst.Template]
+	if !ok {
+		v.report(nil, "unknown_template", LevelError,
+			fmt.Sprintf("Unknown template: '%s'", inst.Template),
+			inst.Position, file)
+		return
+	}
+
+	// Check arguments
+	provided := make(map[string]bool)
+	for _, arg := range inst.Arguments {
+		provided[arg.Name] = true
+		// Find param
+		found := false
+		for _, p := range tdef.Parameters {
+			if p.Name == arg.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			v.report(nil, "invalid_template_arg", LevelError,
+				fmt.Sprintf("Template '%s' has no parameter named '%s'", inst.Template, arg.Name),
+				inst.Position, file)
+		}
+	}
+
+	// Check missing mandatory params
+	for _, p := range tdef.Parameters {
+		if p.DefaultValue == nil && !provided[p.Name] {
+			v.report(nil, "missing_template_arg", LevelError,
+				fmt.Sprintf("Missing mandatory argument '%s' for template '%s'", p.Name, inst.Template),
+				inst.Position, file)
 		}
 	}
 }

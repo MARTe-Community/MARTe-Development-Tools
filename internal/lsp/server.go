@@ -1041,6 +1041,28 @@ func HandleHover(params HoverParams) *Hover {
 					fullInfo += "\n\n" + info.Doc
 				}
 			}
+		} else if res.Reference.TargetTemplate != nil {
+			t := res.Reference.TargetTemplate
+			targetName = t.Name
+			var params []string
+			for _, p := range t.Parameters {
+				s := fmt.Sprintf("%s: %s", p.Name, p.TypeExpr)
+				if p.DefaultValue != nil {
+					s += fmt.Sprintf(" = %s", tree.ValueToString(p.DefaultValue))
+				}
+				params = append(params, s)
+			}
+			fullInfo = fmt.Sprintf("**Template**: `#template %s(%s)`", t.Name, strings.Join(params, ", "))
+			// Find doc for template
+			tree.Walk(func(n *index.ProjectNode) {
+				if targetDoc != "" { return }
+				for _, frag := range n.Fragments {
+					if doc, ok := frag.DefinitionDocs[t]; ok && doc != "" {
+						targetDoc = doc
+						return
+					}
+				}
+			})
 		}
 
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
@@ -1532,12 +1554,15 @@ func HandleDefinition(params DefinitionParams) any {
 
 	var targetNode *index.ProjectNode
 	var targetVar *parser.VariableDefinition
+	var targetTemplate *parser.TemplateDefinition
 
 	if res.Reference != nil {
 		if res.Reference.Target != nil {
 			targetNode = res.Reference.Target
 		} else if res.Reference.TargetVariable != nil {
 			targetVar = res.Reference.TargetVariable
+		} else if res.Reference.TargetTemplate != nil {
+			targetTemplate = res.Reference.TargetTemplate
 		}
 	} else if res.Node != nil {
 		if res.Node.Target != nil {
@@ -1547,6 +1572,58 @@ func HandleDefinition(params DefinitionParams) any {
 		}
 	} else if res.Variable != nil {
 		targetVar = res.Variable
+	}
+
+	if targetTemplate != nil {
+		// Templates are global, we can just find where they are defined in fragments?
+		// Actually, we store TemplateDefinition in ProjectTree.
+		// We need to know which file it came from.
+		// Fragments store definitions.
+		// Find which fragment contains this template.
+		// Or update Indexer to store file in TemplateInfo?
+		// ProjectTree.Templates is map[string]*parser.TemplateDefinition.
+		
+		// Search all fragments for the template definition
+		// This is slow, but templates are few.
+		// Better: store file in ProjectTree.Templates?
+		// Let's just find it for now.
+		tree.Walk(func(n *index.ProjectNode) {
+			for _, frag := range n.Fragments {
+				for _, def := range frag.Definitions {
+					if def == targetTemplate {
+						targetVar = nil // Shadow if needed
+						// We found it!
+					}
+				}
+			}
+		})
+		
+		// Wait, I can just use targetTemplate.Position.
+		// But I need the File.
+		// Let's find the file by searching NodeMap fragments?
+		// Actually, tree.Walk is better.
+		var file string
+		tree.Walk(func(n *index.ProjectNode) {
+			if file != "" { return }
+			for _, frag := range n.Fragments {
+				for _, def := range frag.Definitions {
+					if def == targetTemplate {
+						file = frag.File
+						return
+					}
+				}
+			}
+		})
+		
+		if file != "" {
+			return []Location{{
+				URI: "file://" + file,
+				Range: Range{
+					Start: Position{Line: targetTemplate.Position.Line - 1, Character: targetTemplate.Position.Column - 1},
+					End:   Position{Line: targetTemplate.Position.Line - 1, Character: targetTemplate.Position.Column - 1 + len(targetTemplate.Name)},
+				},
+			}}
+		}
 	}
 
 	if targetVar != nil {
@@ -2015,6 +2092,7 @@ func HandleReferences(params ReferenceParams) []Location {
 
 	var targetNode *index.ProjectNode
 	var targetVar *parser.VariableDefinition
+	var targetTemplate *parser.TemplateDefinition
 
 	if res.Node != nil {
 		targetNode = res.Node
@@ -2023,9 +2101,52 @@ func HandleReferences(params ReferenceParams) []Location {
 			targetNode = res.Reference.Target
 		} else if res.Reference.TargetVariable != nil {
 			targetVar = res.Reference.TargetVariable
+		} else if res.Reference.TargetTemplate != nil {
+			targetTemplate = res.Reference.TargetTemplate
 		}
 	} else if res.Variable != nil {
 		targetVar = res.Variable
+	}
+
+	if targetTemplate != nil {
+		var locations []Location
+		// Declaration
+		if params.Context.IncludeDeclaration {
+			var file string
+			tree.Walk(func(n *index.ProjectNode) {
+				if file != "" { return }
+				for _, frag := range n.Fragments {
+					for _, def := range frag.Definitions {
+						if def == targetTemplate {
+							file = frag.File
+							return
+						}
+					}
+				}
+			})
+			if file != "" {
+				locations = append(locations, Location{
+					URI: "file://" + file,
+					Range: Range{
+						Start: Position{Line: targetTemplate.Position.Line - 1, Character: targetTemplate.Position.Column - 1},
+						End:   Position{Line: targetTemplate.Position.Line - 1, Character: targetTemplate.Position.Column - 1 + len(targetTemplate.Name)},
+					},
+				})
+			}
+		}
+		// Usages
+		for _, ref := range tree.References {
+			if ref.TargetTemplate == targetTemplate {
+				locations = append(locations, Location{
+					URI: "file://" + ref.File,
+					Range: Range{
+						Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+						End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(ref.Name)},
+					},
+				})
+			}
+		}
+		return locations
 	}
 
 	if targetVar != nil {
@@ -2881,6 +3002,26 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 						}
 						processArray(arr)
 					}
+				} else if bif, ok := def.(*parser.IfBlock); ok {
+					res := valueToString(tree, bif.Condition, node)
+					if res != "" {
+						end := bif.Condition.End()
+						addHint(InlayHint{
+							Position: Position{Line: end.Line - 1, Character: end.Column - 1},
+							Label:    " => " + res,
+							Kind:     2,
+						})
+					}
+				} else if bfor, ok := def.(*parser.ForeachBlock); ok {
+					res := valueToString(tree, bfor.Iterable, node)
+					if res != "" {
+						end := bfor.Iterable.End()
+						addHint(InlayHint{
+							Position: Position{Line: end.Line - 1, Character: end.Column - 1},
+							Label:    " => " + res,
+							Kind:     2,
+						})
+					}
 				} else if v, ok := def.(*parser.VariableDefinition); ok {
 					// Expression Evaluation Hint for #let/#var
 					if v.DefaultValue != nil && isComplexValue(v.DefaultValue) {
@@ -2982,32 +3123,101 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 
 	// Helper to extract symbols from a node
 	var getSymbols func(*index.ProjectNode, *Range) []DocumentSymbol
+	var getFromDefs func([]parser.Definition) []DocumentSymbol
+
+	getFromDefs = func(defs []parser.Definition) []DocumentSymbol {
+		var syms []DocumentSymbol
+		for _, def := range defs {
+			switch v := def.(type) {
+			case *parser.VariableDefinition:
+				kind := SymbolKindVariable
+				if len(v.Name) > 0 && v.Name[0] != '@' {
+					kind = SymbolKindConstant
+				}
+				syms = append(syms, DocumentSymbol{
+					Name: v.Name,
+					Kind: kind,
+					Range: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name)},
+					},
+				})
+			case *parser.TemplateDefinition:
+				syms = append(syms, DocumentSymbol{
+					Name: v.Name,
+					Kind: SymbolKindFunction,
+					Range: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.EndPosition.Line - 1, Character: v.EndPosition.Column},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name) + 9},
+					},
+					Children: getFromDefs(v.Body),
+				})
+			case *parser.IfBlock:
+				s := DocumentSymbol{
+					Name: "#if",
+					Kind: SymbolKindOperator,
+					Range: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.EndPosition.Line - 1, Character: v.EndPosition.Column},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + 3},
+					},
+					Children: getFromDefs(v.Then),
+				}
+				if len(v.Else) > 0 {
+					s.Children = append(s.Children, getFromDefs(v.Else)...)
+				}
+				syms = append(syms, s)
+			case *parser.ForeachBlock:
+				syms = append(syms, DocumentSymbol{
+					Name: "#foreach",
+					Kind: SymbolKindOperator,
+					Range: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.EndPosition.Line - 1, Character: v.EndPosition.Column},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + 8},
+					},
+					Children: getFromDefs(v.Body),
+				})
+			case *parser.TemplateInstantiation:
+				syms = append(syms, DocumentSymbol{
+					Name:   v.Name,
+					Detail: "instance of " + v.Template,
+					Kind:   SymbolKindModule,
+					Range: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.EndPosition.Line - 1, Character: v.EndPosition.Column},
+					},
+					SelectionRange: Range{
+						Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
+						End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name) + 5},
+					},
+				})
+			}
+		}
+		return syms
+	}
+
 	getSymbols = func(node *index.ProjectNode, containerRange *Range) []DocumentSymbol {
 		var nodeSyms []DocumentSymbol
 		for _, frag := range node.Fragments {
 			if frag.File == file {
 				if !frag.IsObject {
 					// Non-object fragment (e.g. top-level definitions in a file)
-					for _, def := range frag.Definitions {
-						if v, ok := def.(*parser.VariableDefinition); ok {
-							kind := SymbolKindVariable
-							if len(v.Name) > 0 && v.Name[0] != '@' {
-								kind = SymbolKindConstant
-							}
-							nodeSyms = append(nodeSyms, DocumentSymbol{
-								Name: v.Name,
-								Kind: kind,
-								Range: Range{
-									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
-									End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
-								},
-								SelectionRange: Range{
-									Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
-									End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name)},
-								},
-							})
-						}
-					}
+					nodeSyms = append(nodeSyms, getFromDefs(frag.Definitions)...)
 					continue
 				}
 
@@ -3042,27 +3252,7 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 					},
 				}
 
-				// Add Variables as children (Fields are excluded now)
-				for _, def := range frag.Definitions {
-					if v, ok := def.(*parser.VariableDefinition); ok {
-						kind := SymbolKindVariable
-						if len(v.Name) > 0 && v.Name[0] != '@' {
-							kind = SymbolKindConstant
-						}
-						sym.Children = append(sym.Children, DocumentSymbol{
-							Name: v.Name,
-							Kind: kind,
-							Range: Range{
-								Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
-								End:   Position{Line: v.End().Line - 1, Character: v.End().Column},
-							},
-							SelectionRange: Range{
-								Start: Position{Line: v.Position.Line - 1, Character: v.Position.Column},
-								End:   Position{Line: v.Position.Line - 1, Character: v.Position.Column + len(v.Name)},
-							},
-						})
-					}
-				}
+				sym.Children = append(sym.Children, getFromDefs(frag.Definitions)...)
 
 				// Recurse into children nodes, passing this fragment's range as container
 				for _, child := range node.Children {

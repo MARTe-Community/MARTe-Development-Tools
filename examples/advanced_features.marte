@@ -110,6 +110,10 @@
   +T = {
     Class = ReferenceContainer
   }
+#else
+  +T = {
+    Class = Object
+  }
 #end
 
-x = T
+Assign = T
