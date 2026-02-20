@@ -35,6 +35,7 @@ type Validator struct {
 	Tree        *index.ProjectTree
 	Schema      *schema.Schema
 	Overrides   map[string]parser.Value
+	Variables   map[string]parser.Value
 	mu          sync.Mutex
 }
 
@@ -43,6 +44,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		Tree:      tree,
 		Schema:    schema.LoadFullSchema(projectRoot),
 		Overrides: make(map[string]parser.Value),
+		Variables: make(map[string]parser.Value),
 	}
 
 	for name, valStr := range overrides {
@@ -51,9 +53,19 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		if cfg != nil && len(cfg.Definitions) > 0 {
 			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
 				v.Overrides[name] = f.Value
+				v.Variables[name] = f.Value
 			}
 		}
 	}
+
+	// Also collect variables from Tree
+	tree.Walk(func(n *index.ProjectNode) {
+		for k, varInfo := range n.Variables {
+			if _, ok := v.Variables[k]; !ok || varInfo.Def.IsConst {
+				v.Variables[k] = varInfo.Def.DefaultValue
+			}
+		}
+	})
 
 	return v
 }
@@ -73,6 +85,8 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	tasks := make(chan *index.ProjectNode, 100)
 	var wg sync.WaitGroup
 
+	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
+
 	for i := 0; i < numWorkers; i++ {
 		go func() {
 			for {
@@ -83,7 +97,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 					if !ok {
 						return
 					}
-					v.validateNode(ctx, node)
+					v.validateNode(ctx, node, evalCtx)
 					wg.Done()
 				}
 			}
@@ -146,10 +160,11 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	v.CheckUnresolvedVariables(ctx)
 }
 
-func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
+func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
 	if ctx.Err() != nil {
 		return
 	}
+
 	// Check for invalid content in Signals container of DataSource
 	if node.RealName == "Signals" && node.Parent != nil && isDataSource(node.Parent) {
 		for _, frag := range node.Fragments {
@@ -163,14 +178,24 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 		}
 	}
 
-	fields := v.getFields(node)
+	var evaluated []index.EvaluatedDefinition
+	for _, frag := range node.Fragments {
+		evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+	}
 
-	// 1. Check for duplicate fields (Go logic)
+	fields := v.extractFields(evaluated)
+	var objects []index.EvaluatedDefinition
+	for _, ed := range evaluated {
+		if _, ok := ed.Def.(*parser.ObjectNode); ok {
+			objects = append(objects, ed)
+		}
+	}
+
+	// 1. Check for duplicate fields (evaluated only)
 	for name, defs := range fields {
 		if len(defs) > 1 {
-			firstFile := defs[0].File
 			v.report(node, "duplicate_field", LevelError,
-				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, firstFile),
+				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, defs[0].File),
 				defs[1].Raw.Position, defs[1].File)
 		}
 	}
@@ -233,11 +258,77 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode) {
 		v.validateWithCUE(node, className)
 	}
 
-	// Recursively validate children
-	for _, child := range node.Children {
-		v.validateNode(ctx, child)
+	written := make(map[string]bool)
+	for _, obj := range objects {
+		objectNode := obj.Def.(*parser.ObjectNode)
+		objName := v.ValueToString(objectNode.Name, obj.Ctx)
+		norm := index.NormalizeName(objName)
+
+		if child, ok := node.Children[norm]; ok {
+			if !written[norm] {
+				v.validateNode(ctx, child, obj.Ctx)
+				written[norm] = true
+			}
+		} else {
+			// Dynamic object
+			v.validateDynamicObject(ctx, objectNode, obj.Ctx, obj.File)
+		}
+	}
+
+	// Recursively validate remaining static children (e.g. packages)
+	for name, child := range node.Children {
+		if !written[name] {
+			v.validateNode(ctx, child, evalCtx)
+		}
 	}
 }
+
+func (v *Validator) validateDynamicObject(ctx context.Context, obj *parser.ObjectNode, evalCtx *index.EvaluationContext, file string) {
+	evaluated := v.Tree.EvaluateDefinitions(obj.Subnode.Definitions, evalCtx, file)
+
+	fields := v.extractFields(evaluated)
+	var objects []index.EvaluatedDefinition
+	for _, ed := range evaluated {
+		if _, ok := ed.Def.(*parser.ObjectNode); ok {
+			objects = append(objects, ed)
+		}
+	}
+
+	// Perform basic validation on dynamic object (Class existence, duplicates)
+	for name, defs := range fields {
+		if len(defs) > 1 {
+			v.report(nil, "duplicate_field", LevelError,
+				fmt.Sprintf("Duplicate Field Definition in dynamic object: '%s'", name),
+				defs[1].Raw.Position, defs[1].File)
+		}
+	}
+
+	// Recurse into sub-objects
+	for _, sub := range objects {
+		v.validateDynamicObject(ctx, sub.Def.(*parser.ObjectNode), sub.Ctx, sub.File)
+	}
+}
+
+func (v *Validator) extractFields(evaluated []index.EvaluatedDefinition) map[string][]index.EvaluatedField {
+	fields := make(map[string][]index.EvaluatedField)
+	for _, ed := range evaluated {
+		if d, ok := ed.Def.(*parser.Field); ok {
+			fields[d.Name] = append(fields[d.Name], index.EvaluatedField{
+				Raw:   d,
+				Value: v.Tree.EvaluateValue(d.Value, ed.Ctx),
+				File:  ed.File,
+			})
+		}
+	}
+	return fields
+}
+
+
+func (v *Validator) ValueToString(val parser.Value, ctx *index.EvaluationContext) string {
+	res := v.Tree.EvaluateValue(val, ctx)
+	return v.Tree.ValueToString(res)
+}
+
 
 func (v *Validator) validateClassField(f index.EvaluatedField, node *index.ProjectNode) {
 	// Class field should always have a value Class (string quoted or not)

@@ -29,13 +29,13 @@ func TestNewFeatures(t *testing.T) {
 	+Root = {
 		Class = "RootClass"
 		
-		#if $EnableFeature
+		#if @EnableFeature
 			FeatureField = "Enabled"
 		#else
 			FeatureField = "Disabled"
 		#end
 
-		#foreach Val in $Elements
+		#foreach Val in @Elements
 			"+Item_" .. @Val = {
 				Value = @Val
 			}

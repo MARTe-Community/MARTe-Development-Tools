@@ -24,6 +24,7 @@ type ProjectTree struct {
 	IsolatedFiles  map[string]*ProjectNode
 	GlobalPragmas  map[string][]string
 	NodeMap        map[string][]*ProjectNode
+	Templates      map[string]*parser.TemplateDefinition
 	mu             sync.RWMutex
 }
 
@@ -150,6 +151,30 @@ type EvaluatedField struct {
 	File  string
 }
 
+type EvaluationContext struct {
+	Variables map[string]parser.Value
+	Parent    *EvaluationContext
+	Tree      *ProjectTree
+}
+
+func (ctx *EvaluationContext) Resolve(name string) parser.Value {
+	if v, ok := ctx.Variables[name]; ok {
+		return v
+	}
+	if ctx.Parent != nil {
+		return ctx.Parent.Resolve(name)
+	}
+	// Fallback to global variables in tree?
+	// But which node? The evaluation usually starts at a node.
+	return nil
+}
+
+type EvaluatedDefinition struct {
+	Def  parser.Definition
+	Ctx  *EvaluationContext
+	File string
+}
+
 type Fragment struct {
 	File           string
 	Definitions    []parser.Definition
@@ -173,6 +198,7 @@ func NewProjectTree() *ProjectTree {
 		GlobalPragmas:  make(map[string][]string),
 		NodeMap:        make(map[string][]*ProjectNode),
 		FileReferences: make(map[string][]Reference),
+		Templates:      make(map[string]*parser.TemplateDefinition),
 	}
 }
 
@@ -507,6 +533,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas)
 		case *parser.TemplateDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.Templates[d.Name] = d
 			// Template params
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
@@ -623,6 +650,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
 		case *parser.TemplateDefinition:
 			frag.Definitions = append(frag.Definitions, d)
+			pt.Templates[d.Name] = d
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
@@ -716,6 +744,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			}
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
 		case *parser.TemplateDefinition:
+			pt.Templates[d.Name] = d
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
@@ -908,7 +937,139 @@ func (pt *ProjectTree) ResolveReferences() {
 	}
 }
 
-func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
+func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *EvaluationContext, file string) []EvaluatedDefinition {
+	var result []EvaluatedDefinition
+	for _, def := range defs {
+		switch d := def.(type) {
+		case *parser.IfBlock:
+			cond := pt.EvaluateValue(d.Condition, ctx)
+			if pt.IsTrue(cond) {
+				result = append(result, pt.EvaluateDefinitions(d.Then, ctx, file)...)
+			} else {
+				result = append(result, pt.EvaluateDefinitions(d.Else, ctx, file)...)
+			}
+		case *parser.ForeachBlock:
+			iterable := pt.EvaluateValue(d.Iterable, ctx)
+			if arr, ok := iterable.(*parser.ArrayValue); ok {
+				for i, elem := range arr.Elements {
+					loopCtx := &EvaluationContext{
+						Variables: make(map[string]parser.Value),
+						Parent:    ctx,
+						Tree:      pt,
+					}
+					if d.KeyVar != "" {
+						loopCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
+					}
+					loopCtx.Variables[d.ValueVar] = elem
+					result = append(result, pt.EvaluateDefinitions(d.Body, loopCtx, file)...)
+				}
+			}
+		case *parser.TemplateInstantiation:
+			var tdef *parser.TemplateDefinition
+			if pt.Templates != nil {
+				tdef = pt.Templates[d.Template]
+			}
+
+			if tdef != nil {
+				templateCtx := &EvaluationContext{
+					Variables: make(map[string]parser.Value),
+					Parent:    ctx,
+					Tree:      pt,
+				}
+				// Bind arguments
+				argMap := make(map[string]parser.Value)
+				for _, arg := range d.Arguments {
+					argMap[arg.Name] = pt.EvaluateValue(arg.Value, ctx)
+				}
+
+				for _, param := range tdef.Parameters {
+					if val, ok := argMap[param.Name]; ok {
+						templateCtx.Variables[param.Name] = val
+					} else {
+						templateCtx.Variables[param.Name] = param.DefaultValue
+					}
+				}
+				// The template generates an object with Name d.Name
+				obj := &parser.ObjectNode{
+					Position: d.Position,
+					Name:     &parser.StringValue{Value: d.Name, Quoted: false},
+					Subnode: parser.Subnode{
+						Definitions: tdef.Body,
+					},
+				}
+				result = append(result, EvaluatedDefinition{Def: obj, Ctx: templateCtx, File: file})
+			}
+		case *parser.VariableDefinition:
+			if d.DefaultValue != nil {
+				ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
+			}
+		default:
+			result = append(result, EvaluatedDefinition{Def: d, Ctx: ctx, File: file})
+		}
+	}
+	return result
+}
+
+func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) parser.Value {
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(v.Name, "@")
+		if res := ctx.Resolve(name); res != nil {
+			return pt.EvaluateValue(res, ctx)
+		}
+		// Fallback to tree variables if ctx resolution failed
+		// We need a ProjectNode for resolveVariable.
+		// Evaluation context might not have one directly.
+		return v
+	case *parser.BinaryExpression:
+		left := pt.EvaluateValue(v.Left, ctx)
+		right := pt.EvaluateValue(v.Right, ctx)
+		if res := pt.compute(left, v.Operator, right); res != nil {
+			return res
+		}
+		return &parser.BinaryExpression{
+			Position: v.Position,
+			Left:     left,
+			Operator: v.Operator,
+			Right:    right,
+		}
+	case *parser.UnaryExpression:
+		right := pt.EvaluateValue(v.Right, ctx)
+		if res := pt.computeUnary(v.Operator, right); res != nil {
+			return res
+		}
+		return &parser.UnaryExpression{
+			Position: v.Position,
+			Operator: v.Operator,
+			Right:    right,
+		}
+	case *parser.ArrayValue:
+		newElems := make([]parser.Value, len(v.Elements))
+		for i, e := range v.Elements {
+			newElems[i] = pt.EvaluateValue(e, ctx)
+		}
+		return &parser.ArrayValue{
+			Position:    v.Position,
+			EndPosition: v.EndPosition,
+			Elements:    newElems,
+		}
+	}
+	return val
+}
+
+func (pt *ProjectTree) IsTrue(val parser.Value) bool {
+	switch v := val.(type) {
+	case *parser.BoolValue:
+		return v.Value
+	case *parser.IntValue:
+		return v.Value != 0
+	case *parser.FloatValue:
+		return v.Value != 0
+	case *parser.StringValue:
+		return v.Value != ""
+	}
+	return false
+}
 	// Internal usage might already hold lock.
 	// But FindNode is public.
 	// We need to be careful about recursive locking.
@@ -944,21 +1105,7 @@ func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*
 	// If I modify `ResolveReferences` to call `resolveNameInternal`?
 	// It seems deep refactoring is needed to do proper locking.
 	
-	// Alternative: `ResolveReferences` releases lock during resolution?
-	// No, `NodeMap` might change.
-	
-	// Let's implement `findNode` (unlocked) and `FindNode` (locked).
-	// Same for `ResolveName`.
-	
-	// Implementation below replaces FindNode signature to be the Locked version wrapper
-	// and renames body to findNode.
-	// Wait, Replace tool cannot rename body easily without moving code.
-	
-	// I will just add RLock to FindNode.
-	// AND I will change ResolveReferences to NOT call public ResolveName/FindNode?
-	// `ResolveReferences` calls `pt.ResolveName`.
-	// I will change `ResolveReferences` to use `pt.resolveName` (unlocked).
-	
+func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 	return pt.findNode(root, name, predicate, strict)
@@ -1233,7 +1380,7 @@ func (pt *ProjectTree) Evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value {
 	switch v := val.(type) {
 	case *parser.VariableReferenceValue:
-		name := strings.TrimLeft(v.Name, "@")
+		name := strings.TrimPrefix(v.Name, "@")
 		if info := pt.resolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return pt.evaluate(info.Def.DefaultValue, ctx)
@@ -1465,6 +1612,21 @@ func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.
 			res = lI | rI
 		case parser.TokenCaret:
 			res = lI ^ rI
+		case parser.TokenSymbol:
+			switch op.Value {
+			case "<":
+				return &parser.BoolValue{Value: lI < rI}
+			case ">":
+				return &parser.BoolValue{Value: lI > rI}
+			case "<=":
+				return &parser.BoolValue{Value: lI <= rI}
+			case ">=":
+				return &parser.BoolValue{Value: lI >= rI}
+			case "==":
+				return &parser.BoolValue{Value: lI == rI}
+			case "!=":
+				return &parser.BoolValue{Value: lI != rI}
+			}
 		}
 		return &parser.IntValue{Value: res, Raw: fmt.Sprintf("%d", res)}
 	}
@@ -1483,8 +1645,55 @@ func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.
 			res = lF * rF
 		case parser.TokenSlash:
 			res = lF / rF
+		case parser.TokenSymbol:
+			switch op.Value {
+			case "<":
+				return &parser.BoolValue{Value: lF < rF}
+			case ">":
+				return &parser.BoolValue{Value: lF > rF}
+			case "<=":
+				return &parser.BoolValue{Value: lF <= rF}
+			case ">=":
+				return &parser.BoolValue{Value: lF >= rF}
+			case "==":
+				return &parser.BoolValue{Value: lF == rF}
+			case "!=":
+				return &parser.BoolValue{Value: lF != rF}
+			}
 		}
 		return &parser.FloatValue{Value: res, Raw: fmt.Sprintf("%g", res)}
+	}
+
+	// Boolean comparisons
+	lB, lIsB := left.(*parser.BoolValue)
+	rB, rIsB := right.(*parser.BoolValue)
+	if lIsB && rIsB {
+		if op.Type == parser.TokenSymbol {
+			switch op.Value {
+			case "==":
+				return &parser.BoolValue{Value: lB.Value == rB.Value}
+			case "!=":
+				return &parser.BoolValue{Value: lB.Value != rB.Value}
+			case "&&":
+				return &parser.BoolValue{Value: lB.Value && rB.Value}
+			case "||":
+				return &parser.BoolValue{Value: lB.Value || rB.Value}
+			}
+		}
+	}
+
+	// String comparison
+	lS, lIsS := left.(*parser.StringValue)
+	rS, rIsS := right.(*parser.StringValue)
+	if lIsS && rIsS {
+		if op.Type == parser.TokenSymbol {
+			switch op.Value {
+			case "==":
+				return &parser.BoolValue{Value: lS.Value == rS.Value}
+			case "!=":
+				return &parser.BoolValue{Value: lS.Value != rS.Value}
+			}
+		}
 	}
 
 	return nil

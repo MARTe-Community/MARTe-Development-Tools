@@ -109,7 +109,7 @@ The LSP server should provide the following capabilities:
 - `float`: `-?[0-9]+\.[0-9]+|-?[0-9]+\.?[0-9]*[eE][+-]?[0-9]+`
 - `bool`: `true|false`
 - `string`: `".*"`
-- `reference` : `[a-zA-Z][a-zA-Z0-9_\-\.]* | @[a-zA-Z0-9_]+ | $[a-zA-Z0-9_]+`
+- `reference` : `[a-zA-Z][a-zA-Z0-9_\-\.]* | @[a-zA-Z0-9_]+`
 - `array`: `{ (value | ",")* }`
 
 #### Extended grammar

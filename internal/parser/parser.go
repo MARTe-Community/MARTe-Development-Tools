@@ -624,8 +624,6 @@ func (p *Parser) parseAtom() (Value, bool) {
 			return nil, false
 		}
 		return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
-	case TokenObjectIdentifier:
-		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
 	case TokenSymbol:
 		if tok.Value == "(" {
 			val, ok := p.parseExpression(0)

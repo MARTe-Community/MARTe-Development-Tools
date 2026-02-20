@@ -43,6 +43,25 @@ make check
 make build
 ```
 
+### Logic and Templates
+
+The `advanced_features.marte` file demonstrates the use of conditional blocks, loops, and reusable templates to create dynamic configurations.
+
+Key features shown:
+- `#template` and `#use` for component reuse.
+- `#if` / `#else` for conditional logic.
+- `#foreach` for bulk instantiation of objects.
+- Expression-based dynamic node names.
+
+**Try it:**
+```bash
+# Check the advanced configuration
+./build/mdt check examples/advanced_features.marte
+
+# Build the configuration to see the generated output
+./build/mdt build examples/advanced_features.marte
+```
+
 ### Advanced Features (Logic & Templates)
 
 The tool supports dynamic configuration generation:

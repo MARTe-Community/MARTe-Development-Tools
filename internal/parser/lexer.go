@@ -141,6 +141,10 @@ func (l *Lexer) NextToken() Token {
 
 		switch r {
 		case '=':
+			if l.peek() == '=' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
 			return l.emit(TokenEqual)
 		case '{':
 			return l.emit(TokenLBrace)
@@ -151,6 +155,10 @@ func (l *Lexer) NextToken() Token {
 		case ':':
 			return l.emit(TokenColon)
 		case '|':
+			if l.peek() == '|' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
 			return l.emit(TokenPipe)
 		case '[':
 			return l.emit(TokenLBracket)
@@ -176,6 +184,10 @@ func (l *Lexer) NextToken() Token {
 		case '^':
 			return l.emit(TokenCaret)
 		case '&':
+			if l.peek() == '&' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
 			return l.emit(TokenAmpersand)
 		case '.':
 			if l.peek() == '.' {
@@ -183,7 +195,25 @@ func (l *Lexer) NextToken() Token {
 				return l.emit(TokenConcat)
 			}
 			return l.emit(TokenSymbol)
-		case '~', '!', '<', '>', '(', ')', '?', '\\':
+		case '~', '(', ')', '?', '\\':
+			return l.emit(TokenSymbol)
+		case '!':
+			if l.peek() == '=' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
+			return l.emit(TokenSymbol)
+		case '<':
+			if l.peek() == '=' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
+			return l.emit(TokenSymbol)
+		case '>':
+			if l.peek() == '=' {
+				l.next()
+				return l.emit(TokenSymbol)
+			}
 			return l.emit(TokenSymbol)
 		case '"':
 			return l.lexString()
