@@ -25,7 +25,7 @@ func TestVariableValidation(t *testing.T) {
 	pt.AddFile("def.marte", cfg)
 	
 	v := validator.NewValidator(pt, ".", nil)
-	v.CheckVariables(context.Background())
+	v.ValidateProject(context.Background())
 	
 	foundError := false
 	for _, d := range v.Diagnostics {

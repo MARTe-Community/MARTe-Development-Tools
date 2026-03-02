@@ -33,7 +33,7 @@ func TestLSPCrashOnUndefinedReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("crash.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Line 7: "            Functions = { UndefinedGAM }"
 	// 12 spaces + "Functions" (9) + " = { " (5) = 26 chars prefix.

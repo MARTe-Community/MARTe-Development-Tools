@@ -42,7 +42,7 @@ func TestMultiFileVariableResolution(t *testing.T) {
 	}
 	pt.AddFile("main.marte", cfg2)
 
-	pt.ResolveReferences()
+	pt.ResolveReferences(nil)
 
 	// Validate
 	// We need a dummy schema for CheckVariables to work, or we check References directly.

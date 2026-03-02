@@ -71,17 +71,17 @@ import "list"
 	TimingDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	IOGAM: {
-		InputSignals: { [_]: { ByteSize: int, ... } }
-		OutputSignals: { [_]: { ByteSize: int, ... } }
+		InputSignals: {[_]: {ByteSize: int, ...}}
+		OutputSignals: {[_]: {ByteSize: int, ...}}
 		#meta: MetaType: "gam"
-		
-		InputSize: list.Sum([for k, v in InputSignals { v.ByteSize }])
-		OutputSize: list.Sum([for k, v in OutputSignals { v.ByteSize }])
-		
+
+		InputSize: list.Sum([for k, v in InputSignals {v.ByteSize}])
+		OutputSize: list.Sum([for k, v in OutputSignals {v.ByteSize}])
+
 		InputSize: OutputSize
 	}
 	ReferenceContainer: {
@@ -92,9 +92,9 @@ import "list"
 		#meta: MetaType: "gam"
 	}
 	PIDGAM: {
-		Kp: float | int // type: float (allow int as it promotes)
-		Ki: float | int
-		Kd: float | int
+		Kp:            float | int // type: float (allow int as it promotes)
+		Ki:            float | int
+		Kd:            float | int
 		SamplingTime?: float | int
 		InputSignals: {...}
 		OutputSignals: {...}
@@ -106,44 +106,44 @@ import "list"
 		Format?:  string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	LoggerDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	DANStream: {
 		Timeout?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	EPICSCAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	EPICSCAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	EPICSPVAInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	EPICSPVAOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	SDNSubscriber: {
@@ -157,7 +157,7 @@ import "list"
 		IgnoreTimeoutError?: 0 | 1
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	SDNPublisher: {
@@ -167,22 +167,30 @@ import "list"
 		Topic?:     string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	UDPReceiver: {
-		Port:     int
+		Port:     uint
 		Address?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	UDPSender: {
-		Destination: string
+		Address!:       string
+		Port!:          uint
+		ExecutionMode?: *"IndependentThread" | "RealTimeThread"
+		if ExecutionMode == "IndependentThread" {
+			NumberOfPreTriggers?:  uint
+			NumberOfPostTriggers?: uint
+			CPUMask?:              uint
+			StackSize?:            uint
+		}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	FileReader: {
@@ -191,7 +199,7 @@ import "list"
 		Interpolate?: string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	FileWriter: {
@@ -200,7 +208,7 @@ import "list"
 		StoreOnTrigger?: int
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	OrderedClass: {
@@ -314,23 +322,23 @@ import "list"
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	LinkDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	MDSReader: {
 		TreeName:   string
 		ShotNumber: int
-		Frequency?:  float | int
+		Frequency?: float | int
 		Signals: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	MDSWriter: {
@@ -340,94 +348,94 @@ import "list"
 		TreeName:              string
 		PulseNumber?:          int
 		StoreOnTrigger:        0 | 1
-		EventName?:             string
-		TimeRefresh?:           float | int
+		EventName?:            string
+		TimeRefresh?:          float | int
 		NumberOfPreTriggers?:  int
 		NumberOfPostTriggers?: int
 		Signals: {...}
 		Messages?: {...}
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI1588TimeStamp: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6259ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6259DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6259DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6368ADC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6368DAC: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI6368DIO: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI9157CircularFifoReader: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	NI9157MxiDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	OPCUADSInput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	OPCUADSOutput: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	RealTimeThreadAsyncBridge: {
 		#meta: direction:     "INOUT"
 		#meta: multithreaded: bool | true
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	RealTimeThreadSynchronisation: {...}
 	UARTDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 	BaseLib2Wrapper: {...}
@@ -439,7 +447,7 @@ import "list"
 	GAMDataSource: {
 		#meta: multithreaded: false
 		#meta: direction:     "INOUT"
-		#meta: MetaType:          "datasource"
+		#meta: MetaType:      "datasource"
 		...
 	}
 }

@@ -59,7 +59,7 @@ func TestResolveReferencesWithMap(t *testing.T) {
 	// Use IndexValue to populate FileReferences
 	pt.IndexValue("test.marte", &parser.ReferenceValue{Value: "A"})
 
-	pt.ResolveReferences()
+	pt.ResolveReferences(nil)
 
 	// Check resolution in FileReferences
 	refs := pt.FileReferences["test.marte"]

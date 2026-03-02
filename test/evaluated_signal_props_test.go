@@ -35,7 +35,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 
 	tree := index.NewProjectTree()
 	tree.AddFile("test.marte", cfg)
-	tree.ResolveReferences()
+	tree.ResolveReferences(nil)
 
 	v := validator.NewValidator(tree, ".", nil)
 	v.ValidateProject(context.Background())
@@ -68,7 +68,7 @@ func TestEvaluatedSignalProperties(t *testing.T) {
 	cfg2, _ := p2.Parse()
 	tree2 := index.NewProjectTree()
 	tree2.AddFile("test_err.marte", cfg2)
-	tree2.ResolveReferences()
+	tree2.ResolveReferences(nil)
 
 	v2 := validator.NewValidator(tree2, ".", nil)
 	v2.ValidateProject(context.Background())

@@ -294,8 +294,8 @@ func TestValidator_IOGAM(t *testing.T) {
 			}
 			pt.AddFile("test.marte", cfg)
 			
-			pt.ResolveReferences()
-			pt.ResolveFields()
+			pt.ResolveReferences(nil)
+			pt.ResolveFields(nil)
 
 			v := validator.NewValidator(pt, ".", nil)
 			v.ValidateProject(context.Background())

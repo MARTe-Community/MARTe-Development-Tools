@@ -104,11 +104,11 @@
 
 // 5. Direct Template usage outside a container
 #use DAQChannel MasterClock(ID = 0, Gain = 1.0)
-#var x: bool = false
+#var x: bool = true
 
 #if @x
   +T = {
-    Class = ReferenceContainer
+    Class = Demo
   }
 #else
   +T = {

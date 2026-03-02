@@ -446,8 +446,8 @@ func HandleMessage(msg *JsonRpcMessage) {
 					logger.Printf("ScanDirectory failed: %v\n", err)
 				}
 				logger.Printf("Scan done")
-				snap.Tree().ResolveReferences()
-				snap.Tree().ResolveFields()
+				snap.Tree().ResolveReferences(nil)
+				snap.Tree().ResolveFields(nil)
 				logger.Printf("Resolve done")
 				GlobalSchema = schema.LoadFullSchema(root)
 				logger.Printf("Schema done")
@@ -612,8 +612,8 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
-		newSnap.Tree().ResolveReferences()
-		newSnap.Tree().ResolveFields()
+		newSnap.Tree().ResolveReferences(nil)
+		newSnap.Tree().ResolveFields(nil)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	} else {
@@ -659,8 +659,8 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
-		newSnap.Tree().ResolveReferences()
-		newSnap.Tree().ResolveFields()
+		newSnap.Tree().ResolveReferences(nil)
+		newSnap.Tree().ResolveFields(nil)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
 	} else {

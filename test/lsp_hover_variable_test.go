@@ -26,7 +26,7 @@ func TestLSPHoverVariable(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("hover_var.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// 1. Hover on Definition (#var MyInt)
 	// Line 2 (index 1). # is at 0. Name "MyInt" is at 5.

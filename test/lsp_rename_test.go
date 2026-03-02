@@ -30,7 +30,7 @@ func TestHandleRename(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("rename.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Rename +MyNode to NewNode
 	// +MyNode is at Line 2 (after #package)

@@ -1,5 +1,5 @@
 #package TEST.SIGNAL
-+MySignal = {
+MySignal = {
     Type = uint32
     NumberOfElements = 1
 }

@@ -75,14 +75,14 @@ func TestNewFeatures(t *testing.T) {
 	if !strings.Contains(res, "FeatureField = \"Enabled\"") {
 		t.Error("Expected FeatureField = \"Enabled\"")
 	}
-	if !strings.Contains(res, "\"+Item_1\" = {") || !strings.Contains(res, "\"+Item_2\" = {") || !strings.Contains(res, "\"+Item_3\" = {") {
+	if !strings.Contains(res, "+Item_1 = {") || !strings.Contains(res, "+Item_2 = {") || !strings.Contains(res, "+Item_3 = {") {
 		t.Error("Expected items 1, 2, 3 from foreach")
 	}
 	// Template instances are nested under the instance name provided in #use
-	if !strings.Contains(res, "Instance10 = {") || !strings.Contains(res, "\"+Instance_10\" = {") || !strings.Contains(res, "Type = \"Special\"") {
+	if !strings.Contains(res, "Instance10 = {") || !strings.Contains(res, "+Instance_10 = {") || !strings.Contains(res, "Type = \"Special\"") {
 		t.Error("Expected template instance 10 with Special type")
 	}
-	if !strings.Contains(res, "Instance1 = {") || !strings.Contains(res, "\"+Instance_1\" = {") || !strings.Contains(res, "Type = \"Default\"") {
+	if !strings.Contains(res, "Instance1 = {") || !strings.Contains(res, "+Instance_1 = {") || !strings.Contains(res, "Type = \"Default\"") {
 		t.Error("Expected template instance 1 with Default type")
 	}
 	if !strings.Contains(res, "ExtraField = \"Greater than 1\"") {

@@ -89,7 +89,7 @@ func TestHandleDefinition(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 	lsp.GetTestTree().AddFile(path, config)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	t.Logf("Refs: %d", len(lsp.GetTestTree().References))
 	for _, r := range lsp.GetTestTree().References {
@@ -144,7 +144,7 @@ func TestHandleReferences(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 	lsp.GetTestTree().AddFile(path, config)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Test Find References for MyObject (triggered from its definition)
 	params := lsp.ReferenceParams{

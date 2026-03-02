@@ -167,7 +167,7 @@ func TestLSPVariableDefinition(t *testing.T) {
 	p := parser.NewParser(content)
 	cfg, _ := p.Parse()
 	lsp.GetTestTree().AddFile("var_def.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 	
 	params := lsp.DefinitionParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},

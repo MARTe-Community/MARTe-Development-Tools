@@ -22,7 +22,7 @@ func TestIsolatedFileIsolation(t *testing.T) {
 	c2, _ := p2.Parse()
 	pt.AddFile("f2.marte", c2)
 
-	pt.ResolveReferences()
+	pt.ResolveReferences(nil)
 
 	// Try finding A from f2
 	isoNode := pt.IsolatedFiles["f2.marte"]

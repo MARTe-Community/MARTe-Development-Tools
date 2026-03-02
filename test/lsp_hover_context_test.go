@@ -30,7 +30,7 @@ func TestGetNodeContaining(t *testing.T) {
 	idx := index.NewProjectTree()
 	file := "hover_context.marte"
 	idx.AddFile(file, config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Find reference to GAM1
 	var gamRef *index.Reference

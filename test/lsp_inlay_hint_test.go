@@ -40,7 +40,7 @@ func TestLSPInlayHint(t *testing.T) {
 	p := parser.NewParser(content)
 	cfg, _ := p.Parse()
 	lsp.GetTestTree().AddFile("inlay.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	v := validator.NewValidator(lsp.GetTestTree(), ".", nil)
 	v.ValidateProject(context.Background())

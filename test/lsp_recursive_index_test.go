@@ -48,7 +48,7 @@ func TestLSPRecursiveIndexing(t *testing.T) {
 	if err := lsp.GetTestTree().ScanDirectory(rootDir); err != nil {
 		t.Fatalf("ScanDirectory failed: %v", err)
 	}
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Check if SubComp is in the tree
 	// Root -> App -> SubComp

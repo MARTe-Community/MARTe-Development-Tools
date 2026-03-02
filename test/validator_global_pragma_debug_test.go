@@ -31,7 +31,7 @@ func TestGlobalPragmaDebug(t *testing.T) {
 
 	idx := index.NewProjectTree()
 	idx.AddFile("debug.marte", config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Check if added to GlobalPragmas
 	pragmas, ok := idx.GlobalPragmas["debug.marte"]

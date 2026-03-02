@@ -29,7 +29,7 @@ func TestLSPHoverDoc(t *testing.T) {
 	idx := index.NewProjectTree()
 	file := "doc.marte"
 	idx.AddFile(file, config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Test 1: Hover over +MyObject definition
 	res := idx.Query(file, 4, 2) // Line 4: +MyObject

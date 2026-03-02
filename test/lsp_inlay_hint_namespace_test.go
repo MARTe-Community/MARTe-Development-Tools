@@ -36,11 +36,11 @@ $GAM = {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("test.marte", config)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	params := lsp.InlayHintParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: "file://test.marte"},
-		Range:        lsp.Range{Start: lsp.Position{0, 0}, End: lsp.Position{20, 0}},
+		Range:        lsp.Range{Start: lsp.Position{Line: 0, Character: 0}, End: lsp.Position{Line: 20, Character: 0}},
 	}
 
 	lsp.GetTestDocuments()["file://test.marte"] = content

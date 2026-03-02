@@ -38,7 +38,7 @@ func TestHoverDataSourceName(t *testing.T) {
 		t.Fatalf("Parse error: %v", err)
 	}
 	lsp.GetTestTree().AddFile("test_ds.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Test 1: Explicit Signal (Sig1)
 	// Position: "Sig1" at line 5 (0-based 4)

@@ -30,7 +30,7 @@ func TestNameScoping(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	pt.AddFile("main.marte", cfg)
 	
-	pt.ResolveReferences()
+	pt.ResolveReferences(nil)
 	
 	// Helper to find ref target
 	findRefTarget := func(refName string, containerName string) *index.ProjectNode {

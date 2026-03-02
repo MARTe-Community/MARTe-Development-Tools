@@ -47,7 +47,7 @@ func TestHoverGAMUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("test_gam_usage.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Query hover for Sig1 (Line 5)
 	// Line 4: Sig1... (0-based)

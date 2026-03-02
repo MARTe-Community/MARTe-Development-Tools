@@ -145,6 +145,7 @@ type ProjectNode struct {
 	Variables     map[string]VariableInfo
 	Fields        map[string][]EvaluatedField
 	IsConditional bool
+	DynamicChildren map[string][]*parser.ObjectNode // map[file][]*ObjectNode
 }
 
 type EvaluatedField struct {
@@ -187,6 +188,7 @@ type Fragment struct {
 	Pragmas        []string
 	DefinitionDocs map[parser.Definition]string
 	IsConditional  bool
+	BranchID       string
 	Source         *parser.ObjectNode
 }
 
@@ -368,7 +370,7 @@ func (pt *ProjectTree) valToString(val parser.Value) string {
 			return pt.valToString(v.Left) + pt.valToString(v.Right)
 		}
 	case *parser.VariableReferenceValue:
-		return v.Name
+		return ""
 	}
 	return ""
 }
@@ -424,13 +426,14 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		}
 		if _, ok := node.Children[part]; !ok {
 			node.Children[part] = &ProjectNode{
-				Name:      part,
-				RealName:  part,
-				Children:  make(map[string]*ProjectNode),
-				Parent:    node,
-				Metadata:  make(map[string]string),
-				Variables: make(map[string]VariableInfo),
-				Fields:    make(map[string][]EvaluatedField),
+				Name:          part,
+				RealName:      part,
+				Children:      make(map[string]*ProjectNode),
+				Parent:        node,
+				Metadata:      make(map[string]string),
+				Variables:     make(map[string]VariableInfo),
+				Fields:        make(map[string][]EvaluatedField),
+				IsConditional: false,
 			}
 			pt.addToNodeMap(node.Children[part])
 		}
@@ -438,6 +441,14 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	}
 
 	pt.populateNode(node, file, config)
+}
+
+func (pt *ProjectTree) AddToNodeMap(n *ProjectNode) {
+	pt.addToNodeMap(n)
+}
+
+func (pt *ProjectTree) PopulateObjectFragment(node *ProjectNode, file string, obj *parser.ObjectNode, doc string, comments []parser.Comment, pragmas []parser.Pragma, conditional bool) {
+	pt.addObjectFragment(node, file, obj, doc, comments, pragmas, conditional)
 }
 
 func (pt *ProjectTree) addToNodeMap(n *ProjectNode) {
@@ -469,7 +480,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 
 	for _, def := range config.Definitions {
 		doc := pt.findDoc(config.Comments, def.Pos())
-		pragmas := pt.findPragmas(config.Pragmas, def.Pos())
+		selfPragmas := pt.findPragmas(config.Pragmas, def.Pos())
 
 		switch d := def.(type) {
 		case *parser.Field:
@@ -485,17 +496,23 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
 			pt.IndexExpressionVariables(file, d.Name)
+			
+			if pt.HasVariable(d.Name) {
+				continue
+			}
+
 			objName := pt.valToString(d.Name)
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
-					Name:      norm,
-					RealName:  objName,
-					Children:  make(map[string]*ProjectNode),
-					Parent:    node,
-					Metadata:  make(map[string]string),
-					Variables: make(map[string]VariableInfo),
-					Fields:    make(map[string][]EvaluatedField),
+					Name:          norm,
+					RealName:      objName,
+					Children:      make(map[string]*ProjectNode),
+					Parent:        node,
+					Metadata:      make(map[string]string),
+					Variables:     make(map[string]VariableInfo),
+					Fields:        make(map[string][]EvaluatedField),
+					IsConditional: false,
 				}
 			}
 			child := node.Children[norm]
@@ -512,20 +529,22 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				child.Doc += doc
 			}
 
-			if len(pragmas) > 0 {
-				child.Pragmas = append(child.Pragmas, pragmas...)
+			if len(selfPragmas) > 0 {
+				child.Pragmas = append(child.Pragmas, selfPragmas...)
 			}
 
 			pt.addObjectFragment(child, file, d, doc, config.Comments, config.Pragmas, false)
 		case *parser.IfBlock:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.IndexValue(file, d.Condition)
-			pt.indexNestedDefinitions(node, file, d.Then, config.Comments, config.Pragmas)
-			pt.indexNestedDefinitions(node, file, d.Else, config.Comments, config.Pragmas)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+			pt.indexNestedDefinitions(node, file, d.Then, config.Comments, config.Pragmas, true, id+":then")
+			pt.indexNestedDefinitions(node, file, d.Else, config.Comments, config.Pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.IndexValue(file, d.Iterable)
 			// Add loop variables to index
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			if d.KeyVar != "" {
 				node.Variables[d.KeyVar] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
@@ -538,11 +557,12 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 					File: file,
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas, true, id+":body")
 		case *parser.TemplateDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Templates[d.Name] = d
 			// Template params
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
@@ -552,7 +572,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 					pt.IndexValue(file, p.DefaultValue)
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas, true, id+":template")
 		case *parser.TemplateInstantiation:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
@@ -609,6 +629,11 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
 			pt.IndexExpressionVariables(file, d.Name)
+
+			if pt.HasVariable(d.Name) {
+				continue
+			}
+
 			objName := pt.valToString(d.Name)
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
@@ -620,7 +645,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 					Metadata:      make(map[string]string),
 					Variables:     make(map[string]VariableInfo),
 					Fields:        make(map[string][]EvaluatedField),
-					IsConditional: true,
+					IsConditional: conditional,
 				}
 			}
 			child := node.Children[norm]
@@ -644,11 +669,13 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.IfBlock:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.IndexValue(file, d.Condition)
-			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas)
-			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas, true, id+":then")
+			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.IndexValue(file, d.Iterable)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			if d.KeyVar != "" {
 				node.Variables[d.KeyVar] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
@@ -661,10 +688,11 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 					File: file,
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":body")
 		case *parser.TemplateDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Templates[d.Name] = d
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
@@ -674,7 +702,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 					pt.IndexValue(file, p.DefaultValue)
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":template")
 		case *parser.TemplateInstantiation:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
@@ -693,7 +721,18 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 	node.Fragments = append(node.Fragments, frag)
 }
 
-func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, defs []parser.Definition, comments []parser.Comment, pragmas []parser.Pragma) {
+func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, defs []parser.Definition, comments []parser.Comment, pragmas []parser.Pragma, conditional bool, branchID string) {
+	if conditional && len(defs) > 0 {
+		frag := &Fragment{
+			File:           file,
+			Definitions:    defs,
+			IsConditional:  true,
+			BranchID:       branchID,
+			DefinitionDocs: make(map[parser.Definition]string),
+		}
+		node.Fragments = append(node.Fragments, frag)
+	}
+
 	for _, def := range defs {
 		doc := pt.findDoc(comments, def.Pos())
 		subPragmas := pt.findPragmas(pragmas, def.Pos())
@@ -707,6 +746,11 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
 		case *parser.ObjectNode:
 			pt.IndexExpressionVariables(file, d.Name)
+
+			if pt.HasVariable(d.Name) {
+				continue
+			}
+
 			objName := pt.valToString(d.Name)
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
@@ -718,11 +762,11 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 					Metadata:      make(map[string]string),
 					Variables:     make(map[string]VariableInfo),
 					Fields:        make(map[string][]EvaluatedField),
-					IsConditional: true,
+					IsConditional: conditional,
 				}
 			}
 			child := node.Children[norm]
-			child.IsConditional = true
+			child.IsConditional = conditional
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -739,13 +783,15 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 				child.Pragmas = append(child.Pragmas, subPragmas...)
 			}
 
-			pt.addObjectFragment(child, file, d, doc, comments, pragmas, true)
+			pt.addObjectFragment(child, file, d, doc, comments, pragmas, conditional)
 		case *parser.IfBlock:
 			pt.IndexValue(file, d.Condition)
-			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas)
-			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas, true, id+":then")
+			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			pt.IndexValue(file, d.Iterable)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			if d.KeyVar != "" {
 				node.Variables[d.KeyVar] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: d.KeyVar, Position: d.Position, TypeExpr: "loop key"},
@@ -758,9 +804,10 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 					File: file,
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":body")
 		case *parser.TemplateDefinition:
 			pt.Templates[d.Name] = d
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
 					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
@@ -770,7 +817,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 					pt.IndexValue(file, p.DefaultValue)
 				}
 			}
-			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas)
+			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":template")
 		case *parser.TemplateInstantiation:
 			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
 				Name:     d.Template,
@@ -920,17 +967,13 @@ func (pt *ProjectTree) RebuildIndex() {
 	pt.walk(visitor)
 }
 
-func (pt *ProjectTree) ResolveReferences() {
+func (pt *ProjectTree) ResolveReferences(activeFragments map[*Fragment]bool) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
 	if len(pt.NodeMap) == 0 {
 		pt.RebuildIndex()
 	}
-	
-	// We need to resolve ALL references?
-	// Or only those that are unresolved or might have changed?
-	// For simplicity, resolve all, but avoid tree walking if possible.
 	
 	// Iterate map
 	pt.References = nil // Clear legacy slice to rebuild it consistent with map
@@ -939,6 +982,25 @@ func (pt *ProjectTree) ResolveReferences() {
 		for i := range refs {
 			ref := &refs[i]
 			container := pt.getNodeContaining(ref.File, ref.Position)
+
+			if activeFragments != nil {
+				// Find which fragment this reference belongs to
+				var parentFrag *Fragment
+				if container != nil {
+					for _, frag := range container.Fragments {
+						if ref.Position.Line >= frag.ObjectPos.Line && ref.Position.Line <= frag.EndPos.Line {
+							parentFrag = frag
+							break
+						}
+					}
+				}
+
+				if parentFrag != nil && parentFrag.IsConditional {
+					if !activeFragments[parentFrag] {
+						continue
+					}
+				}
+			}
 
 			if v := pt.resolveVariable(container, ref.Name); v != nil {
 				ref.TargetVariable = v.Def
@@ -949,9 +1011,6 @@ func (pt *ProjectTree) ResolveReferences() {
 			}
 			pt.References = append(pt.References, *ref) // Keep legacy slice updated
 		}
-		// Update map? No, ref is pointer to slice elem?
-		// No, &refs[i] points to slice backing array.
-		// So map is updated.
 	}
 }
 
@@ -960,28 +1019,9 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 	for _, def := range defs {
 		switch d := def.(type) {
 		case *parser.IfBlock:
-			cond := pt.EvaluateValue(d.Condition, ctx)
-			if pt.IsTrue(cond) {
-				result = append(result, pt.EvaluateDefinitions(d.Then, ctx, file)...)
-			} else {
-				result = append(result, pt.EvaluateDefinitions(d.Else, ctx, file)...)
-			}
+			result = append(result, EvaluatedDefinition{Def: d, Ctx: ctx, File: file})
 		case *parser.ForeachBlock:
-			iterable := pt.EvaluateValue(d.Iterable, ctx)
-			if arr, ok := iterable.(*parser.ArrayValue); ok {
-				for i, elem := range arr.Elements {
-					loopCtx := &EvaluationContext{
-						Variables: make(map[string]parser.Value),
-						Parent:    ctx,
-						Tree:      pt,
-					}
-					if d.KeyVar != "" {
-						loopCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
-					}
-					loopCtx.Variables[d.ValueVar] = elem
-					result = append(result, pt.EvaluateDefinitions(d.Body, loopCtx, file)...)
-				}
-			}
+			result = append(result, EvaluatedDefinition{Def: d, Ctx: ctx, File: file})
 		case *parser.TemplateInstantiation:
 			var tdef *parser.TemplateDefinition
 			if pt.Templates != nil {
@@ -1041,8 +1081,6 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 			return pt.EvaluateValue(res, ctx)
 		}
 		// Fallback to tree variables if ctx resolution failed
-		// We need a ProjectNode for resolveVariable.
-		// Evaluation context might not have one directly.
 		return v
 	case *parser.BinaryExpression:
 		left := pt.EvaluateValue(v.Left, ctx)
@@ -1093,41 +1131,7 @@ func (pt *ProjectTree) IsTrue(val parser.Value) bool {
 	}
 	return false
 }
-	// Internal usage might already hold lock.
-	// But FindNode is public.
-	// We need to be careful about recursive locking.
-	// ResolveName calls FindNode.
-	// ResolveName is public.
-	// If ResolveReferences (Lock) calls ResolveName (Lock) -> Deadlock.
-	
-	// STRATEGY: Public methods Lock. Private methods don't.
-	// Rename internal implementation to findNodeInternal.
-	// Public FindNode calls Lock + findNodeInternal.
-	
-	// But FindNode is used by ResolveName.
-	// ResolveName is used by ResolveReferences.
-	// ResolveReferences holds Lock.
-	
-	// I should make FindNode assume NO lock? No, that's unsafe for public usage.
-	// I should make FindNode acquire RLock.
-	// But if called from ResolveReferences (holding Lock), RLock might block?
-	// RWMutex: If Lock is held, RLock blocks.
-	
-	// So I MUST separate internal/external.
-	// Or pass a context?
-	
-	// Quick fix: Since I control the code, I will rename `FindNode` to `findNode` (private)
-	// and make `FindNode` (public) wrap it with RLock.
-	// And update internal callers (`ResolveName`) to use `findNode`?
-	// `ResolveName` is public too.
-	
-	// Let's defer adding lock to FindNode inside index.go for a moment and check callers.
-	// `ResolveName` calls `FindNode`.
-	// `ResolveReferences` calls `ResolveName`.
-	
-	// If I modify `ResolveReferences` to call `resolveNameInternal`?
-	// It seems deep refactoring is needed to do proper locking.
-	
+
 func (pt *ProjectTree) FindNode(root *ProjectNode, name string, predicate func(*ProjectNode) bool, strict bool) *ProjectNode {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
@@ -1507,7 +1511,7 @@ func (pt *ProjectTree) Clone() *ProjectTree {
 
 	// Re-resolve references (connect to new nodes)
 	// Note: This makes Clone() expensive. But necessary for correctness.
-	newPT.ResolveReferences()
+	newPT.ResolveReferences(nil)
 
 	return newPT
 }
@@ -1595,7 +1599,12 @@ func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.
 	if op.Type == parser.TokenConcat {
 		s1 := pt.valueToString(left)
 		s2 := pt.valueToString(right)
-		return &parser.StringValue{Value: s1 + s2, Quoted: true}
+		res := s1 + s2
+		quoted := true
+		if len(res) > 0 && (res[0] == '+' || res[0] == '$') {
+			quoted = false
+		}
+		return &parser.StringValue{Value: res, Quoted: quoted}
 	}
 
 	toInt := func(v parser.Value) (int64, bool) {
@@ -1750,6 +1759,38 @@ func (pt *ProjectTree) ValueToString(val parser.Value) string {
 	return pt.valueToString(val)
 }
 
+func (pt *ProjectTree) HasVariable(val parser.Value) bool {
+	if val == nil {
+		return false
+	}
+	switch v := val.(type) {
+	case *parser.VariableReferenceValue:
+		return true
+	case *parser.BinaryExpression:
+		return pt.HasVariable(v.Left) || pt.HasVariable(v.Right)
+	case *parser.UnaryExpression:
+		return pt.HasVariable(v.Right)
+	}
+	return false
+}
+
+func (pt *ProjectTree) EvaluateValueWithGlobalVars(val parser.Value) parser.Value {
+	vars := make(map[string]parser.Value)
+	pt.walk(func(n *ProjectNode) {
+		for k, v := range n.Variables {
+			if v.Def.DefaultValue != nil {
+				vars[k] = v.Def.DefaultValue
+			}
+		}
+	})
+	ctx := &EvaluationContext{Variables: vars, Tree: pt}
+	res := pt.EvaluateValue(val, ctx)
+	if _, ok := res.(*parser.VariableReferenceValue); ok {
+		return val
+	}
+	return res
+}
+
 func (pt *ProjectTree) valueToString(val parser.Value) string {
 	switch v := val.(type) {
 	case *parser.StringValue:
@@ -1764,6 +1805,11 @@ func (pt *ProjectTree) valueToString(val parser.Value) string {
 		return v.Value
 	case *parser.VariableReferenceValue:
 		return v.Name
+	case *parser.BinaryExpression:
+		if v.Operator.Type == parser.TokenConcat {
+			return pt.valueToString(v.Left) + pt.valueToString(v.Right)
+		}
+		return ""
 	case *parser.ArrayValue:
 		elements := []string{}
 		for _, e := range v.Elements {
@@ -1775,13 +1821,37 @@ func (pt *ProjectTree) valueToString(val parser.Value) string {
 	}
 }
 
-func (pt *ProjectTree) ResolveFields() {
+func (pt *ProjectTree) ResolveFields(activeFragments map[*Fragment]bool) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 	pt.walk(func(node *ProjectNode) {
 		for _, fields := range node.Fields {
 			for i := range fields {
-				fields[i].Value = pt.evaluate(fields[i].Raw.Value, node)
+				field := &fields[i]
+				
+				if activeFragments != nil {
+					// Find which fragment this field belongs to
+					var parentFrag *Fragment
+					for _, frag := range node.Fragments {
+						for _, def := range frag.Definitions {
+							if def == field.Raw {
+								parentFrag = frag
+								break
+							}
+						}
+						if parentFrag != nil {
+							break
+						}
+					}
+
+					if parentFrag != nil && parentFrag.IsConditional {
+						if !activeFragments[parentFrag] {
+							continue
+						}
+					}
+				}
+
+				field.Value = pt.evaluate(field.Raw.Value, node)
 			}
 		}
 	})

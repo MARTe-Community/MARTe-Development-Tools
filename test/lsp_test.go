@@ -85,7 +85,7 @@ func TestLSPDefinition(t *testing.T) {
 
 	idx := index.NewProjectTree()
 	idx.AddFile("memory.marte", config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Find the reference to "MyObject"
 	var foundRef *index.Reference

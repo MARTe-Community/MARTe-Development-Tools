@@ -45,7 +45,7 @@ func TestImplicitSignal(t *testing.T) {
 
 	idx := index.NewProjectTree()
 	idx.AddFile("implicit_signal.marte", config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	v := validator.NewValidator(idx, ".", nil)
 	v.ValidateProject(context.Background())
@@ -89,7 +89,7 @@ func TestImplicitSignal(t *testing.T) {
 	}
 	idx2 := index.NewProjectTree()
 	idx2.AddFile("missing_type.marte", config2)
-	idx2.ResolveReferences()
+	idx2.ResolveReferences(nil)
 	v2 := validator.NewValidator(idx2, ".", nil)
 	v2.ValidateProject(context.Background())
 

@@ -39,7 +39,7 @@ func TestRenameSignalInGAM(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("rename_sig.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// Run validator to populate Targets
 	v := validator.NewValidator(lsp.GetTestTree(), ".", nil)

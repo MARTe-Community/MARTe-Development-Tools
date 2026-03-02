@@ -109,7 +109,7 @@ $App = {
 		p := parser.NewParser(content)
 		cfg, _ := p.Parse()
 		lsp.GetTestTree().AddFile(path, cfg)
-		lsp.GetTestTree().ResolveReferences()
+		lsp.GetTestTree().ResolveReferences(nil)
 
 		// Position at end of "DataSource = "
 		params := lsp.CompletionParams{
@@ -174,7 +174,7 @@ $App = {
 		cfg2, _ := parser.NewParser(contentIso).Parse()
 		lsp.GetTestTree().AddFile("iso.marte", cfg2)
 
-		lsp.GetTestTree().ResolveReferences()
+		lsp.GetTestTree().ResolveReferences(nil)
 
 		// Completion in isolated file
 		params := lsp.CompletionParams{
@@ -206,7 +206,7 @@ $App = {
 			t.Logf("Parser error in contentPrj: %v", err)
 		}
 		lsp.GetTestTree().AddFile("prj.marte", cfg3)
-		lsp.GetTestTree().ResolveReferences()
+		lsp.GetTestTree().ResolveReferences(nil)
 
 		paramsPrj := lsp.CompletionParams{
 			TextDocument: lsp.TextDocumentIdentifier{URI: "file://prj.marte"},

@@ -40,10 +40,10 @@ $App = {
 
 	idx := index.NewProjectTree()
 	idx.AddFile("test.marte", config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.CheckUnused(context.Background())
+	v.ValidateProject(context.Background())
 
 	foundUnused := false
 	for _, d := range v.Diagnostics {
@@ -86,10 +86,10 @@ $App = {
 
 	idx := index.NewProjectTree()
 	idx.AddFile("test.marte", config)
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	v := validator.NewValidator(idx, ".", nil)
-	v.CheckUnused(context.Background())
+	v.ValidateProject(context.Background())
 
 	foundUnusedSig2 := false
 	for _, d := range v.Diagnostics {

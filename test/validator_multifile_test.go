@@ -79,7 +79,7 @@ func TestMultiFileReference(t *testing.T) {
 	parseAndAddToIndex(t, idx, "integration/multifile_ref_1.marte")
 	parseAndAddToIndex(t, idx, "integration/multifile_ref_2.marte")
 
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Check if the reference in +SourceNode to TargetNode is resolved.
 	v := validator.NewValidator(idx, ".", nil)
@@ -180,7 +180,7 @@ func TestIsolatedFileValidation(t *testing.T) {
 	c2, _ := p2.Parse()
 	idx.AddFile("iso.marte", c2)
 
-	idx.ResolveReferences()
+	idx.ResolveReferences(nil)
 
 	// Find reference
 	var ref *index.Reference

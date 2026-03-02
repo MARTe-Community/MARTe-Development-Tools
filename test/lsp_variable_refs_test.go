@@ -25,7 +25,7 @@ func TestLSPVariableRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsp.GetTestTree().AddFile("vars.marte", cfg)
-	lsp.GetTestTree().ResolveReferences()
+	lsp.GetTestTree().ResolveReferences(nil)
 
 	// 1. Definition from Usage
 	// Line 4: "    Field = @MyVar"

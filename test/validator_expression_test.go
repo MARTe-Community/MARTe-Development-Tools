@@ -64,13 +64,13 @@ func TestValidatorExpressionCoverage(t *testing.T) {
 		t.Fatalf("Parse failed: %v", err)
 	}
 	pt.AddFile("expr.marte", cfg)
-	pt.ResolveReferences()
+	pt.ResolveReferences(nil)
 
 	v := validator.NewValidator(pt, ".", nil)
 	// Use NewSchema to ensure basic types
 	v.Schema = schema.NewSchema()
 
-	v.CheckVariables(context.Background())
+	v.ValidateProject(context.Background())
 
 	// Check for expected errors
 	foundBadSum := false

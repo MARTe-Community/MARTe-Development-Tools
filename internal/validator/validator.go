@@ -37,8 +37,8 @@ type Validator struct {
 	Overrides       map[string]parser.Value
 	Variables       map[string]parser.Value
 	mu              sync.Mutex
-	activeNodes     map[*index.ProjectNode]bool
-	activeFragments map[*index.Fragment]bool
+	ActiveNodes     map[*index.ProjectNode]bool
+	ActiveFragments map[*index.Fragment]bool
 	muActive        sync.Mutex
 }
 
@@ -48,8 +48,8 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		Schema:          schema.LoadFullSchema(projectRoot),
 		Overrides:       make(map[string]parser.Value),
 		Variables:       make(map[string]parser.Value),
-		activeNodes:     make(map[*index.ProjectNode]bool),
-		activeFragments: make(map[*index.Fragment]bool),
+		ActiveNodes:     make(map[*index.ProjectNode]bool),
+		ActiveFragments: make(map[*index.Fragment]bool),
 	}
 
 	for name, valStr := range overrides {
@@ -80,10 +80,10 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 		return
 	}
 	v.muActive.Lock()
-	v.activeNodes[node] = true
+	v.ActiveNodes[node] = true
 	for _, frag := range node.Fragments {
 		if !frag.IsConditional {
-			v.activeFragments[frag] = true
+			v.ActiveFragments[frag] = true
 		}
 	}
 	v.muActive.Unlock()
@@ -91,25 +91,58 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 	var evaluated []index.EvaluatedDefinition
 	for _, frag := range node.Fragments {
 		v.muActive.Lock()
-		active := v.activeFragments[frag]
+		active := v.ActiveFragments[frag]
 		v.muActive.Unlock()
 		if active {
+			// fmt.Printf("[DEBUG] Evaluating fragment definitions (count=%d) from %s\n", len(frag.Definitions), frag.File)
 			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
 		}
 	}
 
 	written := make(map[string]bool)
-	for _, ed := range evaluated {
-		if obj, ok := ed.Def.(*parser.ObjectNode); ok {
-			objName := v.ValueToString(obj.Name, ed.Ctx)
-			norm := index.NormalizeName(objName)
-			if child, ok := node.Children[norm]; ok {
-				// Activate this specific fragment of the child
+	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode)
+	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode) {
+		for _, ed := range evaluated {
+			// fmt.Printf("[DEBUG] Processing evaluated definition: %T\n", ed.Def)
+			switch d := ed.Def.(type) {
+			case *parser.ObjectNode:
+				objName := v.ValueToString(d.Name, ed.Ctx)
+				norm := index.NormalizeName(objName)
+				
+				// Find or create the child node
 				v.muActive.Lock()
+				child, ok := node.Children[norm]
+				if !ok {
+					child = &index.ProjectNode{
+						Name:          norm,
+						RealName:      objName,
+						Children:      make(map[string]*index.ProjectNode),
+						Parent:        node,
+						Metadata:      make(map[string]string),
+						Variables:     make(map[string]index.VariableInfo),
+						Fields:        make(map[string][]index.EvaluatedField),
+						IsConditional: false, // It's active now
+					}
+					node.Children[norm] = child
+					v.Tree.AddToNodeMap(child)
+				}
+				
+				// Ensure this fragment is present and active
+				found := false
 				for _, f := range child.Fragments {
-					if f.Source == obj {
-						v.activeFragments[f] = true
+					if f.Source == d {
+						v.ActiveFragments[f] = true
+						found = true
 						break
+					}
+				}
+				if !found {
+					v.Tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, true)
+					for _, f := range child.Fragments {
+						if f.Source == d {
+							v.ActiveFragments[f] = true
+							break
+						}
 					}
 				}
 				v.muActive.Unlock()
@@ -118,9 +151,70 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					v.collectActiveNodes(ctx, child, ed.Ctx)
 					written[norm] = true
 				}
+			case *parser.IfBlock:
+				cond := v.Tree.EvaluateValue(d.Condition, ed.Ctx)
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				if v.Tree.IsTrue(cond) {
+					// Activate fragments for 'Then' branch
+					v.muActive.Lock()
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":then" {
+							v.ActiveFragments[f] = true
+						}
+					}
+					v.muActive.Unlock()
+					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
+				} else if len(d.Else) > 0 {
+					v.muActive.Lock()
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":else" {
+							v.ActiveFragments[f] = true
+						}
+					}
+					v.muActive.Unlock()
+					processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
+				}
+			case *parser.ForeachBlock:
+				iterable := v.Tree.EvaluateValue(d.Iterable, ed.Ctx)
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				if arr, ok := iterable.(*parser.ArrayValue); ok {
+					v.muActive.Lock()
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":body" {
+							v.ActiveFragments[f] = true
+						}
+					}
+					v.muActive.Unlock()
+					for i, val := range arr.Elements {
+						subCtx := &index.EvaluationContext{
+							Variables: make(map[string]parser.Value),
+							Parent:    ed.Ctx,
+							Tree:      v.Tree,
+						}
+						if d.KeyVar != "" {
+							subCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
+						}
+						if d.ValueVar != "" {
+							subCtx.Variables[d.ValueVar] = val
+						}
+						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+					}
+				}
+			case *parser.TemplateDefinition:
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				v.muActive.Lock()
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":template" {
+						v.ActiveFragments[f] = true
+					}
+				}
+				v.muActive.Unlock()
+				processEval(v.Tree.EvaluateDefinitions(d.Body, ed.Ctx, ed.File), node)
 			}
 		}
 	}
+
+	processEval(evaluated, node)
 
 	for name, child := range node.Children {
 		if !written[name] && !child.IsConditional {
@@ -133,19 +227,44 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	if v.Tree == nil {
 		return
 	}
-	// Ensure references and fields are resolved
-	v.Tree.ResolveFields()
-	v.Tree.ResolveReferences()
+	// Initial full resolution (before activation pass, as ActiveFragments is empty)
+	v.Tree.ResolveFields(nil)
+	v.Tree.ResolveReferences(nil)
+
+	// Multi-pass active node collection to handle variables defined in conditional blocks
+	for pass := 0; pass < 5; pass++ { // Max 5 passes to avoid infinite loops
+		evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
+		
+		v.Tree.Walk(func(n *index.ProjectNode) {
+			for k, varInfo := range n.Variables {
+				if _, ok := v.Variables[k]; !ok || varInfo.Def.IsConst {
+					v.Variables[k] = varInfo.Def.DefaultValue
+				}
+			}
+		})
+		// Re-apply overrides
+		for k, val := range v.Overrides {
+			v.Variables[k] = val
+		}
+
+		prevCount := len(v.ActiveFragments)
+		if v.Tree.Root != nil {
+			v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
+		}
+		for _, node := range v.Tree.IsolatedFiles {
+			v.collectActiveNodes(ctx, node, evalCtx)
+		}
+		
+		// Re-resolve only active things after activation pass
+		v.Tree.ResolveFields(v.ActiveFragments)
+		v.Tree.ResolveReferences(v.ActiveFragments)
+
+		if len(v.ActiveFragments) == prevCount {
+			break
+		}
+	}
 
 	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
-
-	// Phase 1: Collect Active Nodes
-	if v.Tree.Root != nil {
-		v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
-	}
-	for _, node := range v.Tree.IsolatedFiles {
-		v.collectActiveNodes(ctx, node, evalCtx)
-	}
 
 	numWorkers := runtime.NumCPU()
 	if numWorkers < 4 {
@@ -232,6 +351,22 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		return
 	}
 
+	// Only validate if at least one fragment is active
+	hasActiveFragment := false
+	v.muActive.Lock()
+	for _, frag := range node.Fragments {
+		if v.ActiveFragments[frag] {
+			hasActiveFragment = true
+			break
+		}
+	}
+	v.muActive.Unlock()
+
+	// Exception: Packages (Root, or nodes without fragments) might still be active containers
+	if !hasActiveFragment && len(node.Fragments) > 0 {
+		return
+	}
+
 	// Check for invalid content in Signals container of DataSource
 	if node.RealName == "Signals" && node.Parent != nil && isDataSource(node.Parent) {
 		for _, frag := range node.Fragments {
@@ -248,7 +383,7 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	var evaluated []index.EvaluatedDefinition
 	for _, frag := range node.Fragments {
 		v.muActive.Lock()
-		active := v.activeFragments[frag]
+		active := v.ActiveFragments[frag]
 		v.muActive.Unlock()
 		if active {
 			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
@@ -287,26 +422,30 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 
 	// 2. Check for mandatory Class if it's an object node (+/$)
 	className := ""
-	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
+	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') && !isSignal(node) {
 		if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
 			className = v.getFieldValue(classFields[0], node)
 		}
 
-		hasType := false
-		if _, ok := fields["Type"]; ok {
-			hasType = true
-		}
-
-		if className == "" && !hasType {
+		if className == "" {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
 			v.report(node, "missing_class", LevelError,
-				fmt.Sprintf("Node %s is an object and must contain a 'Class' field (or be a Signal with 'Type')", node.RealName),
+				fmt.Sprintf("Node %s is an object and must contain a 'Class' field", node.RealName),
 				pos, file)
 		}
 
 		if className == "RealTimeThread" {
 			v.checkFunctionsArray(node, fields)
+		}
+	} else if isSignal(node) {
+		// Signals (no + prefix) must have Type
+		if _, ok := fields["Type"]; !ok {
+			pos := v.getNodePosition(node)
+			file := v.getNodeFile(node)
+			v.report(node, "missing_type", LevelError,
+				fmt.Sprintf("Signal %s must contain a 'Type' field", node.RealName),
+				pos, file)
 		}
 	}
 
@@ -359,10 +498,20 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	// Recursively validate remaining static children (e.g. packages)
 	for name, child := range node.Children {
 		if !written[name] {
-			if child.IsConditional {
-				continue
+			// Check if child has at least one active fragment
+			childActive := false
+			v.muActive.Lock()
+			for _, f := range child.Fragments {
+				if v.ActiveFragments[f] {
+					childActive = true
+					break
+				}
 			}
-			v.validateNode(ctx, child, evalCtx)
+			v.muActive.Unlock()
+
+			if !child.IsConditional || childActive {
+				v.validateNode(ctx, child, evalCtx)
+			}
 		}
 	}
 }
@@ -586,14 +735,14 @@ func (v *Validator) isPositionActive(file string, pos parser.Position) bool {
 				if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
 					(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
 					v.muActive.Lock()
-					active := v.activeFragments[frag]
+					active := v.ActiveFragments[frag]
 					v.muActive.Unlock()
 					return active
 				}
 			} else {
 				// Non-object fragment (package level)
 				v.muActive.Lock()
-				active := v.activeFragments[frag]
+				active := v.ActiveFragments[frag]
 				v.muActive.Unlock()
 				return active
 			}
@@ -1370,7 +1519,7 @@ func (v *Validator) resolveReference(name string, ctx *index.ProjectNode, predic
 	target := v.Tree.ResolveName(ctx, name, predicate)
 	if target != nil {
 		v.muActive.Lock()
-		active := v.activeNodes[target]
+		active := v.ActiveNodes[target]
 		v.muActive.Unlock()
 		if !active {
 			return nil
@@ -1439,7 +1588,7 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 		return
 	}
 	v.muActive.Lock()
-	active := v.activeNodes[node]
+	active := v.ActiveNodes[node]
 	v.muActive.Unlock()
 	if !active {
 		return
@@ -1489,6 +1638,9 @@ func isDataSource(node *index.ProjectNode) bool {
 }
 
 func isSignal(node *index.ProjectNode) bool {
+	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
+		return false
+	}
 	if node.Parent != nil && node.Parent.Name == "Signals" {
 		if isDataSource(node.Parent.Parent) {
 			return true
@@ -1498,6 +1650,13 @@ func isSignal(node *index.ProjectNode) bool {
 }
 
 func (v *Validator) getNodePosition(node *index.ProjectNode) parser.Position {
+	v.muActive.Lock()
+	defer v.muActive.Unlock()
+	for _, frag := range node.Fragments {
+		if v.ActiveFragments[frag] {
+			return frag.ObjectPos
+		}
+	}
 	if len(node.Fragments) > 0 {
 		return node.Fragments[0].ObjectPos
 	}
@@ -1505,6 +1664,13 @@ func (v *Validator) getNodePosition(node *index.ProjectNode) parser.Position {
 }
 
 func (v *Validator) getNodeFile(node *index.ProjectNode) string {
+	v.muActive.Lock()
+	defer v.muActive.Unlock()
+	for _, frag := range node.Fragments {
+		if v.ActiveFragments[frag] {
+			return frag.File
+		}
+	}
 	if len(node.Fragments) > 0 {
 		return node.Fragments[0].File
 	}
@@ -1989,7 +2155,7 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 		seen := make(map[string]parser.Position)
 		for _, frag := range node.Fragments {
 			v.muActive.Lock()
-			active := v.activeFragments[frag]
+			active := v.ActiveFragments[frag]
 			v.muActive.Unlock()
 			if !active {
 				continue
