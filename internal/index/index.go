@@ -25,6 +25,7 @@ type ProjectTree struct {
 	GlobalPragmas  map[string][]string
 	NodeMap        map[string][]*ProjectNode
 	Templates      map[string]*parser.TemplateDefinition
+	TemplateFiles  map[string]string // Maps template name to the file it came from
 	mu             sync.RWMutex
 }
 
@@ -133,18 +134,19 @@ type Reference struct {
 }
 
 type ProjectNode struct {
-	Name      string // Normalized name
-	RealName  string // The actual name used in definition (e.g. +Node)
-	Doc       string // Aggregated documentation
-	Fragments []*Fragment
-	Children  map[string]*ProjectNode
-	Parent    *ProjectNode
-	Metadata  map[string]string // Store extra info like Class, Type, Size
-	Target    *ProjectNode      // Points to referenced node (for Direct References/Links)
-	Pragmas       []string
-	Variables     map[string]VariableInfo
-	Fields        map[string][]EvaluatedField
-	IsConditional bool
+	Name            string // Normalized name
+	RealName        string // The actual name used in definition (e.g. +Node)
+	Doc             string // Aggregated documentation
+	Fragments       []*Fragment
+	Children        map[string]*ProjectNode
+	Parent          *ProjectNode
+	Metadata        map[string]string // Store extra info like Class, Type, Size
+	Target          *ProjectNode      // Points to referenced node (for Direct References/Links)
+	Pragmas         []string
+	Variables       map[string]VariableInfo
+	Fields          map[string][]EvaluatedField
+	IsConditional   bool
+	File            string                          // The file that owns this child node (for cleanup on RemoveFile)
 	DynamicChildren map[string][]*parser.ObjectNode // map[file][]*ObjectNode
 }
 
@@ -205,6 +207,7 @@ func NewProjectTree() *ProjectTree {
 		NodeMap:        make(map[string][]*ProjectNode),
 		FileReferences: make(map[string][]Reference),
 		Templates:      make(map[string]*parser.TemplateDefinition),
+		TemplateFiles:  make(map[string]string),
 	}
 }
 
@@ -230,12 +233,36 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	}
 	delete(pt.GlobalPragmas, file)
 	pt.removeFileFromNode(pt.Root, file)
+	pt.removeChildrenOwnedByFile(pt.Root, file)
+
+	// Remove templates that belong to this file
+	for name, f := range pt.TemplateFiles {
+		if f == file {
+			delete(pt.TemplateFiles, name)
+			delete(pt.Templates, name)
+		}
+	}
 }
 
 func (pt *ProjectTree) removeNodeTreeFromMap(node *ProjectNode) {
 	pt.removeFromNodeMap(node)
 	for _, child := range node.Children {
 		pt.removeNodeTreeFromMap(child)
+	}
+}
+
+func (pt *ProjectTree) removeChildrenOwnedByFile(node *ProjectNode, file string) {
+	var toRemove []string
+	for name, child := range node.Children {
+		if child.File == file {
+			toRemove = append(toRemove, name)
+		} else {
+			pt.removeChildrenOwnedByFile(child, file)
+		}
+	}
+	for _, name := range toRemove {
+		pt.removeNodeTreeFromMap(node.Children[name])
+		delete(node.Children, name)
 	}
 }
 
@@ -378,13 +405,13 @@ func (pt *ProjectTree) valToString(val parser.Value) string {
 func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
-	
+
 	// We call internal removeFile (without lock, as we hold it)
 	// But RemoveFile is public and locks.
 	// We should split RemoveFile into internal/external.
 	// Refactoring to avoid double lock or code dup.
 	// For now, let's copy body of RemoveFile logic or use a helper.
-	
+
 	// RE-IMPLEMENTATION of RemoveFile logic inline to avoid deadlock
 	delete(pt.FileReferences, file)
 	if iso, ok := pt.IsolatedFiles[file]; ok {
@@ -393,6 +420,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	}
 	delete(pt.GlobalPragmas, file)
 	pt.removeFileFromNode(pt.Root, file)
+	pt.removeChildrenOwnedByFile(pt.Root, file)
 
 	// Collect global pragmas
 	for _, p := range config.Pragmas {
@@ -409,6 +437,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 			Metadata:  make(map[string]string),
 			Variables: make(map[string]VariableInfo),
 			Fields:    make(map[string][]EvaluatedField),
+			File:      file,
 		}
 		pt.IsolatedFiles[file] = node
 		pt.populateNode(node, file, config)
@@ -434,6 +463,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 				Variables:     make(map[string]VariableInfo),
 				Fields:        make(map[string][]EvaluatedField),
 				IsConditional: false,
+				File:          file,
 			}
 			pt.addToNodeMap(node.Children[part])
 		}
@@ -496,7 +526,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
 			pt.IndexExpressionVariables(file, d.Name)
-			
+
 			if pt.HasVariable(d.Name) {
 				continue
 			}
@@ -513,10 +543,13 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 					Variables:     make(map[string]VariableInfo),
 					Fields:        make(map[string][]EvaluatedField),
 					IsConditional: false,
+					File:          file,
 				}
 			}
 			child := node.Children[norm]
-			child.IsConditional = false
+			if child.IsConditional && !false {
+				child.IsConditional = false
+			}
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -561,6 +594,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.TemplateDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Templates[d.Name] = d
+			pt.TemplateFiles[d.Name] = file
 			// Template params
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
@@ -692,6 +726,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.TemplateDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Templates[d.Name] = d
+			pt.TemplateFiles[d.Name] = file
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
@@ -763,10 +798,13 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 					Variables:     make(map[string]VariableInfo),
 					Fields:        make(map[string][]EvaluatedField),
 					IsConditional: conditional,
+					File:          file,
 				}
 			}
 			child := node.Children[norm]
-			child.IsConditional = conditional
+			if child.IsConditional && !conditional {
+				child.IsConditional = false
+			}
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -807,6 +845,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":body")
 		case *parser.TemplateDefinition:
 			pt.Templates[d.Name] = d
+			pt.TemplateFiles[d.Name] = file
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			for _, p := range d.Parameters {
 				node.Variables[p.Name] = VariableInfo{
@@ -974,10 +1013,10 @@ func (pt *ProjectTree) ResolveReferences(activeFragments map[*Fragment]bool) {
 	if len(pt.NodeMap) == 0 {
 		pt.RebuildIndex()
 	}
-	
+
 	// Iterate map
 	pt.References = nil // Clear legacy slice to rebuild it consistent with map
-	
+
 	for _, refs := range pt.FileReferences {
 		for i := range refs {
 			ref := &refs[i]
@@ -1460,7 +1499,7 @@ func (pt *ProjectTree) Clone() *ProjectTree {
 	defer pt.mu.RUnlock()
 
 	newPT := NewProjectTree()
-	
+
 	// Clone isolated files
 	for k, v := range pt.IsolatedFiles {
 		newPT.IsolatedFiles[k] = v.Clone(nil)
@@ -1478,24 +1517,34 @@ func (pt *ProjectTree) Clone() *ProjectTree {
 		newPT.GlobalPragmas[k] = newPragmas
 	}
 
+	// Clone Templates
+	for k, v := range pt.Templates {
+		newPT.Templates[k] = v
+	}
+
+	// Clone TemplateFiles
+	for k, v := range pt.TemplateFiles {
+		newPT.TemplateFiles[k] = v
+	}
+
 	// Clone FileReferences
 	for k, v := range pt.FileReferences {
 		newRefs := make([]Reference, len(v))
 		// We can shallow copy references because they mostly point to data we aren't mutating deeply in place
-		// BUT Reference.Target points to *ProjectNode. 
+		// BUT Reference.Target points to *ProjectNode.
 		// If we clone the nodes, we need to update the references to point to the NEW nodes.
 		// This is tricky. A simple Clone() breaks the graph links (Reference -> Target).
-		
-		// For now, we will perform a simple copy and rely on RebuildIndex/ResolveReferences 
-		// being called or handling it. 
+
+		// For now, we will perform a simple copy and rely on RebuildIndex/ResolveReferences
+		// being called or handling it.
 		// Actually, in the Snapshot model, we typically 'Update' a snapshot by cloning it and applying a delta.
 		// If we clone the whole tree, all pointers in 'Reference.Target' will point to the OLD tree's nodes.
 		// This is BAD.
-		
+
 		// To fix this correctly, we would need to re-resolve references after cloning.
 		// Since 'ResolveReferences' is fast enough (lookup in map), we can just clear Targets and re-resolve?
 		// Or we can traverse and update.
-		
+
 		// Let's copy them, and then nil out the Targets so they get re-resolved lazily or explicitly.
 		for i, r := range v {
 			newRef := r
@@ -1552,7 +1601,7 @@ func (pn *ProjectNode) Clone(parent *ProjectNode) *ProjectNode {
 	}
 
 	// Clone Fragments
-	// Fragment pointers can be shared? 
+	// Fragment pointers can be shared?
 	// Fragments contain AST nodes (*parser.Definition).
 	// If we don't mutate AST nodes, sharing fragments is fine.
 	// But Fragments also contain IsObject, Doc...
@@ -1585,7 +1634,7 @@ func (pn *ProjectNode) Clone(parent *ProjectNode) *ProjectNode {
 	for k, child := range pn.Children {
 		newNode.Children[k] = child.Clone(newNode)
 	}
-	
+
 	// Note: newNode.Target is NOT cloned here because it points to an arbitrary node in the tree.
 	// It must be resolved after the full tree is built.
 	// We leave it nil or deal with it in RebuildIndex/Resolve?
@@ -1828,7 +1877,7 @@ func (pt *ProjectTree) ResolveFields(activeFragments map[*Fragment]bool) {
 		for _, fields := range node.Fields {
 			for i := range fields {
 				field := &fields[i]
-				
+
 				if activeFragments != nil {
 					// Find which fragment this field belongs to
 					var parentFrag *Fragment

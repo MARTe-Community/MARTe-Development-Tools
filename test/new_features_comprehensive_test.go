@@ -2,8 +2,8 @@ package integration
 
 import (
 	"context"
-	"testing"
 	"strings"
+	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
@@ -78,7 +78,7 @@ package schema
 
 	tree := index.NewProjectTree()
 	tree.AddFile("test.marte", cfg)
-	tree.ResolveFields()
+	tree.ResolveFields(nil)
 
 	v := validator.NewValidator(tree, "", nil)
 	// Inject custom schema
@@ -87,7 +87,7 @@ package schema
 
 	v.ValidateProject(context.Background())
 
-	// We expect 2 errors: 
+	// We expect 2 errors:
 	// 1. OrphanChild parent class mismatch (Parent should be RootClass, is Configuration)
 	// 2. WronglyNamedChild parent name mismatch (Parent should be SpecialRoot, is NormalRoot)
 
@@ -146,8 +146,8 @@ package schema
 		p2 := parser.NewParser(contentSuppressed)
 		cfg2, _ := p2.Parse()
 		tree.AddFile("suppressed.marte", cfg2)
-		tree.ResolveFields()
-		
+		tree.ResolveFields(nil)
+
 		v.Diagnostics = nil
 		v.ValidateProject(context.Background())
 

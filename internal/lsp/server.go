@@ -207,11 +207,11 @@ type CodeActionContext struct {
 }
 
 type CodeAction struct {
-	Title       string         `json:"title"`
-	Kind        string         `json:"kind,omitempty"`
+	Title       string          `json:"title"`
+	Kind        string          `json:"kind,omitempty"`
 	Diagnostics []LSPDiagnostic `json:"diagnostics,omitempty"`
-	Edit        *WorkspaceEdit `json:"edit,omitempty"`
-	Command     *Command       `json:"command,omitempty"`
+	Edit        *WorkspaceEdit  `json:"edit,omitempty"`
+	Command     *Command        `json:"command,omitempty"`
 }
 
 type Command struct {
@@ -301,10 +301,10 @@ type WorkspaceSymbolParams struct {
 }
 
 type SymbolInformation struct {
-	Name          string   `json:"name"`
+	Name          string     `json:"name"`
 	Kind          SymbolKind `json:"kind"`
-	Location      Location `json:"location"`
-	ContainerName string   `json:"containerName,omitempty"`
+	Location      Location   `json:"location"`
+	ContainerName string     `json:"containerName,omitempty"`
 }
 
 type WorkspaceEdit struct {
@@ -351,12 +351,12 @@ func triggerValidation(uri string) {
 	valTimers[uri] = time.AfterFunc(1000*time.Millisecond, func() {
 		valMu.Lock()
 		delete(valTimers, uri)
-		
+
 		// Cancel previous validation for this URI
 		if cancel, ok := valCancels[uri]; ok {
 			cancel()
 		}
-		
+
 		ctx, cancel := context.WithCancel(context.Background())
 		valCancels[uri] = cancel
 		valMu.Unlock()
@@ -368,11 +368,9 @@ func triggerValidation(uri string) {
 	})
 }
 
-
-
 func RunServer() {
 	SynchronousValidation = false // Disable sync for production
-	
+
 	GlobalSession = cache.NewSession("default")
 
 	reader := bufio.NewReader(os.Stdin)
@@ -581,23 +579,23 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 	if GlobalSession == nil {
 		GlobalSession = cache.NewSession("default")
 	}
-	
+
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
 	if view == nil {
 		// Fallback create view if not exists
 		root := uriToPath(params.TextDocument.URI)
 		// Try to find project root by looking up tree? No.
 		// Simplified: just create a view for this file's dir
-		view = GlobalSession.CreateView("auto", root) 
+		view = GlobalSession.CreateView("auto", root)
 	}
-	
+
 	// Create new snapshot
 	oldSnap := view.Snapshot()
 	newSnap := oldSnap.Clone(context.Background())
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	newSnap.Documents()[params.TextDocument.URI] = params.TextDocument.Text
-	
+
 	p := parser.NewParser(params.TextDocument.Text)
 	config, _ := p.Parse()
 	newSnap.ParserErrors()[params.TextDocument.URI] = p.Errors()
@@ -628,10 +626,10 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	if view == nil {
 		return
 	}
-	
+
 	oldSnap := view.Snapshot()
 	newSnap := oldSnap.Clone(context.Background())
-	
+
 	text, ok := newSnap.Documents()[uri]
 	if !ok {
 		logger.Printf("[ERROR] document %s not found\n", uri)
@@ -756,7 +754,7 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 		return nil
 	}
 	snap := view.Snapshot()
-	
+
 	uri := params.TextDocument.URI
 	text, ok := snap.Documents()[uri]
 	if !ok {
@@ -828,7 +826,7 @@ func publishImmediateDiagnostics(uri string, snap *cache.Snapshot) {
 	// We want the full validation later to still be able to publish.
 	// Actually, to prevent blinking, we should update the cache if it's the same.
 	// But immediate diagnostics only contain parser errors, whereas full contains both.
-	
+
 	notification := JsonRpcMessage{
 		Jsonrpc: "2.0",
 		Method:  "textDocument/publishDiagnostics",
@@ -933,7 +931,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 
 	for path, diags := range fileDiags {
 		fileURI := "file://" + path
-		
+
 		// Simple hash (JSON representation)
 		data, _ := json.Marshal(diags)
 		hash := string(data)
@@ -956,7 +954,6 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	}
 }
 
-
 func collectFiles(node *index.ProjectNode, files map[string]bool) {
 	if node == nil {
 		return
@@ -976,10 +973,12 @@ func mustMarshal(v any) json.RawMessage {
 
 func HandleHover(params HoverParams) *Hover {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -1055,7 +1054,9 @@ func HandleHover(params HoverParams) *Hover {
 			fullInfo = fmt.Sprintf("**Template**: `#template %s(%s)`", t.Name, strings.Join(params, ", "))
 			// Find doc for template
 			tree.Walk(func(n *index.ProjectNode) {
-				if targetDoc != "" { return }
+				if targetDoc != "" {
+					return
+				}
 				for _, frag := range n.Fragments {
 					if doc, ok := frag.DefinitionDocs[t]; ok && doc != "" {
 						targetDoc = doc
@@ -1095,10 +1096,12 @@ func valueToString(tree *index.ProjectTree, val parser.Value, ctx *index.Project
 
 func HandleCompletion(params CompletionParams) *CompletionList {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	uri := params.TextDocument.URI
 	path := uriToPath(uri)
 	text, ok := snap.Documents()[uri]
@@ -1539,10 +1542,12 @@ func isDataSource(node *index.ProjectNode) bool {
 
 func HandleDefinition(params DefinitionParams) any {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -1582,7 +1587,7 @@ func HandleDefinition(params DefinitionParams) any {
 		// Find which fragment contains this template.
 		// Or update Indexer to store file in TemplateInfo?
 		// ProjectTree.Templates is map[string]*parser.TemplateDefinition.
-		
+
 		// Search all fragments for the template definition
 		// This is slow, but templates are few.
 		// Better: store file in ProjectTree.Templates?
@@ -1597,14 +1602,16 @@ func HandleDefinition(params DefinitionParams) any {
 				}
 			}
 		})
-		
+
 		// Wait, I can just use targetTemplate.Position.
 		// But I need the File.
 		// Let's find the file by searching NodeMap fragments?
 		// Actually, tree.Walk is better.
 		var file string
 		tree.Walk(func(n *index.ProjectNode) {
-			if file != "" { return }
+			if file != "" {
+				return
+			}
 			for _, frag := range n.Fragments {
 				for _, def := range frag.Definitions {
 					if def == targetTemplate {
@@ -1614,7 +1621,7 @@ func HandleDefinition(params DefinitionParams) any {
 				}
 			}
 		})
-		
+
 		if file != "" {
 			return []Location{{
 				URI: "file://" + file,
@@ -1660,10 +1667,12 @@ func HandleDefinition(params DefinitionParams) any {
 
 func HandleTypeDefinition(params TypeDefinitionParams) any {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -1713,17 +1722,50 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	// 2. Resolve via Class field (if it points to a template $)
 	class := getEvaluatedMetadata(tree, targetNode, "Class")
 	if class != "" {
-		// Look for a template with this name ($Class)
-		templateName := "$" + class
+		// First check if it's a #template definition (stored in Templates map)
+		if t, ok := tree.Templates[class]; ok {
+			// Find which file contains this template
+			var templateFile string
+			tree.Walk(func(n *index.ProjectNode) {
+				if templateFile != "" {
+					return
+				}
+				for _, frag := range n.Fragments {
+					for _, def := range frag.Definitions {
+						if def == t {
+							templateFile = frag.File
+							return
+						}
+					}
+				}
+			})
+			if templateFile != "" {
+				return []Location{{
+					URI: "file://" + templateFile,
+					Range: Range{
+						Start: Position{Line: t.Position.Line - 1, Character: t.Position.Column - 1},
+						End:   Position{Line: t.Position.Line - 1, Character: t.Position.Column - 1 + len(t.Name)},
+					},
+				}}
+			}
+		}
+
+		// Check for $class style template (ObjectNode with $ prefix)
+		// NormalizeName strips the $ prefix, so we look for child with name "class"
+		normalizedClass := index.NormalizeName(class)
 		if targetNode.Parent != nil {
-			if template, ok := targetNode.Parent.Children[index.NormalizeName(templateName)]; ok {
+			if template, ok := targetNode.Parent.Children[normalizedClass]; ok {
 				return nodeToLocations(template)
 			}
 		}
-		// Search globally for template
+		// Search globally for $class style template
 		var found *index.ProjectNode
 		tree.Walk(func(n *index.ProjectNode) {
-			if n.RealName == templateName {
+			if found != nil {
+				return
+			}
+			// RealName might be "$class" or "class", normalize before comparing
+			if index.NormalizeName(n.RealName) == normalizedClass {
 				found = n
 			}
 		})
@@ -1732,13 +1774,60 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		}
 	}
 
-	// 3. Fallback: If it's an instance (+), jump to the template ($) with the same name
+	// 3. Fallback: If it's an instance (+), jump to the template with the same name
 	if len(targetNode.RealName) > 0 && targetNode.RealName[0] == '+' {
-		templateName := "$" + targetNode.Name
+		// template names don't have + or $ prefix
+		templateName := targetNode.Name
+		if templateName[0] == '+' || templateName[0] == '$' {
+			templateName = templateName[1:]
+		}
+
+		// First check if it's a #template definition (stored in Templates map)
+		if t, ok := tree.Templates[templateName]; ok {
+			// Find which file contains this template
+			var templateFile string
+			tree.Walk(func(n *index.ProjectNode) {
+				if templateFile != "" {
+					return
+				}
+				for _, frag := range n.Fragments {
+					for _, def := range frag.Definitions {
+						if def == t {
+							templateFile = frag.File
+							return
+						}
+					}
+				}
+			})
+			if templateFile != "" {
+				return []Location{{
+					URI: "file://" + templateFile,
+					Range: Range{
+						Start: Position{Line: t.Position.Line - 1, Character: t.Position.Column - 1},
+						End:   Position{Line: t.Position.Line - 1, Character: t.Position.Column - 1 + len(t.Name)},
+					},
+				}}
+			}
+		}
+
+		// Check for $style template (ObjectNode with $ prefix) in parent hierarchy
 		if targetNode.Parent != nil {
 			if template, ok := targetNode.Parent.Children[templateName]; ok {
 				return nodeToLocations(template)
 			}
+		}
+		// Search globally for $style template
+		var found *index.ProjectNode
+		tree.Walk(func(n *index.ProjectNode) {
+			if found != nil {
+				return
+			}
+			if index.NormalizeName(n.RealName) == templateName {
+				found = n
+			}
+		})
+		if found != nil {
+			return nodeToLocations(found)
 		}
 	}
 
@@ -1760,7 +1849,6 @@ func nodeToLocations(node *index.ProjectNode) []Location {
 	}
 	return locations
 }
-
 
 func HandleCodeAction(params CodeActionParams) []CodeAction {
 	var actions []CodeAction
@@ -1828,7 +1916,7 @@ func HandleCodeAction(params CodeActionParams) []CodeAction {
 				},
 			})
 		}
-		
+
 		// 4. Unused GAM/Signal -> add ignore pragma
 		if strings.Contains(diag.Message, "Unused GAM") || strings.Contains(diag.Message, "Unused Signal") {
 			actions = append(actions, CodeAction{
@@ -1856,10 +1944,12 @@ func HandleCodeAction(params CodeActionParams) []CodeAction {
 
 func HandlePrepareCallHierarchy(params CallHierarchyPrepareParams) []CallHierarchyItem {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -1912,9 +2002,11 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	if !ok {
 		return nil
 	}
-	
+
 	view := GlobalSession.ViewOf(params.Item.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
 
@@ -1939,7 +2031,7 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 				producers := getGAMSignalPeers(tree, sig, "Output")
 				for _, prod := range producers {
 					calls = append(calls, CallHierarchyIncomingCall{
-						From: nodeToCallItem(tree, prod),
+						From:       nodeToCallItem(tree, prod),
 						FromRanges: []Range{params.Item.Range},
 					})
 				}
@@ -1952,7 +2044,7 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 		producers := getGAMSignalPeers(tree, node, "Output")
 		for _, prod := range producers {
 			calls = append(calls, CallHierarchyIncomingCall{
-				From: nodeToCallItem(tree, prod),
+				From:       nodeToCallItem(tree, prod),
 				FromRanges: []Range{params.Item.Range},
 			})
 		}
@@ -1966,9 +2058,11 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	if !ok {
 		return nil
 	}
-	
+
 	view := GlobalSession.ViewOf(params.Item.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
 
@@ -1992,7 +2086,7 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 				consumers := getGAMSignalPeers(tree, sig, "Input")
 				for _, cons := range consumers {
 					calls = append(calls, CallHierarchyOutgoingCall{
-						To: nodeToCallItem(tree, cons),
+						To:         nodeToCallItem(tree, cons),
 						FromRanges: []Range{params.Item.Range},
 					})
 				}
@@ -2005,7 +2099,7 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 		consumers := getGAMSignalPeers(tree, node, "Input")
 		for _, cons := range consumers {
 			calls = append(calls, CallHierarchyOutgoingCall{
-				To: nodeToCallItem(tree, cons),
+				To:         nodeToCallItem(tree, cons),
 				FromRanges: []Range{params.Item.Range},
 			})
 		}
@@ -2056,7 +2150,7 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 		if n.Parent == nil || n.Parent.Parent == nil {
 			return
 		}
-		
+
 		match := false
 		if direction == "Input" && n.Parent.Name == "InputSignals" {
 			match = true
@@ -2077,10 +2171,12 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 
 func HandleReferences(params ReferenceParams) []Location {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -2114,7 +2210,9 @@ func HandleReferences(params ReferenceParams) []Location {
 		if params.Context.IncludeDeclaration {
 			var file string
 			tree.Walk(func(n *index.ProjectNode) {
-				if file != "" { return }
+				if file != "" {
+					return
+				}
 				for _, frag := range n.Fragments {
 					for _, def := range frag.Definitions {
 						if def == targetTemplate {
@@ -2452,10 +2550,12 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode) string {
 
 func HandleRename(params RenameParams) *WorkspaceEdit {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
@@ -2894,10 +2994,12 @@ func isComplexValue(val parser.Value) bool {
 
 func HandleInlayHint(params InlayHintParams) []InlayHint {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
-	
+
 	path := uriToPath(params.TextDocument.URI)
 	var hints []InlayHint
 	seenPositions := make(map[Position]bool)
@@ -3092,7 +3194,9 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
-	if view == nil { return nil }
+	if view == nil {
+		return nil
+	}
 	snap := view.Snapshot()
 	tree := snap.Tree()
 
@@ -3243,8 +3347,8 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 				}
 
 				sym := DocumentSymbol{
-					Name: node.RealName,
-					Kind: kind,
+					Name:  node.RealName,
+					Kind:  kind,
 					Range: r,
 					SelectionRange: Range{
 						Start: r.Start,
@@ -3282,7 +3386,6 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 		return nodeSyms
 	}
 
-
 	symbols := getSymbols(tree.Root, nil)
 	for _, iso := range tree.IsolatedFiles {
 		symbols = append(symbols, getSymbols(iso, nil)...)
@@ -3291,16 +3394,15 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 	return symbols
 }
 
-
 func HandleWorkspaceSymbol(params WorkspaceSymbolParams) []SymbolInformation {
 	// Query all views
 	// For simplicity, just use default view if exists or iterate all
 	var symbols []SymbolInformation
-	
+
 	for _, view := range GlobalSession.Views() {
 		snap := view.Snapshot()
 		tree := snap.Tree()
-		
+
 		query := strings.ToLower(params.Query)
 
 		isSignal := func(n *index.ProjectNode) bool {
