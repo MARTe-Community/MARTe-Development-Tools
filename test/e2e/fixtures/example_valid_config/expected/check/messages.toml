@@ -1,0 +1,14 @@
+# Expected messages for check command
+# Leave empty if no errors/warnings expected
+
+[errors]
+# Uncomment to test specific errors
+# [[errors]]
+# file = "config.marte"
+# line = 1
+# message = "some error"
+
+[warnings]
+# Warnings are optional - test will pass if they don't appear
+# [[warnings]]
+# message = "Unused GAM"

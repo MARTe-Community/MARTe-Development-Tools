@@ -1,0 +1,8 @@
++ValidConfig = {
+    Class = "GAM"
+    InputSignals = {
+        Signal1 = {
+            Type = "uint32"
+        }
+    }
+}

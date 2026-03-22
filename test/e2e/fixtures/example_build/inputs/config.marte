@@ -1,0 +1,6 @@
++MyConfig = {
+    Class = "GAM"
+    Signal1 = {
+        Type = "uint32"
+    }
+}

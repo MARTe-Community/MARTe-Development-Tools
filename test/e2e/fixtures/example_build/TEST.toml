@@ -1,0 +1,3 @@
+description = "Test building a simple configuration"
+tools = ["build"]
+timeout = 30
