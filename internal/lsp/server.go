@@ -3078,7 +3078,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 						dsNode := tree.ResolveName(node, dsName, isDataSource)
 						if dsNode != nil {
-							cls := dsNode.Metadata["Class"]
+							cls := getEvaluatedMetadata(tree, dsNode, "Class", node)
 							if cls != "" {
 								if idx := strings.LastIndex(cls, "::"); idx != -1 {
 									cls = cls[idx+2:]
@@ -3198,7 +3198,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 		}
 
 		if ref.Target != nil {
-			cls := ref.Target.Metadata["Class"]
+			cls := getEvaluatedMetadata(tree, ref.Target, "Class", container)
 			if cls != "" {
 				if idx := strings.LastIndex(cls, "::"); idx != -1 {
 					cls = cls[idx+2:]
