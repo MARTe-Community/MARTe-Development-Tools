@@ -1590,6 +1590,7 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	if targetTemplate != nil {
+		fmt.Printf("DEBUG: HandleDef targetTemplate=%v Name=%s Pos=%v\n", targetTemplate, targetTemplate.Name, targetTemplate.Position)
 		// Templates are global, we can just find where they are defined in fragments?
 		// Actually, we store TemplateDefinition in ProjectTree.
 		// We need to know which file it came from.
@@ -1598,39 +1599,8 @@ func HandleDefinition(params DefinitionParams) any {
 		// Or update Indexer to store file in TemplateInfo?
 		// ProjectTree.Templates is map[string]*parser.TemplateDefinition.
 
-		// Search all fragments for the template definition
-		// This is slow, but templates are few.
-		// Better: store file in ProjectTree.Templates?
-		// Let's just find it for now.
-		tree.Walk(func(n *index.ProjectNode) {
-			for _, frag := range n.Fragments {
-				for _, def := range frag.Definitions {
-					if def == targetTemplate {
-						targetVar = nil // Shadow if needed
-						// We found it!
-					}
-				}
-			}
-		})
-
-		// Wait, I can just use targetTemplate.Position.
-		// But I need the File.
-		// Let's find the file by searching NodeMap fragments?
-		// Actually, tree.Walk is better.
-		var file string
-		tree.Walk(func(n *index.ProjectNode) {
-			if file != "" {
-				return
-			}
-			for _, frag := range n.Fragments {
-				for _, def := range frag.Definitions {
-					if def == targetTemplate {
-						file = frag.File
-						return
-					}
-				}
-			}
-		})
+		file := tree.TemplateFiles[targetTemplate.Name]
+		targetVar = nil // Shadow if needed
 
 		if file != "" {
 			return []Location{{
@@ -2226,20 +2196,7 @@ func HandleReferences(params ReferenceParams) []Location {
 		var locations []Location
 		// Declaration
 		if params.Context.IncludeDeclaration {
-			var file string
-			tree.Walk(func(n *index.ProjectNode) {
-				if file != "" {
-					return
-				}
-				for _, frag := range n.Fragments {
-					for _, def := range frag.Definitions {
-						if def == targetTemplate {
-							file = frag.File
-							return
-						}
-					}
-				}
-			})
+			file := tree.TemplateFiles[targetTemplate.Name]
 			if file != "" {
 				locations = append(locations, Location{
 					URI: "file://" + file,
