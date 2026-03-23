@@ -22,6 +22,16 @@ type LSPTestClient struct {
 	documents map[string]string
 	version   int
 	done      chan struct{}
+	metrics   *LSPMetrics
+}
+
+type LSPMetrics struct {
+	mu              sync.Mutex
+	TotalDuration   time.Duration
+	RequestCount    int
+	TotalDelayTime  time.Duration
+	LastRequestTime time.Duration
+	PeakMemoryKB    int64
 }
 
 func NewLSPTestClient(mdtPath, rootDir string) *LSPTestClient {
@@ -48,6 +58,9 @@ func NewLSPTestClient(mdtPath, rootDir string) *LSPTestClient {
 		documents: make(map[string]string),
 		version:   0,
 		done:      make(chan struct{}),
+		metrics: &LSPMetrics{
+			RequestCount: 0,
+		},
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -122,6 +135,12 @@ func (c *LSPTestClient) readLoop() {
 }
 
 func (c *LSPTestClient) call(method string, params, result interface{}) error {
+	return c.callWithTimeout(method, params, result, 30*time.Second)
+}
+
+func (c *LSPTestClient) callWithTimeout(method string, params, result interface{}, timeout time.Duration) error {
+	start := time.Now()
+
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
@@ -170,17 +189,27 @@ func (c *LSPTestClient) call(method string, params, result interface{}) error {
 	}
 	c.mu.Unlock()
 
-	_, err = c.stdin.Write(append(reqBytes, '\n'))
-	if err != nil {
-		return err
+	_, writeErr := c.stdin.Write(append(reqBytes, '\n'))
+	if writeErr != nil {
+		return writeErr
 	}
 
+	var callErr error
 	select {
 	case resp := <-respChan:
-		return resp.(error)
-	case <-time.After(30 * time.Second):
-		return fmt.Errorf("LSP call timeout: %s", method)
+		callErr = resp.(error)
+	case <-time.After(timeout):
+		callErr = fmt.Errorf("LSP call timeout: %s (exceeded %v)", method, timeout)
 	}
+
+	duration := time.Since(start)
+	c.metrics.mu.Lock()
+	c.metrics.TotalDuration += duration
+	c.metrics.RequestCount++
+	c.metrics.LastRequestTime = duration
+	c.metrics.mu.Unlock()
+
+	return callErr
 }
 
 func (c *LSPTestClient) notify(method string, params interface{}) {
@@ -591,4 +620,33 @@ func (c *LSPTestClient) Rename(path string, line, char int, newName string) ([]W
 type WorkspaceEdit struct {
 	URI     string
 	Changes []TextEdit
+}
+
+func (c *LSPTestClient) Metrics() *LSPMetrics {
+	return c.metrics
+}
+
+func (c *LSPTestClient) AddDelayTime(d time.Duration) {
+	c.metrics.mu.Lock()
+	c.metrics.TotalDelayTime += d
+	c.metrics.mu.Unlock()
+}
+
+func (c *LSPTestClient) GetRequestDuration() time.Duration {
+	c.metrics.mu.Lock()
+	defer c.metrics.mu.Unlock()
+	return c.metrics.LastRequestTime
+}
+
+func (c *LSPMetrics) NetDuration() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.TotalDuration - c.TotalDelayTime
+}
+
+func (c *LSPMetrics) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return fmt.Sprintf("Requests: %d, Total: %v, Delay: %v, Net: %v, Last: %v",
+		c.RequestCount, c.TotalDuration, c.TotalDelayTime, c.TotalDuration-c.TotalDelayTime, c.LastRequestTime)
 }

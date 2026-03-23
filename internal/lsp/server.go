@@ -1021,9 +1021,16 @@ func HandleHover(params HoverParams) *Hover {
 		targetDoc := ""
 
 		if res.Reference.Target != nil {
-			targetName = res.Reference.Target.RealName
-			targetDoc = res.Reference.Target.Doc
-			fullInfo = formatNodeInfo(tree, res.Reference.Target)
+			resolvedTarget := tree.ReResolveReference(res.Reference)
+			if resolvedTarget != nil {
+				targetName = resolvedTarget.RealName
+				targetDoc = resolvedTarget.Doc
+				fullInfo = formatNodeInfo(tree, resolvedTarget)
+			} else {
+				targetName = res.Reference.Target.RealName
+				targetDoc = res.Reference.Target.Doc
+				fullInfo = formatNodeInfo(tree, res.Reference.Target)
+			}
 		} else if res.Reference.TargetVariable != nil {
 			v := res.Reference.TargetVariable
 			targetName = v.Name
@@ -1563,7 +1570,10 @@ func HandleDefinition(params DefinitionParams) any {
 
 	if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = res.Reference.Target
+			targetNode = tree.ReResolveReference(res.Reference)
+			if targetNode == nil {
+				targetNode = res.Reference.Target
+			}
 		} else if res.Reference.TargetVariable != nil {
 			targetVar = res.Reference.TargetVariable
 		} else if res.Reference.TargetTemplate != nil {
@@ -1685,7 +1695,12 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	var targetNode *index.ProjectNode
 
 	if res.Reference != nil {
-		targetNode = res.Reference.Target
+		if res.Reference.Target != nil {
+			targetNode = tree.ReResolveReference(res.Reference)
+			if targetNode == nil {
+				targetNode = res.Reference.Target
+			}
+		}
 	} else if res.Node != nil {
 		targetNode = res.Node
 	}
@@ -2194,7 +2209,10 @@ func HandleReferences(params ReferenceParams) []Location {
 		targetNode = res.Node
 	} else if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = res.Reference.Target
+			targetNode = tree.ReResolveReference(res.Reference)
+			if targetNode == nil {
+				targetNode = res.Reference.Target
+			}
 		} else if res.Reference.TargetVariable != nil {
 			targetVar = res.Reference.TargetVariable
 		} else if res.Reference.TargetTemplate != nil {
@@ -2577,7 +2595,10 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 		targetField = res.Field
 	} else if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = res.Reference.Target
+			targetNode = tree.ReResolveReference(res.Reference)
+			if targetNode == nil {
+				targetNode = res.Reference.Target
+			}
 		} else {
 			return nil
 		}

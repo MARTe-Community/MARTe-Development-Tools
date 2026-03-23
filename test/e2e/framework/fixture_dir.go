@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -39,8 +40,9 @@ type ExpectedFormatOutput struct {
 }
 
 type LSPEditStep struct {
-	Delay    int         `toml:"delay"`  // milliseconds to wait before this step
-	Action   string      `toml:"action"` // open, edit, hover, completion, definition
+	Delay    int         `toml:"delay"`   // milliseconds to wait before this step
+	Timeout  int         `toml:"timeout"` // max expected reply time in ms (default 5000)
+	Action   string      `toml:"action"`  // open, edit, hover, completion, definition
 	Path     string      `toml:"path"`
 	Line     int         `toml:"line"`
 	Char     int         `toml:"char"`
@@ -54,7 +56,8 @@ type LSPExpected struct {
 	Hover       string   `toml:"hover"`       // expected hover content
 	Completions []string `toml:"completions"` // expected completion labels
 	Definitions int      `toml:"definitionsCount"`
-	Symbols     []string `toml:"symbols"` // expected symbol names
+	Symbols     []string `toml:"symbols"`     // expected symbol names
+	CompletedIn int      `toml:"completedIn"` // assert processing time < this value (ms)
 }
 
 type ExpectedLSP struct {
@@ -465,11 +468,22 @@ func (r *FixtureTestRunner) runLSPTest(t *testing.T) {
 	client := tf.RunLSP()
 	defer client.Close()
 
+	var memBefore, memAfter runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
+
+	testStart := time.Now()
+	totalDelay := time.Duration(0)
+
 	steps := r.test.ExpectedLSP.Steps
 
 	for i, step := range steps {
+		stepStart := time.Now()
+
 		if step.Delay > 0 {
-			time.Sleep(time.Duration(step.Delay) * time.Millisecond)
+			delay := time.Duration(step.Delay) * time.Millisecond
+			totalDelay += delay
+			time.Sleep(delay)
+			client.AddDelayTime(delay)
 		}
 
 		switch step.Action {
@@ -533,7 +547,16 @@ func (r *FixtureTestRunner) runLSPTest(t *testing.T) {
 			}
 		}
 
-		// Check diagnostics after each step
+		stepDuration := time.Since(stepStart) - time.Duration(step.Delay)*time.Millisecond
+
+		if step.Timeout > 0 && stepDuration > time.Duration(step.Timeout)*time.Millisecond {
+			t.Errorf("Step %d: exceeded timeout. Expected < %dms, took %v", i, step.Timeout, stepDuration)
+		}
+
+		if step.Expected.CompletedIn > 0 && stepDuration > time.Duration(step.Expected.CompletedIn)*time.Millisecond {
+			t.Errorf("Step %d: exceeded completedIn. Expected < %dms, took %v", i, step.Expected.CompletedIn, stepDuration)
+		}
+
 		if step.Expected.DiagsCount > 0 {
 			diags := client.GetDiagnostics(step.Path)
 			if len(diags) != step.Expected.DiagsCount {
@@ -541,6 +564,14 @@ func (r *FixtureTestRunner) runLSPTest(t *testing.T) {
 			}
 		}
 	}
+
+	testDuration := time.Since(testStart) - totalDelay
+
+	runtime.ReadMemStats(&memAfter)
+	peakMemoryKB := int64((memAfter.Alloc - memBefore.Alloc) / 1024)
+
+	t.Logf("LSP test metrics: duration=%v, peak_memory=%dKB, steps=%d",
+		testDuration, peakMemoryKB, len(steps))
 }
 
 func matchesExp(diag Diagnostic, exp ExpectedMessage) bool {
