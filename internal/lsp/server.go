@@ -995,9 +995,9 @@ func HandleHover(params HoverParams) *Hover {
 
 	if res.Node != nil {
 		if res.Node.Target != nil {
-			content = fmt.Sprintf("**Link**: `%s` -> `%s`\n\n%s", res.Node.RealName, res.Node.Target.RealName, formatNodeInfo(tree, res.Node.Target))
+			content = fmt.Sprintf("**Link**: `%s` -> `%s`\n\n%s", res.Node.RealName, res.Node.Target.RealName, formatNodeInfo(tree, res.Node.Target, container))
 		} else {
-			content = formatNodeInfo(tree, res.Node)
+			content = formatNodeInfo(tree, res.Node, container)
 		}
 	} else if res.Field != nil {
 		content = fmt.Sprintf("**Field**: `%s`", res.Field.Name)
@@ -1021,15 +1021,15 @@ func HandleHover(params HoverParams) *Hover {
 		targetDoc := ""
 
 		if res.Reference.Target != nil {
-			resolvedTarget := tree.ReResolveReference(res.Reference)
+			resolvedTarget := res.Reference.Target
 			if resolvedTarget != nil {
 				targetName = resolvedTarget.RealName
 				targetDoc = resolvedTarget.Doc
-				fullInfo = formatNodeInfo(tree, resolvedTarget)
+				fullInfo = formatNodeInfo(tree, resolvedTarget, container)
 			} else {
 				targetName = res.Reference.Target.RealName
 				targetDoc = res.Reference.Target.Doc
-				fullInfo = formatNodeInfo(tree, res.Reference.Target)
+				fullInfo = formatNodeInfo(tree, res.Reference.Target, container)
 			}
 		} else if res.Reference.TargetVariable != nil {
 			v := res.Reference.TargetVariable
@@ -1570,7 +1570,7 @@ func HandleDefinition(params DefinitionParams) any {
 
 	if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = tree.ReResolveReference(res.Reference)
+			targetNode = res.Reference.Target
 			if targetNode == nil {
 				targetNode = res.Reference.Target
 			}
@@ -1696,7 +1696,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 
 	if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = tree.ReResolveReference(res.Reference)
+			targetNode = res.Reference.Target
 			if targetNode == nil {
 				targetNode = res.Reference.Target
 			}
@@ -1735,7 +1735,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	}
 
 	// 2. Resolve via Class field (if it points to a template $)
-	class := getEvaluatedMetadata(tree, targetNode, "Class")
+	class := getEvaluatedMetadata(tree, targetNode, "Class", nil)
 	if class != "" {
 		// First check if it's a #template definition (stored in Templates map)
 		if t, ok := tree.Templates[class]; ok {
@@ -2209,7 +2209,7 @@ func HandleReferences(params ReferenceParams) []Location {
 		targetNode = res.Node
 	} else if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = tree.ReResolveReference(res.Reference)
+			targetNode = res.Reference.Target
 			if targetNode == nil {
 				targetNode = res.Reference.Target
 			}
@@ -2353,16 +2353,18 @@ func HandleReferences(params ReferenceParams) []Location {
 	return locations
 }
 
-func getEvaluatedMetadata(tree *index.ProjectTree, node *index.ProjectNode, key string) string {
-	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
-		return tree.ValueToString(tree.Evaluate(fields[len(fields)-1].Value, node))
+func getEvaluatedMetadata(tree *index.ProjectTree, node *index.ProjectNode, key string, container *index.ProjectNode) string {
+	f := tree.GetActiveField(node, key, container)
+	if f != nil {
+		return tree.ValueToString(tree.Evaluate(f.Value, node))
 	}
 	return node.Metadata[key]
 }
 
-func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode) string {
+func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container *index.ProjectNode) string {
 	info := ""
-	if class := node.Metadata["Class"]; class != "" {
+	class := getEvaluatedMetadata(tree, node, "Class", container)
+	if class != "" {
 		if idx := strings.LastIndex(class, "::"); idx != -1 {
 			class = class[idx+2:]
 		}
@@ -2371,8 +2373,8 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode) string {
 		info = fmt.Sprintf("`%s`\n\n", node.RealName)
 	}
 	// Check if it's a Signal (has Type or DataSource)
-	typ := getEvaluatedMetadata(tree, node, "Type")
-	ds := getEvaluatedMetadata(tree, node, "DataSource")
+	typ := getEvaluatedMetadata(tree, node, "Type", container)
+	ds := getEvaluatedMetadata(tree, node, "DataSource", container)
 
 	if ds == "" {
 		if node.Parent != nil && node.Parent.Name == "Signals" {
@@ -2595,7 +2597,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 		targetField = res.Field
 	} else if res.Reference != nil {
 		if res.Reference.Target != nil {
-			targetNode = tree.ReResolveReference(res.Reference)
+			targetNode = res.Reference.Target
 			if targetNode == nil {
 				targetNode = res.Reference.Target
 			}
@@ -2939,9 +2941,9 @@ func getTypeSize(typeName string) int64 {
 
 func calculateSignalElements(tree *index.ProjectTree, node *index.ProjectNode) (int64, int64, string) {
 	// Returns: (totalElements, byteSize, description)
-	typ := getEvaluatedMetadata(tree, node, "Type")
+	typ := getEvaluatedMetadata(tree, node, "Type", nil)
 	if typ == "" && node.Target != nil {
-		typ = getEvaluatedMetadata(tree, node.Target, "Type")
+		typ = getEvaluatedMetadata(tree, node.Target, "Type", nil)
 	}
 	typeSize := getTypeSize(typ)
 
@@ -2968,14 +2970,14 @@ func calculateSignalElements(tree *index.ProjectTree, node *index.ProjectNode) (
 		}
 	} else {
 		// Base
-		elems := getEvaluatedMetadata(tree, node, "NumberOfElements")
-		dims := getEvaluatedMetadata(tree, node, "NumberOfDimensions")
+		elems := getEvaluatedMetadata(tree, node, "NumberOfElements", nil)
+		dims := getEvaluatedMetadata(tree, node, "NumberOfDimensions", nil)
 
 		if elems == "" && node.Target != nil {
-			elems = getEvaluatedMetadata(tree, node.Target, "NumberOfElements")
+			elems = getEvaluatedMetadata(tree, node.Target, "NumberOfElements", nil)
 		}
 		if dims == "" && node.Target != nil {
-			dims = getEvaluatedMetadata(tree, node.Target, "NumberOfDimensions")
+			dims = getEvaluatedMetadata(tree, node.Target, "NumberOfDimensions", nil)
 		}
 
 		e, _ := strconv.ParseInt(elems, 0, 64)
@@ -3040,10 +3042,10 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 			// Signal Name Hint (::TYPE[SIZE])
 			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
-				typ := getEvaluatedMetadata(tree, node, "Type")
+				typ := getEvaluatedMetadata(tree, node, "Type", nil)
 
 				if typ == "" && node.Target != nil {
-					typ = getEvaluatedMetadata(tree, node.Target, "Type")
+					typ = getEvaluatedMetadata(tree, node.Target, "Type", nil)
 				}
 
 				if typ != "" {

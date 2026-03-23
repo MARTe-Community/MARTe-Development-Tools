@@ -1054,279 +1054,117 @@ func (pt *ProjectTree) ResolveReferences(activeFragments map[*Fragment]bool) {
 	}
 }
 
-
-
-targetNode := ref.Target
-
-	if !pt.isInConditionalFragment(targetNode) {
-		return ref.Target
+func (pt *ProjectTree) getBranchIDForNodeFragment(node *ProjectNode, targetFrag *Fragment) string {
+	if node == nil || node.Parent == nil || targetFrag.Source == nil {
+		return targetFrag.BranchID
 	}
 
-	frag := pt.findConditionalFragmentForNode(targetNode)
-	if frag == nil {
-		return ref.Target
+	// If the fragment already has a BranchID, return it
+	if targetFrag.BranchID != "" {
+		return targetFrag.BranchID
 	}
 
-	parts := strings.Split(frag.BranchID, ":")
-	if len(parts) < 3 {
-		return ref.Target
-	}
-	ifBlockLine, err1 := strconv.Atoi(parts[0])
-	ifBlockCol, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return ref.Target
-	}
-	targetBranchID := parts[2]
-
-	ifBlock := &parser.IfBlock{Position: parser.Position{Line: ifBlockLine, Column: ifBlockCol}}
-
-	evalCtx := &EvaluationContext{
-		Variables: make(map[string]parser.Value),
-		Parent:    nil,
-		Tree:      pt,
-	}
-
-	container := pt.getNodeContaining(ref.File, ref.Position)
-
-	if container != nil {
-		for _, f := range container.Fragments {
-			for _, def := range f.Definitions {
-				if vd, ok := def.(*parser.VariableDefinition); ok {
-					if vd.DefaultValue != nil {
-						evalCtx.Variables[vd.Name] = vd.DefaultValue
-					}
+	// Look in the parent node's fragments for the one that defines this object
+	for _, pFrag := range node.Parent.Fragments {
+		for _, def := range pFrag.Definitions {
+			if def == targetFrag.Source {
+				// We found the parent fragment that defines this object.
+				// Does it have a BranchID?
+				if pFrag.BranchID != "" {
+					return pFrag.BranchID
 				}
+				// If not, we could recursively check its source, but objects
+				// inside IfBlocks have their definition in the IfBlock fragment directly.
 			}
 		}
 	}
 
-	cond := pt.EvaluateValue(ifBlock.Condition, evalCtx)
-	isTrue := pt.IsTrue(cond)
-
-	activeBranch := "then"
-	if !isTrue {
-		activeBranch = "else"
-	}
-
-	if targetBranchID == activeBranch {
-		return ref.Target
-	}
-
-	newTargetID := fmt.Sprintf("%d:%d:%s", ifBlockLine, ifBlockCol, activeBranch)
-	for _, cand := range pt.NodeMap[ref.Name] {
-		for _, f := range cand.Fragments {
-			if f.IsConditional && f.BranchID == newTargetID {
-				return cand
-			}
-		}
-	}
-
-	return ref.Target
+	return ""
 }
-					}
+
+func (pt *ProjectTree) GetActiveField(node *ProjectNode, key string, container *ProjectNode) *EvaluatedField {
+	fields := node.Fields[key]
+	if len(fields) == 0 {
+		return nil
+	}
+
+	activeField := &fields[len(fields)-1]
+
+	for i := len(fields) - 1; i >= 0; i-- {
+		f := fields[i]
+		var frag *Fragment
+		for _, nodeFrag := range node.Fragments {
+			for _, def := range nodeFrag.Definitions {
+				if def == f.Raw {
+					frag = nodeFrag
+					break
 				}
 			}
-		} else {
-			fmt.Printf("DEBUG ReResolveReference: NodeMap[%q] = nil\n", ref.Name)
+			if frag != nil {
+				break
+			}
 		}
-	} else {
-		fmt.Printf("DEBUG ReResolveReference: NodeMap = nil\n")
-	}
 
-	fmt.Printf("DEBUG ReResolveReference: Checking if target %s is in conditional fragment...\n", 
-		func() string {
-			if targetNode == nil { return "<nil>" }
-			return targetNode.RealName
-		}())
+		if frag == nil || !frag.IsConditional {
+			return &f
+		}
 
-	frag := pt.findConditionalFragmentForNode(targetNode)
-	if frag == nil {
-		fmt.Printf("DEBUG ReResolveReference: target is NOT in conditional fragment\n")
-		return ref.Target
-	}
+		branchID := pt.getBranchIDForNodeFragment(node, frag)
+		if branchID != "" {
+			parts := strings.Split(branchID, ":")
+			if len(parts) >= 3 {
+				ifBlockLine, _ := strconv.Atoi(parts[0])
+				ifBlockCol, _ := strconv.Atoi(parts[1])
+				targetBranchID := parts[2]
 
-	fmt.Printf("DEBUG ReResolveReference: target frag BranchID=%s\n", frag.BranchID)
-
-	parts := strings.Split(frag.BranchID, ":")
-	if len(parts) < 3 {
-		fmt.Printf("DEBUG ReResolveReference: invalid BranchID format: %q\n", frag.BranchID)
-		return ref.Target
-	}
-	ifBlockLine, err1 := strconv.Atoi(parts[0])
-	ifBlockCol, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		fmt.Printf("DEBUG ReResolveReference: failed to parse line/col from %q and %q: %v, %v\n", 
-			parts[0], parts[1], err1, err2)
-		return ref.Target
-	}
-	targetBranchID := parts[2]
-
-	ifBlock := &parser.IfBlock{Position: parser.Position{Line: ifBlockLine, Column: ifBlockCol}}
-	fmt.Printf("DEBUG ReResolveReference: target's branch=%s, IfBlock at %d:%d\n", targetBranchID, ifBlockLine, ifBlockCol)
-
-	evalCtx := &EvaluationContext{
-		Variables: make(map[string]parser.Value),
-		Parent:    nil,
-		Tree:      pt,
-	}
-
-	container := pt.getNodeContaining(ref.File, ref.Position)
-	fmt.Printf("DEBUG ReResolveReference: container=%s\n", 
-		func() string {
-			if container == nil { return "<nil>" }
-			return container.RealName
-		}())
-
-	if container != nil {
-		fmt.Printf("DEBUG ReResolveReference: Scanning container fragments for variables...\n")
-		for _, f := range container.Fragments {
-			if f != nil {
-				fmt.Printf("  Fragment: File=%q, IsConditional=%t\n", f.File, f.IsConditional)
-				for _, def := range f.Definitions {
-					if vd, ok := def.(*parser.VariableDefinition); ok {
-						if vd.DefaultValue != nil {
-							evalCtx.Variables[vd.Name] = vd.DefaultValue
-							fmt.Printf("    Added variable %s = %v\n", vd.Name, vd.DefaultValue)
-						} else {
-							fmt.Printf("    Variable %s has no default value\n", vd.Name)
+				var actualIfBlock *parser.IfBlock
+				if node.Parent != nil {
+					for _, pf := range node.Parent.Fragments {
+						for _, pdef := range pf.Definitions {
+							if ib, ok := pdef.(*parser.IfBlock); ok {
+								if ib.Position.Line == ifBlockLine && ib.Position.Column == ifBlockCol {
+									actualIfBlock = ib
+									break
+								}
+							}
 						}
 					}
 				}
-			}
-		}
-	}
 
-	cond := pt.EvaluateValue(ifBlock.Condition, evalCtx)
-	fmt.Printf("DEBUG ReResolveReference: evaluated condition %v to %v\n", ifBlock.Condition, cond)
-	isTrue := pt.IsTrue(cond)
+				if actualIfBlock != nil {
+					evalCtx := &EvaluationContext{
+						Variables: make(map[string]parser.Value),
+						Parent:    nil,
+						Tree:      pt,
+					}
+					if container != nil {
+						for _, cf := range container.Fragments {
+							for _, def := range cf.Definitions {
+								if vd, ok := def.(*parser.VariableDefinition); ok {
+									if vd.DefaultValue != nil {
+										evalCtx.Variables[vd.Name] = vd.DefaultValue
+									}
+								}
+							}
+						}
+					}
 
-	activeBranch := "then"
-	if !isTrue {
-		activeBranch = "else"
-	}
+					cond := pt.EvaluateValue(actualIfBlock.Condition, evalCtx)
+					isTrue := pt.IsTrue(cond)
+					activeBranch := "then"
+					if !isTrue {
+						activeBranch = "else"
+					}
 
-	fmt.Printf("DEBUG ReResolveReference: condition eval to %v, activeBranch=%s, targetBranchID=%s\n", isTrue, activeBranch, targetBranchID)
-
-	if targetBranchID == activeBranch {
-		fmt.Printf("DEBUG ReResolveReference: target branch matches active, returning target\n")
-		return ref.Target
-	}
-
-	newTargetID := fmt.Sprintf("%d:%d:%s", ifBlockLine, ifBlockCol, activeBranch)
-	fmt.Printf("DEBUG ReResolveReference: looking for candidate with branchID=%s\n", newTargetID)
-	for _, cand := range pt.NodeMap[ref.Name] {
-		fmt.Printf("DEBUG ReResolveReference: checking candidate %s\n", cand.RealName)
-		for _, f := range cand.Fragments {
-			fmt.Printf("DEBUG ReResolveReference:   frag: IsConditional=%v, BranchID=%s\n", f.IsConditional, f.BranchID)
-			if f.IsConditional && f.BranchID == newTargetID {
-				fmt.Printf("DEBUG ReResolveReference:   FOUND MATCH! Returning %s\n", cand.RealName)
-				return cand
-			}
-		}
-	}
-
-	fmt.Printf("DEBUG ReResolveReference: no matching candidate found\n")
-	return ref.Target
-}
-			if ref.Name == "" {
-				return fmt.Sprintf("<nil-name>, target=%v", ref.Target)
-			}
-			return ref.Name
-		}())
-
-	if ref == nil || ref.Target == nil {
-		fmt.Printf("DEBUG ReResolveReference: returning nil target\n")
-		return ref.Target
-	}
-
-	targetNode := ref.Target
-	fmt.Printf("DEBUG ReResolveReference: ref=%s, target=%s, refPos=%d:%d\n",
-		ref.Name, targetNode.RealName, ref.Position.Line, ref.Position.Column)
-
-	frag := pt.findConditionalFragmentForNode(targetNode)
-	if frag == nil {
-		fmt.Printf("DEBUG ReResolveReference: target is NOT in conditional fragment\n")
-		return ref.Target
-	}
-
-	fmt.Printf("DEBUG ReResolveReference: target frag BranchID=%s\n", frag.BranchID)
-
-	parts := strings.Split(frag.BranchID, ":")
-	if len(parts) < 3 {
-		fmt.Printf("DEBUG ReResolveReference: invalid BranchID format: %q\n", frag.BranchID)
-		return ref.Target
-	}
-	ifBlockLine, err1 := strconv.Atoi(parts[0])
-	ifBlockCol, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		fmt.Printf("DEBUG ReResolveReference: failed to parse line/col from %q and %q: %v, %v\n",
-			parts[0], parts[1], err1, err2)
-		return ref.Target
-	}
-	targetBranchID := parts[2]
-
-	ifBlock := &parser.IfBlock{Position: parser.Position{Line: ifBlockLine, Column: ifBlockCol}}
-	fmt.Printf("DEBUG ReResolveReference: target's branch=%s, IfBlock at %d:%d\n", targetBranchID, ifBlockLine, ifBlockCol)
-
-	evalCtx := &EvaluationContext{
-		Variables: make(map[string]parser.Value),
-		Parent:    nil,
-		Tree:      pt,
-	}
-
-	container := pt.getNodeContaining(ref.File, ref.Position)
-	fmt.Printf("DEBUG ReResolveReference: container=%s\n",
-		func() string {
-			if container == nil {
-				return "<nil>"
-			}
-			return container.RealName
-		}())
-
-	if container != nil {
-		for _, f := range container.Fragments {
-			for _, def := range f.Definitions {
-				if vd, ok := def.(*parser.VariableDefinition); ok {
-					if vd.DefaultValue != nil {
-						evalCtx.Variables[vd.Name] = vd.DefaultValue
-						fmt.Printf("DEBUG ReResolveReference: added variable %s = %v\n", vd.Name, vd.DefaultValue)
+					if activeBranch == targetBranchID {
+						return &f
 					}
 				}
 			}
 		}
 	}
 
-	cond := pt.EvaluateValue(ifBlock.Condition, evalCtx)
-	fmt.Printf("DEBUG ReResolveReference: evaluated condition %v to %v\n", ifBlock.Condition, cond)
-	isTrue := pt.IsTrue(cond)
-
-	activeBranch := "then"
-	if !isTrue {
-		activeBranch = "else"
-	}
-
-	fmt.Printf("DEBUG ReResolveReference: condition eval to %v, activeBranch=%s, targetBranchID=%s\n", isTrue, activeBranch, targetBranchID)
-
-	if targetBranchID == activeBranch {
-		fmt.Printf("DEBUG ReResolveReference: target branch matches active, returning target\n")
-		return ref.Target
-	}
-
-	newTargetID := fmt.Sprintf("%d:%d:%s", ifBlockLine, ifBlockCol, activeBranch)
-	fmt.Printf("DEBUG ReResolveReference: looking for candidate with branchID=%s\n", newTargetID)
-	for _, cand := range pt.NodeMap[ref.Name] {
-		fmt.Printf("DEBUG ReResolveReference: checking candidate %s\n", cand.RealName)
-		for _, f := range cand.Fragments {
-			fmt.Printf("DEBUG ReResolveReference:   frag: IsConditional=%v, BranchID=%s\n", f.IsConditional, f.BranchID)
-			if f.IsConditional && f.BranchID == newTargetID {
-				fmt.Printf("DEBUG ReResolveReference:   FOUND MATCH! Returning %s\n", cand.RealName)
-				return cand
-			}
-		}
-	}
-
-	fmt.Printf("DEBUG ReResolveReference: no matching candidate found\n")
-	return ref.Target
+	return activeField
 }
 
 func (pt *ProjectTree) isInConditionalFragment(node *ProjectNode) bool {
@@ -1704,8 +1542,8 @@ func (pt *ProjectTree) findNodeContaining(node *ProjectNode, file string, pos pa
 					(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
 					return node
 				}
-			} else {
-				// Package-level fragment matches if not inside any child object
+			} else if !frag.IsConditional && frag.BranchID == "" {
+				// True package/file-level fragment matches if not inside any child object
 				return node
 			}
 		}
