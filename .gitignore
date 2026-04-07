@@ -32,3 +32,7 @@ build
 node_modules/
 package.*
 package-*
+
+.opencode
+.claude
+CLAUDE.md

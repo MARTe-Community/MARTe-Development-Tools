@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +20,9 @@ type LSPTestClient struct {
 	rootDir   string
 	mu        sync.Mutex
 	nextID    int
+	// pending maps request id → response channel
+	pending   map[int]chan json.RawMessage
+	// handlers maps notification method → handler
 	handlers  map[string]func(json.RawMessage)
 	documents map[string]string
 	version   int
@@ -54,6 +59,7 @@ func NewLSPTestClient(mdtPath, rootDir string) *LSPTestClient {
 		stdout:    bufio.NewReader(stdout),
 		rootDir:   rootDir,
 		nextID:    1,
+		pending:   make(map[int]chan json.RawMessage),
 		handlers:  make(map[string]func(json.RawMessage)),
 		documents: make(map[string]string),
 		version:   0,
@@ -72,6 +78,117 @@ func NewLSPTestClient(mdtPath, rootDir string) *LSPTestClient {
 	client.initialize(rootDir)
 
 	return client
+}
+
+// writeMsg sends a JSON-RPC message with proper Content-Length framing.
+func (c *LSPTestClient) writeMsg(msg interface{}) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(data))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, err := io.WriteString(c.stdin, header); err != nil {
+		return err
+	}
+	_, err = c.stdin.Write(data)
+	return err
+}
+
+// readMsg reads one JSON-RPC message from stdout using Content-Length framing.
+func (c *LSPTestClient) readMsg() (json.RawMessage, error) {
+	// Read headers until blank line
+	contentLen := -1
+	for {
+		line, err := c.stdout.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		if strings.HasPrefix(line, "Content-Length:") {
+			n, err := strconv.Atoi(strings.TrimSpace(line[len("Content-Length:"):]))
+			if err != nil {
+				return nil, fmt.Errorf("bad Content-Length: %v", err)
+			}
+			contentLen = n
+		}
+	}
+	if contentLen < 0 {
+		return nil, fmt.Errorf("missing Content-Length header")
+	}
+	body := make([]byte, contentLen)
+	if _, err := io.ReadFull(c.stdout, body); err != nil {
+		return nil, err
+	}
+	return json.RawMessage(body), nil
+}
+
+func (c *LSPTestClient) readLoop() {
+	for {
+		select {
+		case <-c.done:
+			return
+		default:
+		}
+
+		raw, err := c.readMsg()
+		if err != nil {
+			select {
+			case <-c.done:
+				return
+			default:
+				// Connection lost or server exited — drain pending with errors.
+				c.mu.Lock()
+				for id, ch := range c.pending {
+					errMsg, _ := json.Marshal(map[string]interface{}{
+						"error": map[string]interface{}{"message": err.Error()},
+					})
+					ch <- errMsg
+					delete(c.pending, id)
+				}
+				c.mu.Unlock()
+				return
+			}
+		}
+
+		// Parse to determine if it's a response (has "id") or notification (has "method", no "id")
+		var envelope struct {
+			ID     *json.RawMessage `json:"id"`
+			Method string           `json:"method"`
+			Params json.RawMessage  `json:"params"`
+		}
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			continue
+		}
+
+		if envelope.ID != nil {
+			// Response to a request we sent
+			var id int
+			if err := json.Unmarshal(*envelope.ID, &id); err == nil {
+				c.mu.Lock()
+				ch, ok := c.pending[id]
+				if ok {
+					delete(c.pending, id)
+				}
+				c.mu.Unlock()
+				if ok {
+					ch <- raw
+				}
+			}
+		} else if envelope.Method != "" {
+			// Notification from server
+			c.mu.Lock()
+			handler, ok := c.handlers[envelope.Method]
+			c.mu.Unlock()
+			if ok {
+				handler(envelope.Params)
+			}
+		}
+	}
 }
 
 func (c *LSPTestClient) initialize(rootDir string) {
@@ -95,43 +212,7 @@ func (c *LSPTestClient) initialize(rootDir string) {
 
 	var result map[string]interface{}
 	c.call("initialize", params, &result)
-
 	c.notify("initialized", nil)
-}
-
-func (c *LSPTestClient) readLoop() {
-	decoder := json.NewDecoder(c.stdout)
-	for {
-		select {
-		case <-c.done:
-			return
-		default:
-		}
-
-		c.stdout.ReadByte()
-		c.stdout.UnreadByte()
-
-		var msg map[string]interface{}
-		if err := decoder.Decode(&msg); err != nil {
-			select {
-			case <-c.done:
-				return
-			case <-time.After(10 * time.Millisecond):
-				continue
-			}
-		}
-
-		method, ok := msg["method"].(string)
-		if !ok {
-			continue
-		}
-
-		params, _ := json.Marshal(msg["params"])
-
-		if handler, exists := c.handlers[method]; exists {
-			handler(params)
-		}
-	}
 }
 
 func (c *LSPTestClient) call(method string, params, result interface{}) error {
@@ -144,6 +225,8 @@ func (c *LSPTestClient) callWithTimeout(method string, params, result interface{
 	c.mu.Lock()
 	id := c.nextID
 	c.nextID++
+	respChan := make(chan json.RawMessage, 1)
+	c.pending[id] = respChan
 	c.mu.Unlock()
 
 	req := map[string]interface{}{
@@ -153,52 +236,31 @@ func (c *LSPTestClient) callWithTimeout(method string, params, result interface{
 		"params":  params,
 	}
 
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		return err
-	}
-
-	respChan := make(chan interface{})
-	responseHandler := func(resp json.RawMessage) {
-		var respObj map[string]interface{}
-		if err := json.Unmarshal(resp, &respObj); err != nil {
-			respChan <- err
-			return
-		}
-
-		if errObj, ok := respObj["error"]; ok {
-			respChan <- fmt.Errorf("LSP error: %v", errObj)
-			return
-		}
-
-		if result != nil {
-			if err := json.Unmarshal(respObj["result"].(json.RawMessage), result); err != nil {
-				respChan <- err
-				return
-			}
-		}
-		respChan <- nil
-	}
-
-	c.mu.Lock()
-	c.handlers[fmt.Sprintf("response-%d", id)] = func(resp json.RawMessage) {
-		responseHandler(resp)
+	if err := c.writeMsg(req); err != nil {
 		c.mu.Lock()
-		delete(c.handlers, fmt.Sprintf("response-%d", id))
+		delete(c.pending, id)
 		c.mu.Unlock()
-	}
-	c.mu.Unlock()
-
-	_, writeErr := c.stdin.Write(append(reqBytes, '\n'))
-	if writeErr != nil {
-		return writeErr
+		return err
 	}
 
 	var callErr error
 	select {
-	case resp := <-respChan:
-		callErr = resp.(error)
+	case raw := <-respChan:
+		var respObj struct {
+			Error  *struct{ Message string } `json:"error"`
+			Result json.RawMessage           `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &respObj); err != nil {
+			callErr = err
+		} else if respObj.Error != nil {
+			callErr = fmt.Errorf("LSP error: %s", respObj.Error.Message)
+		} else if result != nil && respObj.Result != nil {
+			callErr = json.Unmarshal(respObj.Result, result)
+		}
 	case <-time.After(timeout):
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
 		callErr = fmt.Errorf("LSP call timeout: %s (exceeded %v)", method, timeout)
 	}
 
@@ -218,9 +280,7 @@ func (c *LSPTestClient) notify(method string, params interface{}) {
 		"method":  method,
 		"params":  params,
 	}
-
-	reqBytes, _ := json.Marshal(req)
-	c.stdin.Write(append(reqBytes, '\n'))
+	c.writeMsg(req) //nolint:errcheck
 }
 
 func (c *LSPTestClient) OpenFile(path, content string) string {
@@ -361,9 +421,7 @@ func (c *LSPTestClient) Definition(path string, line, char int) ([]Location, err
 		},
 	}
 
-	var result struct {
-		Locations []map[string]interface{} `json:"locations"`
-	}
+	var result []map[string]interface{}
 
 	err := c.call(uri, params, &result)
 	if err != nil {
@@ -371,10 +429,10 @@ func (c *LSPTestClient) Definition(path string, line, char int) ([]Location, err
 	}
 
 	var locs []Location
-	for _, l := range result.Locations {
+	for _, l := range result {
 		loc := Location{}
-		if uri, ok := l["uri"].(string); ok {
-			loc.URI = uri
+		if u, ok := l["uri"].(string); ok {
+			loc.URI = u
 		}
 		if rng, ok := l["range"].(map[string]interface{}); ok {
 			if start, ok := rng["start"].(map[string]interface{}); ok {

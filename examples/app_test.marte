@@ -1,3 +1,4 @@
+#let Value: uint32 = 10
 +App = {
   Class = RealTimeApplication
   +Data = {

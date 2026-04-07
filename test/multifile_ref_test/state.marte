@@ -1,0 +1,14 @@
+#package MyProject.App
+
++States = {
+    Class = ReferenceContainer
+    +State = {
+        Class = RealTimeState
+        Threads = {
+            +Thread = {
+                Class = RealTimeThread
+                Functions = { MyGAM }
+            }
+        }
+    }
+}

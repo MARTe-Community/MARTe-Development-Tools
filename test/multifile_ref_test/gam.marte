@@ -1,0 +1,15 @@
+#package MyProject
+
++MyGAM = {
+    Class = IOGAM
+    InputSignals = {
+        SigA = {
+            Type = uint32
+        }
+    }
+    OutputSignals = {
+        SigB = {
+            Type = uint32
+        }
+    }
+}

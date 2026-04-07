@@ -1052,6 +1052,26 @@ func (pt *ProjectTree) ResolveReferences(activeFragments map[*Fragment]bool) {
 			pt.References = append(pt.References, *ref) // Keep legacy slice updated
 		}
 	}
+
+	// Also link signal usages (GAM InputSignals/OutputSignals) to their DataSource signal definition.
+	// Only Case 2 of GetSignalInfo (usages) should set Target; skip signal definitions (Case 1)
+	// to avoid self-referencing and false "referenced" marks in unused-signal detection.
+	pt.walk(func(n *ProjectNode) {
+		if n.Parent == nil {
+			return
+		}
+		// Skip signal definitions (inside a DataSource's Signals node)
+		if n.Parent.Name == "Signals" && pt.IsDataSource(n.Parent.Parent) {
+			return
+		}
+		if dsNode, sigName := pt.GetSignalInfo(n); dsNode != nil && sigName != "" {
+			if signals, ok := dsNode.Children["Signals"]; ok {
+				if target, ok := signals.Children[NormalizeName(sigName)]; ok {
+					n.Target = target
+				}
+			}
+		}
+	})
 }
 
 func (pt *ProjectTree) getBranchIDForNodeFragment(node *ProjectNode, targetFrag *Fragment) string {
@@ -1998,6 +2018,108 @@ func (pt *ProjectTree) EvaluateValueWithGlobalVars(val parser.Value) parser.Valu
 		return val
 	}
 	return res
+}
+
+func (pt *ProjectTree) IsGAM(node *ProjectNode) bool {
+	if node.RealName == "" || (node.RealName[0] != '+' && node.RealName[0] != '$') {
+		return false
+	}
+	_, hasInput := node.Children["InputSignals"]
+	_, hasOutput := node.Children["OutputSignals"]
+	return hasInput || hasOutput
+}
+
+func (pt *ProjectTree) IsDataSource(node *ProjectNode) bool {
+	if node.Parent != nil && node.Parent.Name == "Data" {
+		return true
+	}
+	_, hasSignals := node.Children["Signals"]
+	return hasSignals
+}
+
+func (pt *ProjectTree) IsSignal(node *ProjectNode) bool {
+	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
+		return false
+	}
+	if node.Parent != nil && node.Parent.Name == "Signals" {
+		if pt.IsDataSource(node.Parent.Parent) {
+			return true
+		}
+	}
+	return false
+}
+
+func (pt *ProjectTree) GetSignalInfo(node *ProjectNode) (*ProjectNode, string) {
+	if node.Parent == nil {
+		return nil, ""
+	}
+
+	// Case 1: Definition
+	if node.Parent.Name == "Signals" && pt.IsDataSource(node.Parent.Parent) {
+		return node.Parent.Parent, node.RealName
+	}
+
+	// Case 2: Usage
+	if (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") && pt.IsGAM(node.Parent.Parent) {
+		dsName := ""
+		sigName := node.RealName
+
+		// Scan fields
+		for _, frag := range node.Fragments {
+			for _, def := range frag.Definitions {
+				if f, ok := def.(*parser.Field); ok {
+					if f.Name == "DataSource" {
+						switch v := f.Value.(type) {
+						case *parser.StringValue:
+							dsName = v.Value
+						case *parser.ReferenceValue:
+							dsName = v.Value
+						}
+					}
+					if f.Name == "Alias" {
+						switch v := f.Value.(type) {
+						case *parser.StringValue:
+							sigName = v.Value
+						case *parser.ReferenceValue:
+							sigName = v.Value
+						}
+					}
+				}
+			}
+		}
+
+		if dsName != "" {
+			dsNode := pt.resolveName(node, dsName, pt.IsDataSource)
+			return dsNode, sigName
+		}
+	}
+	return nil, ""
+}
+
+func (pt *ProjectTree) FindSignalPeers(target *ProjectNode) []*ProjectNode {
+	dsNode, sigName := pt.GetSignalInfo(target)
+	if dsNode == nil || sigName == "" {
+		return nil
+	}
+
+	var peers []*ProjectNode
+
+	// Add definition if exists
+	if signals, ok := dsNode.Children["Signals"]; ok {
+		if def, ok := signals.Children[NormalizeName(sigName)]; ok {
+			peers = append(peers, def)
+		}
+	}
+
+	// Find usages
+	pt.walk(func(n *ProjectNode) {
+		d, s := pt.GetSignalInfo(n)
+		if d == dsNode && s == sigName {
+			peers = append(peers, n)
+		}
+	})
+
+	return peers
 }
 
 func (pt *ProjectTree) valueToString(val parser.Value) string {

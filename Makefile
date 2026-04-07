@@ -1,7 +1,7 @@
 BINARY_NAME=mdt
 BUILD_DIR=build
 
-.PHONY: all build test coverage clean install vet fmt
+.PHONY: all build test test-e2e coverage clean install vet fmt
 
 all: vet test build
 
@@ -14,10 +14,13 @@ build_codac:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/Codac/$(BINARY_NAME) ./cmd/mdt
 
 test:
-	go test -v ./test/...
+	go test -v ./test/
+
+test-e2e: build
+	go test -v -timeout 120s ./test/e2e/...
 
 coverage:
-	go test -cover -coverprofile=coverage.out ./test/... -coverpkg=./internal/...
+	go test -cover -coverprofile=coverage.out ./test/ -coverpkg=./internal/...
 	go tool cover -func=coverage.out
 
 vet:

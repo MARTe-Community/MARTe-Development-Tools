@@ -25,6 +25,7 @@ import (
 	"cuelang.org/go/cue"
 )
 
+
 type CompletionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
@@ -323,6 +324,10 @@ type TextEdit struct {
 
 var SynchronousValidation = true // Default to true for tests
 
+// PublishDiagnosticsFn is set by the go-lsp handler to publish diagnostics via the LSP client.
+// When nil, diagnostics are published via the legacy JSON-RPC send() path (test/legacy mode).
+var PublishDiagnosticsFn func(ctx context.Context, fileURI string, diags []LSPDiagnostic)
+
 var (
 	valMu      sync.Mutex
 	valCancels = make(map[string]context.CancelFunc)
@@ -331,6 +336,22 @@ var (
 	diagMu        sync.Mutex
 	lastPublished = make(map[string]string) // URI -> Hash of diagnostics
 )
+
+func publishDiagnosticsForFile(ctx context.Context, fileURI string, diags []LSPDiagnostic) {
+	if PublishDiagnosticsFn != nil {
+		PublishDiagnosticsFn(ctx, fileURI, diags)
+		return
+	}
+	notification := JsonRpcMessage{
+		Jsonrpc: "2.0",
+		Method:  "textDocument/publishDiagnostics",
+		Params: mustMarshal(PublishDiagnosticsParams{
+			URI:         fileURI,
+			Diagnostics: diags,
+		}),
+	}
+	send(notification)
+}
 
 func triggerValidation(uri string) {
 	if SynchronousValidation {
@@ -366,26 +387,6 @@ func triggerValidation(uri string) {
 			runValidation(ctx, uri, view.Snapshot())
 		}
 	})
-}
-
-func RunServer() {
-	SynchronousValidation = false // Disable sync for production
-
-	GlobalSession = cache.NewSession("default")
-
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		msg, err := readMessage(reader)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			logger.Printf("Error reading message: %v\n", err)
-			continue
-		}
-
-		HandleMessage(msg)
-	}
 }
 
 func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
@@ -447,6 +448,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				snap.Tree().ResolveReferences(nil)
 				snap.Tree().ResolveFields(nil)
 				logger.Printf("Resolve done")
+				view.SetSnapshot(snap)
 				GlobalSchema = schema.LoadFullSchema(root)
 				logger.Printf("Schema done")
 			}
@@ -687,15 +689,7 @@ func HandleDidClose(params DidCloseTextDocumentParams) {
 	valMu.Unlock()
 
 	// 2. Clear diagnostics in the client
-	notification := JsonRpcMessage{
-		Jsonrpc: "2.0",
-		Method:  "textDocument/publishDiagnostics",
-		Params: mustMarshal(PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: []LSPDiagnostic{},
-		}),
-	}
-	send(notification)
+	publishDiagnosticsForFile(context.Background(), uri, []LSPDiagnostic{})
 
 	// 3. Clear cache
 	diagMu.Lock()
@@ -822,20 +816,7 @@ func publishImmediateDiagnostics(uri string, snap *cache.Snapshot) {
 		diagnostics = append(diagnostics, diag)
 	}
 
-	// We bypass the lastPublished cache here because this is "partial" information.
-	// We want the full validation later to still be able to publish.
-	// Actually, to prevent blinking, we should update the cache if it's the same.
-	// But immediate diagnostics only contain parser errors, whereas full contains both.
-
-	notification := JsonRpcMessage{
-		Jsonrpc: "2.0",
-		Method:  "textDocument/publishDiagnostics",
-		Params: mustMarshal(PublishDiagnosticsParams{
-			URI:         uri,
-			Diagnostics: diagnostics,
-		}),
-	}
-	send(notification)
+	publishDiagnosticsForFile(context.Background(), uri, diagnostics)
 }
 
 func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
@@ -941,16 +922,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 		}
 
 		lastPublished[fileURI] = hash
-
-		notification := JsonRpcMessage{
-			Jsonrpc: "2.0",
-			Method:  "textDocument/publishDiagnostics",
-			Params: mustMarshal(PublishDiagnosticsParams{
-				URI:         fileURI,
-				Diagnostics: diags,
-			}),
-		}
-		send(notification)
+		publishDiagnosticsForFile(ctx, fileURI, diags)
 	}
 }
 
@@ -1178,7 +1150,7 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	// Case 2: Typing a key inside an object
 	container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 	if container != nil {
-		if container.Parent != nil && isGAM(container.Parent) {
+		if container.Parent != nil && tree.IsGAM(container.Parent) {
 			if container.Name == "InputSignals" {
 				return suggestGAMSignals(container, "Input")
 			}
@@ -1203,7 +1175,7 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 
 	var walk func(*index.ProjectNode)
 	processNode := func(node *index.ProjectNode) {
-		if !isDataSource(node) {
+		if !GlobalSession.Views()[0].Snapshot().Tree().IsDataSource(node) {
 			return
 		}
 
@@ -1387,12 +1359,12 @@ func suggestFieldValues(tree *index.ProjectTree, container *index.ProjectNode, f
 	ok := false
 	switch field {
 	case "DataSource":
-		if list := suggestObjects(root, "DataSource"); list != nil {
+		if list := suggestObjects(tree, root, "DataSource"); list != nil {
 			items = append(items, list.Items...)
 		}
 		ok = true
 	case "Functions":
-		if list := suggestObjects(root, "GAM"); list != nil {
+		if list := suggestObjects(tree, root, "GAM"); list != nil {
 			items = append(items, list.Items...)
 		}
 		ok = true
@@ -1493,7 +1465,7 @@ func suggestCUEEnums(container *index.ProjectNode, field string) *CompletionList
 	return nil
 }
 
-func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
+func suggestObjects(tree *index.ProjectTree, root *index.ProjectNode, filter string) *CompletionList {
 	if root == nil {
 		return nil
 	}
@@ -1504,9 +1476,9 @@ func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
 		match := false
 		switch filter {
 		case "GAM":
-			match = isGAM(node)
+			match = tree.IsGAM(node)
 		case "DataSource":
-			match = isDataSource(node)
+			match = tree.IsDataSource(node)
 		}
 
 		if match {
@@ -1528,23 +1500,6 @@ func suggestObjects(root *index.ProjectNode, filter string) *CompletionList {
 
 	walk(root)
 	return &CompletionList{Items: items}
-}
-
-func isGAM(node *index.ProjectNode) bool {
-	if node.RealName == "" || (node.RealName[0] != '+' && node.RealName[0] != '$') {
-		return false
-	}
-	_, hasInput := node.Children["InputSignals"]
-	_, hasOutput := node.Children["OutputSignals"]
-	return hasInput || hasOutput
-}
-
-func isDataSource(node *index.ProjectNode) bool {
-	if node.Parent != nil && node.Parent.Name == "Data" {
-		return true
-	}
-	_, hasSignals := node.Children["Signals"]
-	return hasSignals
 }
 
 func HandleDefinition(params DefinitionParams) any {
@@ -1590,7 +1545,6 @@ func HandleDefinition(params DefinitionParams) any {
 	}
 
 	if targetTemplate != nil {
-		fmt.Printf("DEBUG: HandleDef targetTemplate=%v Name=%s Pos=%v\n", targetTemplate, targetTemplate.Name, targetTemplate.Position)
 		// Templates are global, we can just find where they are defined in fragments?
 		// Actually, we store TemplateDefinition in ProjectTree.
 		// We need to know which file it came from.
@@ -1680,9 +1634,9 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	}
 
 	// 1. If it's a Signal usage in a GAM, jump to the Signal definition in the DataSource
-	if ds, _ := getSignalInfo(tree, targetNode); ds != nil {
+	if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
 		// Find the peer that is a definition in a DataSource
-		peers := findSignalPeers(tree, targetNode)
+		peers := tree.FindSignalPeers(targetNode)
 		for _, peer := range peers {
 			if peer.Parent != nil && peer.Parent.Name == "Signals" {
 				var locations []Location
@@ -1963,9 +1917,9 @@ func HandlePrepareCallHierarchy(params CallHierarchyPrepareParams) []CallHierarc
 	}
 
 	kind := SymbolKindObject
-	if isGAM(node) {
+	if tree.IsGAM(node) {
 		kind = SymbolKindClass
-	} else if _, sig := getSignalInfo(tree, node); sig != "" {
+	} else if _, sig := tree.GetSignalInfo(node); sig != "" {
 		kind = SymbolKindVariable
 	}
 
@@ -2010,7 +1964,7 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	var calls []CallHierarchyIncomingCall
 
 	// 1. If it's a GAM, incoming calls are GAMs that produce its inputs
-	if isGAM(node) {
+	if tree.IsGAM(node) {
 		if inputs, ok := node.Children["InputSignals"]; ok {
 			for _, sig := range inputs.Children {
 				producers := getGAMSignalPeers(tree, sig, "Output")
@@ -2025,7 +1979,7 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 	}
 
 	// 2. If it's a Signal, incoming calls are GAMs that produce it (OutputSignals)
-	if _, sig := getSignalInfo(tree, node); sig != "" {
+	if _, sig := tree.GetSignalInfo(node); sig != "" {
 		producers := getGAMSignalPeers(tree, node, "Output")
 		for _, prod := range producers {
 			calls = append(calls, CallHierarchyIncomingCall{
@@ -2065,7 +2019,7 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	var calls []CallHierarchyOutgoingCall
 
 	// 1. If it's a GAM, outgoing calls are GAMs that consume its outputs
-	if isGAM(node) {
+	if tree.IsGAM(node) {
 		if outputs, ok := node.Children["OutputSignals"]; ok {
 			for _, sig := range outputs.Children {
 				consumers := getGAMSignalPeers(tree, sig, "Input")
@@ -2080,7 +2034,7 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	}
 
 	// 2. If it's a Signal, outgoing calls are GAMs that consume it (InputSignals)
-	if _, sig := getSignalInfo(tree, node); sig != "" {
+	if _, sig := tree.GetSignalInfo(node); sig != "" {
 		consumers := getGAMSignalPeers(tree, node, "Input")
 		for _, cons := range consumers {
 			calls = append(calls, CallHierarchyOutgoingCall{
@@ -2106,9 +2060,9 @@ func nodeToCallItem(tree *index.ProjectTree, node *index.ProjectNode) CallHierar
 	}
 
 	kind := SymbolKindObject
-	if isGAM(node) {
+	if tree.IsGAM(node) {
 		kind = SymbolKindClass
-	} else if _, sig := getSignalInfo(tree, node); sig != "" {
+	} else if _, sig := tree.GetSignalInfo(node); sig != "" {
 		kind = SymbolKindVariable
 	}
 
@@ -2125,7 +2079,7 @@ func nodeToCallItem(tree *index.ProjectTree, node *index.ProjectNode) CallHierar
 
 // Helper to find GAMs connected to a signal in a specific direction
 func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, direction string) []*index.ProjectNode {
-	ds, sigName := getSignalInfo(tree, sigNode)
+	ds, sigName := tree.GetSignalInfo(sigNode)
 	if ds == nil || sigName == "" {
 		return nil
 	}
@@ -2144,8 +2098,8 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 			match = true
 		}
 
-		if match && isGAM(n.Parent.Parent) {
-			d, s := getSignalInfo(tree, n)
+		if match && tree.IsGAM(n.Parent.Parent) {
+			d, s := tree.GetSignalInfo(n)
 			if d == ds && index.NormalizeName(s) == index.NormalizeName(sigName) {
 				peers = append(peers, n.Parent.Parent)
 			}
@@ -2175,19 +2129,16 @@ func HandleReferences(params ReferenceParams) []Location {
 	var targetVar *parser.VariableDefinition
 	var targetTemplate *parser.TemplateDefinition
 
-	if res.Node != nil {
-		targetNode = res.Node
-	} else if res.Reference != nil {
+	if res.Reference != nil {
 		if res.Reference.Target != nil {
 			targetNode = res.Reference.Target
-			if targetNode == nil {
-				targetNode = res.Reference.Target
-			}
 		} else if res.Reference.TargetVariable != nil {
 			targetVar = res.Reference.TargetVariable
 		} else if res.Reference.TargetTemplate != nil {
 			targetTemplate = res.Reference.TargetTemplate
 		}
+	} else if res.Node != nil {
+		targetNode = res.Node
 	} else if res.Variable != nil {
 		targetVar = res.Variable
 	}
@@ -2256,6 +2207,40 @@ func HandleReferences(params ReferenceParams) []Location {
 		return nil
 	}
 
+	// Special handling for Signals
+	if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
+		peers := tree.FindSignalPeers(targetNode)
+		var locations []Location
+		seen := make(map[string]bool)
+
+		for _, peer := range peers {
+			for _, frag := range peer.Fragments {
+				if !frag.IsObject {
+					continue
+				}
+				loc := Location{
+					URI: "file://" + frag.File,
+					Range: Range{
+						Start: Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1},
+						End:   Position{Line: frag.ObjectPos.Line - 1, Character: frag.ObjectPos.Column - 1 + len(peer.RealName)},
+					},
+				}
+				key := fmt.Sprintf("%s:%d:%d", loc.URI, loc.Range.Start.Line, loc.Range.Start.Character)
+				if !seen[key] {
+					if !params.Context.IncludeDeclaration {
+						// Check if this fragment IS the one we clicked on
+						if frag.File == path && frag.ObjectPos.Line == line && frag.ObjectPos.Column == col {
+							continue
+						}
+					}
+					locations = append(locations, loc)
+					seen[key] = true
+				}
+			}
+		}
+		return locations
+	}
+
 	// Resolve canonical target (follow link if present)
 	canonical := targetNode
 	if targetNode.Target != nil {
@@ -2306,6 +2291,29 @@ func HandleReferences(params ReferenceParams) []Location {
 			}
 		}
 	})
+
+	// 3. String literal references (common for DataSources)
+	if tree.IsDataSource(canonical) {
+		tree.Walk(func(node *index.ProjectNode) {
+			for _, frag := range node.Fragments {
+				for _, def := range frag.Definitions {
+					if f, ok := def.(*parser.Field); ok {
+						if str, ok := f.Value.(*parser.StringValue); ok {
+							if str.Value == canonical.Name || str.Value == canonical.RealName {
+								locations = append(locations, Location{
+									URI: "file://" + frag.File,
+									Range: Range{
+										Start: Position{Line: str.Position.Line - 1, Character: str.Position.Column - 1},
+										End:   Position{Line: str.Position.Line - 1, Character: str.Position.Column - 1 + len(str.Value) + 2}, // including quotes
+									},
+								})
+							}
+						}
+					}
+				}
+			}
+		})
+	}
 
 	return locations
 }
@@ -2365,8 +2373,8 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 	}
 
 	// Check if Implicit Signal peers exist
-	if ds, _ := getSignalInfo(tree, node); ds != nil {
-		peers := findSignalPeers(tree, node)
+	if ds, _ := tree.GetSignalInfo(node); ds != nil {
+		peers := tree.FindSignalPeers(node)
 
 		// 1. Explicit Definition Fields
 		var defNode *index.ProjectNode
@@ -2393,7 +2401,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 
 		extraInfo := ""
 		for _, p := range peers {
-			if (p.Parent.Name == "InputSignals" || p.Parent.Name == "OutputSignals") && isGAM(p.Parent.Parent) {
+			if (p.Parent.Name == "InputSignals" || p.Parent.Name == "OutputSignals") && tree.IsGAM(p.Parent.Parent) {
 				gamName := p.Parent.Parent.RealName
 				for _, frag := range p.Fragments {
 					for _, def := range frag.Definitions {
@@ -2473,7 +2481,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 			if container != nil {
 				curr := container
 				for curr != nil {
-					if isGAM(curr) {
+					if tree.IsGAM(curr) {
 						suffix := ""
 						p := container
 						for p != nil && p != curr {
@@ -2500,7 +2508,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 	tree.Walk(func(n *index.ProjectNode) {
 		if n.Target == node {
 			if n.Parent != nil && (n.Parent.Name == "InputSignals" || n.Parent.Name == "OutputSignals") {
-				if n.Parent.Parent != nil && isGAM(n.Parent.Parent) {
+				if n.Parent.Parent != nil && tree.IsGAM(n.Parent.Parent) {
 					suffix := " (Input)"
 					if n.Parent.Name == "OutputSignals" {
 						suffix = " (Output)"
@@ -2572,8 +2580,8 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	if targetNode != nil {
 		// Special handling for Signals (Implicit/Explicit)
-		if ds, _ := getSignalInfo(tree, targetNode); ds != nil {
-			peers := findSignalPeers(tree, targetNode)
+		if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
+			peers := tree.FindSignalPeers(targetNode)
 			seenPeers := make(map[*index.ProjectNode]bool)
 
 			for _, peer := range peers {
@@ -2793,79 +2801,6 @@ func suggestVariables(tree *index.ProjectTree, container *index.ProjectNode) *Co
 	return &CompletionList{Items: items}
 }
 
-func getSignalInfo(tree *index.ProjectTree, node *index.ProjectNode) (*index.ProjectNode, string) {
-	if node.Parent == nil {
-		return nil, ""
-	}
-
-	// Case 1: Definition
-	if node.Parent.Name == "Signals" && isDataSource(node.Parent.Parent) {
-		return node.Parent.Parent, node.RealName
-	}
-
-	// Case 2: Usage
-	if (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") && isGAM(node.Parent.Parent) {
-		dsName := ""
-		sigName := node.RealName
-
-		// Scan fields
-		for _, frag := range node.Fragments {
-			for _, def := range frag.Definitions {
-				if f, ok := def.(*parser.Field); ok {
-					if f.Name == "DataSource" {
-						if v, ok := f.Value.(*parser.StringValue); ok {
-							dsName = v.Value
-						}
-						if v, ok := f.Value.(*parser.ReferenceValue); ok {
-							dsName = v.Value
-						}
-					}
-					if f.Name == "Alias" {
-						if v, ok := f.Value.(*parser.StringValue); ok {
-							sigName = v.Value
-						}
-						if v, ok := f.Value.(*parser.ReferenceValue); ok {
-							sigName = v.Value
-						}
-					}
-				}
-			}
-		}
-
-		if dsName != "" {
-			dsNode := tree.ResolveName(node, dsName, isDataSource)
-			return dsNode, sigName
-		}
-	}
-	return nil, ""
-}
-
-func findSignalPeers(tree *index.ProjectTree, target *index.ProjectNode) []*index.ProjectNode {
-	dsNode, sigName := getSignalInfo(tree, target)
-	if dsNode == nil || sigName == "" {
-		return nil
-	}
-
-	var peers []*index.ProjectNode
-
-	// Add definition if exists (and not already target)
-	if signals, ok := dsNode.Children["Signals"]; ok {
-		if def, ok := signals.Children[index.NormalizeName(sigName)]; ok {
-			peers = append(peers, def)
-		}
-	}
-
-	// Find usages
-	tree.Walk(func(n *index.ProjectNode) {
-		d, s := getSignalInfo(tree, n)
-		if d == dsNode && s == sigName {
-			peers = append(peers, n)
-		}
-	})
-
-	return peers
-}
-
 func getEvaluatedField(tree *index.ProjectTree, node *index.ProjectNode, key string) parser.Value {
 	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
 		return tree.Evaluate(fields[len(fields)-1].Value, node)
@@ -2981,6 +2916,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 	tree := snap.Tree()
 
 	path := uriToPath(params.TextDocument.URI)
+	isDataSource := func(n *index.ProjectNode) bool { return tree.IsDataSource(n) }
 	var hints []InlayHint
 	seenPositions := make(map[Position]bool)
 

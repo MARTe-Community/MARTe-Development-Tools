@@ -368,7 +368,7 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	}
 
 	// Check for invalid content in Signals container of DataSource
-	if node.RealName == "Signals" && node.Parent != nil && isDataSource(node.Parent) {
+	if node.RealName == "Signals" && node.Parent != nil && v.Tree.IsDataSource(node.Parent) {
 		for _, frag := range node.Fragments {
 			for _, def := range frag.Definitions {
 				if f, ok := def.(*parser.Field); ok {
@@ -422,7 +422,7 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 
 	// 2. Check for mandatory Class if it's an object node (+/$)
 	className := ""
-	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') && !isSignal(node) {
+	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') && !v.Tree.IsSignal(node) {
 		if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
 			className = v.getFieldValue(classFields[0], node)
 		}
@@ -438,7 +438,7 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		if className == "RealTimeThread" {
 			v.checkFunctionsArray(node, fields)
 		}
-	} else if isSignal(node) {
+	} else if v.Tree.IsSignal(node) {
 		// Signals (no + prefix) must have Type
 		if _, ok := fields["Type"]; !ok {
 			pos := v.getNodePosition(node)
@@ -450,17 +450,17 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	}
 
 	// 4. Signal Validation (for DataSource signals)
-	if isSignal(node) {
+	if v.Tree.IsSignal(node) {
 		v.validateSignal(node, fields)
 	}
 
 	// 5. GAM Validation (Signal references)
-	if isGAM(node) {
+	if v.Tree.IsGAM(node) {
 		v.validateGAM(node)
 	}
 
 	// 6. DataSource Validation
-	if isDataSource(node) {
+	if v.Tree.IsDataSource(node) {
 		v.validateDataSource(node)
 	}
 
@@ -1117,7 +1117,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		return // Ignore implicit signals or missing datasource (handled elsewhere if mandatory)
 	}
 
-	dsNode := v.resolveReference(dsName, signalNode, isDataSource)
+	dsNode := v.resolveReference(dsName, signalNode, v.Tree.IsDataSource)
 	if dsNode == nil {
 		v.report(signalNode, "unknown_datasource", LevelError,
 			fmt.Sprintf("Unknown DataSource '%s' referenced in signal '%s'", dsName, signalNode.RealName),
@@ -1594,7 +1594,7 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 		return
 	}
 	// Heuristic for GAM
-	if isGAM(node) {
+	if v.Tree.IsGAM(node) {
 		if !referenced[node] {
 			v.report(node, "unused_gam", LevelWarning,
 				fmt.Sprintf("Unused GAM: %s is defined but not referenced in any thread or scheduler", node.RealName),
@@ -1603,7 +1603,7 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 	}
 
 	// Heuristic for DataSource and its signals
-	if isDataSource(node) {
+	if v.Tree.IsDataSource(node) {
 		if signalsNode, ok := node.Children["Signals"]; ok {
 			for _, signal := range signalsNode.Children {
 				if !referenced[signal] {
@@ -1618,35 +1618,6 @@ func (v *Validator) checkUnusedRecursive(ctx context.Context, node *index.Projec
 	for _, child := range node.Children {
 		v.checkUnusedRecursive(ctx, child, referenced)
 	}
-}
-
-func isGAM(node *index.ProjectNode) bool {
-	if node.RealName == "" || (node.RealName[0] != '+' && node.RealName[0] != '$') {
-		return false
-	}
-	_, hasInput := node.Children["InputSignals"]
-	_, hasOutput := node.Children["OutputSignals"]
-	return hasInput || hasOutput
-}
-
-func isDataSource(node *index.ProjectNode) bool {
-	if node.Parent != nil && node.Parent.Name == "Data" {
-		return true
-	}
-	_, hasSignals := node.Children["Signals"]
-	return hasSignals
-}
-
-func isSignal(node *index.ProjectNode) bool {
-	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') {
-		return false
-	}
-	if node.Parent != nil && node.Parent.Name == "Signals" {
-		if isDataSource(node.Parent.Parent) {
-			return true
-		}
-	}
-	return false
 }
 
 func (v *Validator) getNodePosition(node *index.ProjectNode) parser.Position {
@@ -1683,7 +1654,7 @@ func (v *Validator) checkFunctionsArray(node *index.ProjectNode, fields map[stri
 		if arr, ok := f.Value.(*parser.ArrayValue); ok {
 			for _, elem := range arr.Elements {
 				if ref, ok := elem.(*parser.ReferenceValue); ok {
-					target := v.resolveReference(ref.Value, node, isGAM)
+					target := v.resolveReference(ref.Value, node, v.Tree.IsGAM)
 					if target == nil {
 						v.report(node, "invalid_function", LevelError,
 							fmt.Sprintf("Function '%s' not found or is not a valid GAM", ref.Value),
@@ -1820,7 +1791,7 @@ func (v *Validator) getThreadGAMs(thread *index.ProjectNode) []*index.ProjectNod
 		if arr, ok := f.Value.(*parser.ArrayValue); ok {
 			for _, elem := range arr.Elements {
 				if ref, ok := elem.(*parser.ReferenceValue); ok {
-					target := v.resolveReference(ref.Value, thread, isGAM)
+					target := v.resolveReference(ref.Value, thread, v.Tree.IsGAM)
 					if target != nil {
 						gams = append(gams, target)
 					}
@@ -1842,7 +1813,7 @@ func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNo
 			fields := v.getFields(sig)
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 				dsName := v.getFieldValue(dsFields[0], sig)
-				dsNode := v.resolveReference(dsName, sig, isDataSource)
+				dsNode := v.resolveReference(dsName, sig, v.Tree.IsDataSource)
 				if dsNode != nil {
 					dsMap[dsNode] = true
 				}
@@ -1976,7 +1947,7 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 		if dsNode == nil {
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 				dsName := v.getFieldValue(dsFields[0], sig)
-				dsNode = v.resolveReference(dsName, sig, isDataSource)
+				dsNode = v.resolveReference(dsName, sig, v.Tree.IsDataSource)
 			}
 			if aliasFields, ok := fields["Alias"]; ok && len(aliasFields) > 0 {
 				sigName = v.getFieldValue(aliasFields[0], sig)
@@ -2061,7 +2032,7 @@ func (v *Validator) CheckSignalConsistency(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !isGAM(node) {
+		if !v.Tree.IsGAM(node) {
 			return
 		}
 		// Check Input and Output
@@ -2076,7 +2047,7 @@ func (v *Validator) CheckSignalConsistency(ctx context.Context) {
 					if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 						dsName := v.getFieldValue(dsFields[0], sig)
 						if dsName != "" {
-							dsNode = v.resolveReference(dsName, sig, isDataSource)
+							dsNode = v.resolveReference(dsName, sig, v.Tree.IsDataSource)
 						}
 					}
 
