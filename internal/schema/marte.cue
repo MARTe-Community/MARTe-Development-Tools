@@ -161,10 +161,9 @@ import "list"
 		...
 	}
 	SDNPublisher: {
-		Address:    string
-		Port:       int
-		Interface?: string
-		Topic?:     string
+		Port:      int
+		Interface: string
+		Topic?:    string
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "OUT"
 		#meta: MetaType:      "datasource"
