@@ -28,7 +28,7 @@ func TestProjectFilter(t *testing.T) {
 
 	// Build mdt
 	binPath := filepath.Join(tmpDir, "mdt")
-	buildCmd := exec.Command("go", "build", "-o", binPath, "../cmd/mdt/main.go")
+	buildCmd := exec.Command("go", "build", "-o", binPath, "../cmd/mdt")
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build mdt: %v\n%s", err, string(out))
 	}

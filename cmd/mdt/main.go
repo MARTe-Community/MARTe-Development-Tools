@@ -20,7 +20,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		logger.Println("Usage: mdt <command> [arguments]")
-		logger.Println("Commands: lsp, build, check, fmt, init")
+		logger.Println("Commands: lsp, build, check, fmt, init, graph")
 		os.Exit(1)
 	}
 
@@ -36,6 +36,8 @@ func main() {
 		runFmt(os.Args[2:])
 	case "init":
 		runInit(os.Args[2:])
+	case "graph":
+		runGraph(os.Args[2:])
 	default:
 		logger.Printf("Unknown command: %s\n", command)
 		os.Exit(1)
