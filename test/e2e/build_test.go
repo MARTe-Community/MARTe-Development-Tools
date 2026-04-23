@@ -38,15 +38,17 @@ func TestBuildMultiFile(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("base.marte", `
+//! allow(unknown_class)
 +Base = {
     Class = "BaseClass"
 }
 `)
 
 	tf.CreateFile("derived.marte", `
+//! allow(unknown_class)
 +Derived = {
     Class = "DerivedClass"
-    Base = Base
+    SomeField = "value"
 }
 `)
 
@@ -72,11 +74,12 @@ func TestBuildWithVariables(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("config.marte", `
-#let ENVIRONMENT = "production"
+//! allow(unknown_class)
+#let ENVIRONMENT: string = "production"
 
 +MyConfig = {
     Class = "Test"
-    Env = ENVIRONMENT
+    Env = @ENVIRONMENT
 }
 `)
 
@@ -124,6 +127,8 @@ func TestCheckValidConfig(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("valid.marte", `
+//! allow(unknown_class)
+//! allow(unused_gam)
 +ValidConfig = {
     Class = "GAM"
     InputSignals = {
@@ -187,12 +192,14 @@ func TestCheckFolder(t *testing.T) {
 	subdir := tf.CreateSubdir("configs")
 
 	tf.CreateFile("configs/valid1.marte", `
+//! allow(unknown_class)
 +Valid1 = {
     Class = "Test"
 }
 `)
 
 	tf.CreateFile("configs/valid2.marte", `
+//! allow(unknown_class)
 +Valid2 = {
     Class = "Test"
 }
@@ -213,16 +220,16 @@ func TestBuildWithProjectFilter(t *testing.T) {
 
 	tf.CreateFile("proj1.marte", `
 #package proj1
-
-+Config = {
+//! allow(unknown_class)
++Proj1Config = {
     Class = "Test"
 }
 `)
 
 	tf.CreateFile("proj2.marte", `
 #package proj2
-
-+Config = {
+//! allow(unknown_class)
++Proj2Config = {
     Class = "Test"
 }
 `)
@@ -233,12 +240,12 @@ func TestBuildWithProjectFilter(t *testing.T) {
 		t.Fatalf("Build failed: %s", result.Stderr)
 	}
 
-	if !strings.Contains(result.Output, "proj1") {
-		t.Fatalf("Expected output to contain proj1 namespace")
+	if !strings.Contains(result.Output, "Proj1Config") {
+		t.Fatalf("Expected output to contain Proj1Config")
 	}
 
-	if strings.Contains(result.Output, "proj2") {
-		t.Fatalf("Expected output to NOT contain proj2 namespace (filtered)")
+	if strings.Contains(result.Output, "Proj2Config") {
+		t.Fatalf("Expected output to NOT contain Proj2Config (filtered)")
 	}
 }
 
@@ -249,22 +256,23 @@ func TestBuildWithVariableOverride(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("config.marte", `
-#let NAME = "default"
+//! allow(unknown_class)
+#var COUNT: int = 5
 
 +Config = {
     Class = "Test"
-    Name = NAME
+    Count = @COUNT
 }
 `)
 
-	result := tf.RunBuild("-vNAME=override", "config.marte")
+	result := tf.RunBuild("-vCOUNT=99", "config.marte")
 
 	if result.ExitCode != 0 {
 		t.Fatalf("Build failed: %s", result.Stderr)
 	}
 
-	if !strings.Contains(result.Output, "override") {
-		t.Fatalf("Expected output to contain overridden value 'override'")
+	if !strings.Contains(result.Output, "99") {
+		t.Fatalf("Expected output to contain overridden value '99'")
 	}
 }
 
@@ -275,15 +283,16 @@ func TestBuildWithConditional(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("config.marte", `
-#var ENABLE_FEATURE = true
+//! allow(unknown_class)
+#var ENABLE_FEATURE: bool = true
 
 +Config = {
     Class = "Test"
-    #if ENABLE_FEATURE
+    #if @ENABLE_FEATURE
     Feature = {
         Enabled = true
     }
-    #endif
+    #end
 }
 `)
 
@@ -305,16 +314,12 @@ func TestBuildWithLoop(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("config.marte", `
-+Config = {
+//! allow(unknown_class)
+#foreach name in { "Signal1", "Signal2", "Signal3" }
+("+Test" .. @name) = {
     Class = "Test"
-    Signals = {
-        #foreach $name in ["Signal1", "Signal2", "Signal3"]
-        $name = {
-            Type = "uint32"
-        }
-        #endforeach
-    }
 }
+#end
 `)
 
 	result := tf.RunBuild("config.marte")

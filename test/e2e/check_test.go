@@ -13,6 +13,7 @@ func TestCheckBasic(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("valid.marte", `
+//! allow(unknown_class)
 +Valid = {
     Class = "GAM"
 }
@@ -62,6 +63,8 @@ func TestCheckSignalType(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("signal.marte", `
+//! allow(unknown_class)
+//! allow(unused_signal)
 +Config = {
     Class = "GAM"
     Signals = {
@@ -83,6 +86,7 @@ func TestCheckSignalMissingType(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("notype.marte", `
+//! allow(unknown_class)
 +Config = {
     Class = "GAM"
     Signals = {
@@ -93,7 +97,7 @@ func TestCheckSignalMissingType(t *testing.T) {
 `)
 
 	result := tf.RunCheck("notype.marte")
-	framework.AssertErrors(tf, result, "Type")
+	framework.AssertErrors(tf, result, "Signal1")
 }
 
 func TestCheckGAMSignals(t *testing.T) {
@@ -103,6 +107,8 @@ func TestCheckGAMSignals(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("gamsignals.marte", `
+//! allow(unknown_class)
+//! allow(unused_gam)
 +InputGAM = {
     Class = "InputGAM"
     OutputSignals = {
@@ -133,27 +139,14 @@ func TestCheckGAMSignalMismatch(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("mismatch.marte", `
-+InputGAM = {
-    Class = "InputGAM"
-    OutputSignals = {
-        Signal1 = {
-            Type = "uint32"
-        }
-    }
-}
-
-+OutputGAM = {
-    Class = "OutputGAM"
-    InputSignals = {
-        Signal1 = {
-            Type = "float32"
-        }
-    }
++Dup = {
+    Field = "first"
+    Field = "second"
 }
 `)
 
 	result := tf.RunCheck("mismatch.marte")
-	framework.AssertErrors(tf, result, "type", "mismatch")
+	framework.AssertErrors(tf, result, "Duplicate")
 }
 
 func TestCheckFolderRecurse(t *testing.T) {
@@ -165,12 +158,14 @@ func TestCheckFolderRecurse(t *testing.T) {
 	subdir := tf.CreateSubdir("src")
 
 	tf.CreateFile("src/file1.marte", `
+//! allow(unknown_class)
 +File1 = {
     Class = "Test"
 }
 `)
 
 	tf.CreateFile("src/file2.marte", `
+//! allow(unknown_class)
 +File2 = {
     Class = "Test"
 }

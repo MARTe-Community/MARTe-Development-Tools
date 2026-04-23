@@ -1,0 +1,6625 @@
++WebRoot = {
+  Class = HttpObjectBrowser
+  Root = "."
+  +ObjectBrowse = {
+    Class = HttpObjectBrowser
+    Root = "/"
+  }
+  +ResourcesHtml = {
+    Class = HttpDirectoryResource
+    BaseDir = "/opt/marte2-core/Resources/HTTP"
+  }
+  +Monitor = {
+    Class = HttpDataMonitor
+    Plot0 = {
+      APS_HVON = {
+        Component = RTApp.Data.DDB3
+        Signal = "APS_HVON"
+      }
+      APS_SWON = {
+        Component = RTApp.Data.DDB3
+        Signal = "APS_SWON"
+      }
+      BPS_HVON = {
+        Component = RTApp.Data.DDB3
+        Signal = "BPS_HVON"
+      }
+      BPS_SWON = {
+        Component = RTApp.Data.DDB3
+        Signal = "BPS_SWON"
+      }
+      HVPS_HVON = {
+        Component = RTApp.Data.DDB3
+        Signal = "MHVPS_HVON"
+      }
+    }
+  }
+}
++WebServer = {
+  Class = HttpService
+  Port = 8084
+  WebRoot = WebRoot
+  Timeout = 0
+  ListenMaxConnections = 255
+  AcceptTimeout = 1000
+  MaxNumberOfThreads = 8
+  MinNumberOfThreads = 1
+}
++StateMachine = {
+  Class = StateMachine
+  +DISABLED = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = "ERROR"
+      NextStateError = "ERROR"
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +ERROR = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+  }
+  +INITIAL = {
+    Class = ReferenceContainer
+    +Start = {
+      Class = StateMachineEvent
+      NextState = "WAITSTANDBY"
+      NextStateError = "ERROR"
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+  }
+  +WAITHVON = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitPermit = {
+      Class = StateMachineEvent
+      NextState = WAITPERMIT
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitPermit
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 5
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITHVON_PREP = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitPermit = {
+      Class = StateMachineEvent
+      NextState = WAITPERMIT
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitPermit
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 5
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITHVON_SDN = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitPermit = {
+      Class = StateMachineEvent
+      NextState = WAITPERMIT
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitPermit
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 5
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITHVON_SDN_PREP = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitPermit = {
+      Class = StateMachineEvent
+      NextState = WAITPERMIT
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitPermit
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 5
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITPERMIT = {
+    Class = ReferenceContainer
+    +GoWaitReady = {
+      Class = StateMachineEvent
+      NextState = WAITREADY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitReady
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 4
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitHVON = {
+      Class = StateMachineEvent
+      NextState = WAITHVON
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 6
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitHVON_SDN = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_SDN
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_SDN
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 8
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitHVON_PREP = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_PREP
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_PREP
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 7
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitHVON_SDN_PREP = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_SDN_PREP
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_SDN_PREP
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 9
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITREADY = {
+    Class = ReferenceContainer
+    +GoWaitStandby = {
+      Class = StateMachineEvent
+      NextState = WAITSTANDBY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitStandby
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 3
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoWaitPermit = {
+      Class = StateMachineEvent
+      NextState = WAITPERMIT
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitPermit
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 5
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+  +WAITSTANDBY = {
+    Class = ReferenceContainer
+    +GoWaitReady = {
+      Class = StateMachineEvent
+      NextState = WAITREADY
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitReady
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 4
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoDisabled = {
+      Class = StateMachineEvent
+      NextState = DISABLED
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Disabled
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 2
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+    }
+    +GoError = {
+      Class = StateMachineEvent
+      NextState = ERROR
+      NextStateError = ERROR
+      +StopCurrentStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StopCurrentStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = Error
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = 1
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 1
+        }
+      }
+    }
+  }
+}
++RTApp = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+    +DDB1 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+      Signals = {
+        PXI_FAULT = {
+          Type = uint32
+        }
+        PXI6528_Status = {
+          Type = uint32
+        }
+        PXI6259_Status = {
+          Type = uint32
+        }
+        PXI6683_Status = {
+          Type = uint8
+        }
+        PXI6683_PtpdStatus = {
+          Type = uint8
+        }
+        GYA_APS_READY = {
+          Type = uint8
+        }
+        GYA_APS_FLT = {
+          Type = uint8
+        }
+        GYA_BPS_READY = {
+          Type = uint8
+        }
+        GYA_BPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_OV = {
+          Type = uint8
+        }
+        MHVPS_OC = {
+          Type = uint8
+        }
+        MHVPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_READY = {
+          Type = uint8
+        }
+        ECPC_MOD = {
+          Type = uint8
+        }
+        FAST_TRIP = {
+          Type = uint8
+        }
+        PLC_ITL = {
+          Type = uint8
+        }
+        PLC_STANDBY = {
+          Type = uint8
+        }
+        PLC_READY = {
+          Type = uint8
+        }
+        PLC_ON = {
+          Type = uint8
+        }
+        PLC_PERMIT = {
+          Type = uint8
+        }
+        PLC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_CC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_SYNCMODE = {
+          Type = uint8
+        }
+        TRIGGER = {
+          Type = uint8
+        }
+        APS_HVON = {
+          Type = uint8
+        }
+        APS_SWON = {
+          Type = uint8
+        }
+        BPS_HVON = {
+          Type = uint8
+        }
+        BPS_SWON = {
+          Type = uint8
+        }
+        MHVPS_HVON = {
+          Type = uint8
+        }
+        BEAM_ON_STAT = {
+          Type = uint8
+        }
+        HVARMED = {
+          Type = uint8
+        }
+        HVINJECTION = {
+          Type = uint8
+        }
+        RFON = {
+          Type = uint8
+        }
+        ELAPSED_TIME = {
+          Type = uint32
+        }
+        BEAM_ON_TIME = {
+          Type = uint32
+        }
+        SHOT_ID = {
+          Type = uint32
+        }
+        CRIO_RV1 = {
+          Type = uint8
+        }
+        CRIO_RV2 = {
+          Type = uint8
+        }
+        CRIO_RV3 = {
+          Type = uint8
+        }
+        FAST_STOP = {
+          Type = uint32
+        }
+        PREP_TIME_WF = {
+          Type = uint32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        MHVPS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        BPS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        APS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        MCPS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        GCPS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        FHPS_PREP_WF = {
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        GYA_PREPRO_TIME = {
+          Type = int32
+        }
+        FHPS_PrePro = {
+          Type = float32
+        }
+        CSV_LOADED = {
+          Type = uint32
+        }
+        CSV_ERR = {
+          Type = uint32
+        }
+        GCPS_TRG_CURR_SET = {
+          Type = float32
+        }
+        MCPS_TRG_CURR_SET = {
+          Type = float32
+        }
+        BPS_OUT = {
+          Type = float32
+        }
+        APS_OUT = {
+          Type = float32
+        }
+        MHVPS_OUT = {
+          Type = float32
+        }
+        MCPS_OUT = {
+          Type = float32
+        }
+        GCPS_OUT = {
+          Type = float32
+        }
+        BPS_REF = {
+          Type = float32
+        }
+        APS_REF = {
+          Type = float32
+        }
+        MHVPS_REF = {
+          Type = float32
+        }
+        FHPS_RU = {
+          Type = uint8
+        }
+        PCF_STATE = {
+          Type = uint32
+        }
+        PCF_FAULT = {
+          Type = uint32
+        }
+      }
+    }
+    +DDB2 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+      Signals = {
+        WaveformPacketID = {
+          Type = uint16
+        }
+        ESDNTime = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+        Counter = {
+          Type = uint32
+        }
+      }
+    }
+    +DDB3 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+      Signals = {
+        SHOT_ID = {
+          Type = uint32
+        }
+        GYA_APS_READY = {
+          Type = uint8
+        }
+        GYA_APS_FLT = {
+          Type = uint8
+        }
+        GYA_BPS_READY = {
+          Type = uint8
+        }
+        GYA_BPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_OV = {
+          Type = uint8
+        }
+        MHVPS_OC = {
+          Type = uint8
+        }
+        MHVPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_READY = {
+          Type = uint8
+        }
+        ECPC_MOD = {
+          Type = uint8
+        }
+        FAST_TRIP = {
+          Type = uint8
+        }
+        CRIO_RV1 = {
+          Type = uint8
+        }
+        CRIO_RV2 = {
+          Type = uint8
+        }
+        CRIO_RV3 = {
+          Type = uint8
+        }
+        PLC_ITL = {
+          Type = uint8
+        }
+        PLC_STANDBY = {
+          Type = uint8
+        }
+        PLC_READY = {
+          Type = uint8
+        }
+        PLC_ON = {
+          Type = uint8
+        }
+        PLC_PERMIT = {
+          Type = uint8
+        }
+        PLC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_CC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_SYNCMODE = {
+          Type = uint8
+        }
+        TRIGGER = {
+          Type = uint8
+        }
+        APS_HVON = {
+          Type = uint8
+        }
+        APS_SWON = {
+          Type = uint8
+        }
+        APS_STOP = {
+          Type = uint8
+        }
+        BPS_HVON = {
+          Type = uint8
+        }
+        BPS_SWON = {
+          Type = uint8
+        }
+        BPS_STOP = {
+          Type = uint8
+        }
+        BEAM_ON_STAT = {
+          Type = uint8
+        }
+        DO_REV5 = {
+          Type = uint8
+        }
+        DO_REV6 = {
+          Type = uint8
+        }
+        DO_REV7 = {
+          Type = uint8
+        }
+        DO_REV8 = {
+          Type = uint8
+        }
+        MHVPS_HVON = {
+          Type = uint8
+        }
+        MHVPS_STOP = {
+          Type = uint8
+        }
+        MHVPS_MODSW = {
+          Type = uint8
+        }
+        PCF_FLT = {
+          Type = uint8
+        }
+        HVARMED = {
+          Type = uint8
+        }
+        HVINJECTION = {
+          Type = uint8
+        }
+        RFON = {
+          Type = uint8
+        }
+        FHPS_RU = {
+          Type = uint8
+        }
+        SCM_RU = {
+          Type = uint8
+        }
+        SCM_RD = {
+          Type = uint8
+        }
+        CCPS_IN_OPERATION = {
+          Type = uint8
+        }
+        PXI_FLT = {
+          Type = uint8
+        }
+        FAST_STOP = {
+          Type = uint8
+        }
+        MODE_SHOTLEN_FLAG = {
+          Type = uint32
+        }
+        RTSMValue = {
+          Type = uint32
+        }
+        BEAM_ON_TIME = {
+          Type = uint32
+        }
+        RFON_TIME = {
+          Type = uint32
+        }
+        PXI6528_Status = {
+          Type = uint32
+        }
+        MHVPS_DT = {
+          Type = uint32
+        }
+        APS_HVON_DT = {
+          Type = uint32
+        }
+        APS_SWON_DT = {
+          Type = uint32
+        }
+        BPS_HVON_DT = {
+          Type = uint32
+        }
+        BPS_SWON_DT = {
+          Type = uint32
+        }
+        SHOTLEN = {
+          Type = uint32
+        }
+        SHORT_PULSE_MODE = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+        Counter = {
+          Type = uint32
+        }
+      }
+    }
+    +DDB6 = {
+      Class = GAMDataSource
+      AllowNoProducer = 1
+      Signals = {
+        CCPS_REF = {
+          Type = float32
+        }
+        FHPS_REF = {
+          Type = float32
+        }
+        FHPS_TAGV = {
+          Type = float32
+        }
+        FHPS_AUTO_STAT = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+        Counter = {
+          Type = uint32
+        }
+      }
+    }
+    +Timings = {
+      Class = TimingDataSource
+    }
+    +EPICSCAInput = {
+      Class = "EPICSCA::EPICSCAInput"
+      Signals = {
+        TRIGGER_DAN = {
+          PVName = "EC-GN-P01:DAN_ENABLED"
+          Type = uint8
+        }
+        CSV_LOAD = {
+          PVName = "EC-GN-P01-GAF:STAT-CSV-LOAD"
+          Type = uint32
+        }
+        CSV_NAME = {
+          PVName = "EC-GN-P01-GAF:STAT-CSV-NAME"
+          Type = char8
+          NumberOfElements = 40
+        }
+        MIS_ITL = {
+          Type = uint32
+          PVName = "EC-GN-P01-GAFP:FMC4310-YTRP"
+        }
+        RESET_FLT = {
+          PVName = "EC-GN-P01-GPF:STAT-RST-FLT"
+          Type = uint32
+        }
+        PLC_SELECT = {
+          PVName = "EC-GN-P01-GPS:PLC4110-CON-OPGY1"
+          Type = uint32
+        }
+        CCPS_OUTPUT_FREQ = {
+          PVName = "EC-GN-P01-GAF-CCPS:STAT-FREQ"
+          Type = float32
+        }
+        CCPS_OUTPUT_AMP = {
+          PVName = "EC-GN-P01-GAF-CCPS:STAT-AMP"
+          Type = float32
+        }
+        CCPS_OUTPUT_OFFS = {
+          PVName = "EC-GN-P01-GAF-CCPS:STAT-OFFS"
+          Type = float32
+        }
+        GCPS_TRG_CURR_MANUAL = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-TRG-CURR-SET-MI"
+          Type = float32
+        }
+        MCPS_TRG_CURR_MANUAL = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-TRG-CURR-SET-MI"
+          Type = float32
+        }
+        BPS_MANUAL = {
+          PVName = "EC-GN-P01-PB1F:PSU1000-EREF-MSP"
+          Type = float32
+        }
+        BPS_MM = {
+          PVName = "EC-GN-P01-PB1F:STAT-MANM"
+          Type = uint32
+        }
+        APS_MANUAL = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-EREF-MSP"
+          Type = float32
+        }
+        APS_MM = {
+          PVName = "EC-GN-P01-PA1F:STAT-MANM"
+          Type = uint32
+        }
+        MHVPS_MANUAL = {
+          PVName = "EC-GN-P01-PMF:PSU0000-EREF-MSP"
+          Type = float32
+        }
+        MHVPS_MM = {
+          PVName = "EC-GN-P01-PMF:STAT-MANM"
+          Type = uint32
+        }
+        MCPS_MM = {
+          PVName = "EC-GN-P01-GAF-MCPS:STAT-MANM"
+          Type = uint32
+        }
+        GCPS_MM = {
+          PVName = "EC-GN-P01-GAF-GCPS:STAT-MANM"
+          Type = uint32
+        }
+        FHPS_AUTO_TAGV = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-AUTO-TAGV"
+          Type = float32
+        }
+        FHPS_AUTO_TIME = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-AUTO-RU-TIME"
+          Type = float32
+        }
+        FHPS_AUTO_START = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-AUTO-START"
+          Type = uint32
+        }
+        FHPS_MANM = {
+          PVName = "EC-GN-P01-GAF-FHPS:STAT-MANM"
+          Type = uint32
+        }
+        GCPS_ACT_RB = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-ACT-RB"
+          Type = uint32
+        }
+        GCPS_CURR_MON = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-CURR-MON"
+          Type = float32
+        }
+        MCPS_ACT_RB = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-ACT-RB"
+          Type = uint32
+        }
+        MCPS_CURR_MON = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-CURR-MON"
+          Type = float32
+        }
+        PREP_MODE = {
+          PVName = "EC-GN-P01-GAF:STAT-PREP-MODE"
+          Type = uint32
+        }
+        MHVPS_DT = {
+          PVName = "EC-GN-P01-PMF:STAT-DT-HVON"
+          Type = uint32
+        }
+        APS_HVON_DT = {
+          PVName = "EC-GN-P01-PA1F:STAT-DT-HVON"
+          Type = uint32
+        }
+        APS_SWON_DT = {
+          PVName = "EC-GN-P01-PA1F:STAT-DT-SWON"
+          Type = uint32
+        }
+        BPS_HVON_DT = {
+          PVName = "EC-GN-P01-PB1F:STAT-DT-HVON"
+          Type = uint32
+        }
+        BPS_SWON_DT = {
+          PVName = "EC-GN-P01-PB1F:STAT-DT-SWON"
+          Type = uint32
+        }
+        SHOTLEN = {
+          PVName = "EC-GN-P01-GAF:STAT-DT-SHOTLEN"
+          Type = uint32
+        }
+        PLC_MODE1 = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YTS-MD1"
+          Type = uint32
+        }
+        PLC_MODE2 = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YTS-MD2"
+          Type = uint32
+        }
+        PLC_MODE3 = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YTS-MD3"
+          Type = uint32
+        }
+        PLC_MODE4 = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YTS-MD4"
+          Type = uint32
+        }
+        MD1_SHOTLEN_LIM = {
+          PVName = "EC-GN-P01-GPF:STAT-MD1-LIM"
+          Type = uint32
+        }
+        MD2_SHOTLEN_LIM = {
+          PVName = "EC-GN-P01-GPF:STAT-MD2-LIM"
+          Type = uint32
+        }
+        MD3_SHOTLEN_LIM = {
+          PVName = "EC-GN-P01-GPF:STAT-MD3-LIM"
+          Type = uint32
+        }
+        MD4_SHOTLEN_LIM = {
+          PVName = "EC-GN-P01-GPF:STAT-MD4-LIM"
+          Type = uint32
+        }
+        GY_MCPS_CURR_MON = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-CURR-MON"
+          Type = float32
+        }
+        GY_GCPS_CURR_MON = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-CURR-MON"
+          Type = float32
+        }
+        GY_FHPS_MEAS_ACI = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-MEAS-ACI"
+          Type = float32
+        }
+        GY_FHPS_MEAS_ACV = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-MEAS-ACV"
+          Type = float32
+        }
+        GY_CCPS_MEAS_DCI = {
+          PVName = "EC-GN-P01-GAF-CCPS:PSU2320-MEAS-DCI"
+          Type = float32
+        }
+        SHORT_PULSE_MODE = {
+          PVName = "EC-GN-P01-GAF:STAT-SHORT-PULSE"
+          Type = uint32
+        }
+      }
+    }
+    +EPICSCAOutput = {
+      Class = EPICSCAOutput
+      CPUMask = 0x1
+      StackSize = 10000000
+      NumberOfBuffers = 2
+      Signals = {
+        PCF_STATE = {
+          PVName = "EC-GN-P01-GAF:STAT-SM"
+          Type = uint32
+        }
+        FHPS_REF = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-EREF"
+          Type = float32
+        }
+        BPS_REF = {
+          PVName = "EC-GN-P01-PB1F:PSU1000-EREF"
+          Type = float32
+        }
+        APS_REF = {
+          PVName = "EC-GN-P01-PA1F:STAT-EREF-CONV.A"
+          Type = float32
+        }
+        MHVPS_REF = {
+          PVName = "EC-GN-P01-PMF:STAT-EREF-CALC.A"
+          Type = float32
+        }
+        APS_STOP = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-CTRP"
+          Type = uint32
+        }
+        BPS_STOP = {
+          PVName = "EC-GN-P01-PB1F:PSU1000-CTRP"
+          Type = uint32
+        }
+        BEAM_ON_STAT = {
+          PVName = "EC-GN-P01-GAFP:FMC4310-YSTA-GAOP"
+          Type = uint8
+        }
+        MHVPS_STOP = {
+          PVName = "EC-GN-P01-PMF:PSU0000-COFF"
+          Type = uint32
+        }
+        PCF_FLT = {
+          PVName = "EC-GN-P01-GPF:PCF4210-CTRP"
+          Type = uint32
+        }
+        PXI_FLT = {
+          PVName = "EC-GN-P01-GPS:PLC4110-RV2"
+          Type = uint32
+        }
+        HVARMED = {
+          PVName = "EC-GN-P01-GPF:PCF4210-YTS-GA1"
+          Type = uint8
+        }
+        HVINJECTION = {
+          PVName = "EC-GN-P01-GPF:PCF4210-YTS-GA2"
+          Type = uint8
+        }
+        RFON = {
+          PVName = "EC-GN-P01-GPF:PCF4210-YTS-GA3"
+          Type = uint8
+        }
+        MHVPS_PREP_WF = {
+          PVName = "EC-GN-P01-PMF:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        BPS_PREP_WF = {
+          PVName = "EC-GN-P01-PB1F:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        APS_PREP_WF = {
+          PVName = "EC-GN-P01-PA1F:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        FHPS_PREP_WF = {
+          PVName = "EC-GN-P01-GAF-FHPS:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        MCPS_PREP_WF = {
+          PVName = "EC-GN-P01-GAF-MCPS:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        GCPS_PREP_WF = {
+          PVName = "EC-GN-P01-GAF-GCPS:STAT-PREP-WF"
+          Type = float32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        PREP_TIME_WF = {
+          PVName = "EC-GN-P01-GAF:STAT-PREP-TIME-WF"
+          Type = uint32
+          NumberOfElements = 8000
+          NumberOfDimensions = 1
+        }
+        BEAM_ON_TIME = {
+          PVName = "EC-GN-P01-GAF:STAT-BEAMON-TIME"
+          Type = uint32
+        }
+        ELAPSED_TIME = {
+          PVName = "EC-GN-P01-GAF:STAT-ELAPSED"
+          Type = uint32
+        }
+        SHOT_ID = {
+          PVName = "EC-GN-P01-GAF:STAT-SHOT-ID"
+          Type = uint32
+        }
+        CSV_LOADED = {
+          PVName = "EC-GN-P01-GAF:STAT-CSV-LOADED"
+          Type = uint32
+        }
+        CSV_ERR = {
+          PVName = "EC-GN-P01-GAF:STAT-CSV-ERR"
+          Type = uint32
+        }
+        MCPS_TRG_CURR_SET = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-TRG-CURR-SET-MO"
+          Type = float32
+        }
+        MCPS_ACT_SP = {
+          PVName = "EC-GN-P01-GAF-MCPS:PSU2120-ACT-SP-MO"
+          Type = uint32
+        }
+        GCPS_TRG_CURR_SET = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-TRG-CURR-SET-MO"
+          Type = float32
+        }
+        GCPS_ACT_SP = {
+          PVName = "EC-GN-P01-GAF-GCPS:PSU2130-ACT-SP-MO"
+          Type = uint32
+        }
+        CCPS_REF = {
+          PVName = "EC-GN-P01-GAF-CCPS:PSU2320-EREF"
+          Type = float32
+        }
+        FHPS_AUTO_STAT = {
+          PVName = "EC-GN-P01-GAF-FHPS:PSU2610-AUTO-STAT"
+          Type = uint32
+        }
+        APS_HVON = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-CON-HV"
+          Type = uint8
+        }
+        APS_SWON = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-CON-SW"
+          Type = uint8
+        }
+        BPS_HVON = {
+          PVName = "EC-GN-P01-PB1F:PSU1000-CON-HV"
+          Type = uint8
+        }
+        BPS_SWON = {
+          PVName = "EC-GN-P01-PB1F:PSU1000-CON-SW"
+          Type = uint8
+        }
+        MHVPS_HVON = {
+          PVName = "EC-GN-P01-PMF:STAT-HVON-CALC.A"
+          Type = uint8
+        }
+        EXT_TRIGGER = {
+          PVName = "EC-GN-P01-GAF:DIO4900-YON"
+          Type = uint8
+        }
+        ECPC_MHVPS_MOD = {
+          PVName = "EC-GN-P01-GPF:PSU0000-YSTA-MOD"
+          Type = uint8
+        }
+        PLC_PERMIT = {
+          PVName = "EC-GN-P01-GPS:PLC4110-CON-GY1PRM"
+          Type = uint8
+        }
+        PLC_OP_SELECTED = {
+          PVName = "EC-GN-P01-GPS:PLC4110-CON-OPGY1"
+          Type = uint8
+        }
+        CCPS_IN_OP = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YON-CCPS1"
+          Type = uint8
+        }
+        PLC_SYNCMODE = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YSTA-MPSS"
+          Type = uint8
+        }
+        PLC_ITL = {
+          PVName = "EC-GN-P01-GPS:PLC4110-YTRP"
+          Type = uint8
+        }
+        PLC_STANDBY = {
+          PVName = "EC-GN-P01-GPS:PLC4110-ST1R"
+          Type = uint8
+        }
+        PLC_READY = {
+          PVName = "EC-GN-P01-GPS:PLC4110-ST2R"
+          Type = uint8
+        }
+        PLC_ON = {
+          PVName = "EC-GN-P01-GPS:PLC4110-ST3R"
+          Type = uint8
+        }
+        APS_FLT = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-YFLT"
+          Type = uint8
+        }
+        APS_READY = {
+          PVName = "EC-GN-P01-PA1F:PSU3000-YSTA"
+          Type = uint8
+        }
+        BPS_FLT = {
+          PVName = "EC-GN-P01-PA1F:PSU1000-YFLT"
+          Type = uint8
+        }
+        BPS_READY = {
+          PVName = "EC-GN-P01-PA1F:PSU1000-YSTA"
+          Type = uint8
+        }
+        MHPS_FLT = {
+          PVName = "EC-GN-P01-PMF:PSU0000-YFLT"
+          Type = uint8
+        }
+        MHPS_READY = {
+          PVName = "EC-GN-P01-PMF:PSU0000-TYSTA"
+          Type = uint8
+        }
+        MHPS_OC = {
+          PVName = "EC-GN-P01-GAFP:FMC4310-YFLT-OC"
+          Type = uint8
+        }
+        MHPS_OV = {
+          PVName = "EC-GN-P01-GAFP:FMC4310-YFLT-OV"
+          Type = uint8
+        }
+        CRIO_RV1 = {
+          Type = uint8
+          PVName = "EC-GN-P01-GAFP:FMC4310-RV1"
+        }
+        CRIO_RV2 = {
+          Type = uint8
+          PVName = "EC-GN-P01-GAFP:FMC4310-RV2"
+        }
+        CRIO_RV3 = {
+          Type = uint8
+          PVName = "EC-GN-P01-GAFP:FMC4310-RV3"
+        }
+        FAST_ITL = {
+          Type = uint8
+          PVName = "EC-GN-P01-GAFP:FMC4310-YTRP"
+        }
+        FAST_PAUSE = {
+          Type = uint8
+          PVName = "EC-GN-P01-GAFP:FMC4310-YTRP2"
+        }
+        PXI_6259_STATE = {
+          Type = uint32
+          PVName = "EC-GN-P01-HWCF:6259-0-STATUS"
+        }
+        PXI_6683_STATE = {
+          Type = uint8
+          PVName = "EC-GN-P01-HWCF:6683-0-STATUS"
+        }
+        PXI_6683_SYNC = {
+          Type = uint8
+          PVName = "EC-GN-P01-HWCF:6683-0-SYNC"
+        }
+        PXI_6683_SYNCLOST = {
+          Type = uint8
+          PVName = "EC-GN-P01-HWCF:6683-0-SYNCLOST"
+        }
+        PXI_6528_STATE = {
+          Type = uint32
+          PVName = "EC-GN-P01-HWCF:6528-0-STATUS"
+        }
+      }
+    }
+    +NI6528_0_DIO = {
+      Class = NI6528
+      DeviceName = "/dev/pxi6528"
+      BoardId = 0
+      Signals = {
+        DI0 = {
+          Type = uint8
+          PortId = 0
+        }
+        DI1 = {
+          Type = uint8
+          PortId = 1
+        }
+        DI2 = {
+          Type = uint8
+          PortId = 2
+        }
+        DO3 = {
+          Type = uint8
+          PortId = 3
+          InversionMask = 0xFF
+        }
+        DO4 = {
+          Type = uint8
+          PortId = 4
+          InversionMask = 0xFF
+        }
+        DO5 = {
+          Type = uint8
+          PortId = 5
+          InversionMask = 0xFF
+        }
+      }
+    }
+    +NI6259_DIO_P0 = {
+      Class = NI6259DIO
+      DeviceName = "/dev/pxi6259"
+      BoardId = 1
+      Signals = {
+        Status = {
+          Type = uint32
+        }
+        NI6259Value = {
+          Type = uint32
+          Mask = 0xFF
+          PortId = 0
+        }
+      }
+    }
+    +Th1Bridge = {
+      Class = RealTimeThreadAsyncBridge
+      NumberOfBuffers = 20
+      Signals = {
+        APS_OUT = {
+          Type = float32
+        }
+        BPS_OUT = {
+          Type = float32
+        }
+        MHVPS_OUT = {
+          Type = float32
+        }
+        PLC_STANDBY = {
+          Type = uint8
+        }
+        FHPS_PrePro = {
+          Type = float32
+        }
+        PXI_FAULT = {
+          Type = uint32
+        }
+      }
+    }
+    +SDNCommands = {
+      Class = "SDN::SDNSubscriber"
+      Topic = "ECPC2SCUJA"
+      Interface = "enp35s0f1"
+      CPUs = 0x200
+      Locked = 1
+      Timeout = 2
+      Signals = {
+        Header = {
+          Type = uint8
+          NumberOfDimensions = 1
+          NumberOfElements = 52
+        }
+        ESDNTime = {
+          Type = uint32
+          NumberOfDimensions = 1
+          NumberOfElements = 1
+        }
+        Command = {
+          Type = uint16
+          NumberOfDimensions = 1
+          NumberOfElements = 64
+        }
+      }
+    }
+    +Th2Bridge = {
+      Class = RealTimeThreadAsyncBridge
+      NumberOfBuffers = 20
+      Signals = {
+        Command = {
+          Type = uint16
+        }
+        RFON = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+        HVInjection = {
+          Type = uint32
+        }
+      }
+    }
+    +SDNReply = {
+      Class = "SDN::SDNPublisher"
+      Topic = "SCUJA2ECPC"
+      Interface = "enp35s0f1"
+      CPUs = 0x200
+      Address = "192.195.1.1"
+      Port = 2000
+      Locked = 1
+      Signals = {
+        Header = {
+          Type = uint8
+          NumberOfElements = 52
+        }
+        ESDNTime = {
+          Type = uint32
+        }
+        ReplyStatus = {
+          Type = uint16
+        }
+        ReplyWaveformAck = {
+          Type = uint16
+        }
+        GYA_MHVPS_MESVOLT = {
+          Type = float32
+        }
+        GYA_MHVPS_MESCURR = {
+          Type = float32
+        }
+        GYA_BPS_MESVOLT = {
+          Type = float32
+        }
+        GYA_BPS_MESCURR = {
+          Type = float32
+        }
+        GYA_APS_MESVOLT = {
+          Type = float32
+        }
+        GYA_APS_MESCURR = {
+          Type = float32
+        }
+        GYA_ARC1_MESVOLT = {
+          Type = float32
+        }
+        GYA_ARC2_MESVOLT = {
+          Type = float32
+        }
+        GYA_ARC3_MESVOLT = {
+          Type = float32
+        }
+        GYA_MCPS_CURR_MON = {
+          Type = float32
+        }
+        GYA_GCPS_CURR_MON = {
+          Type = float32
+        }
+        GYA_FHPS_MEAS_ACI = {
+          Type = float32
+        }
+        GYA_CCPS_MEAS_DCI = {
+          Type = float32
+        }
+      }
+    }
+    +SynchThread = {
+      Class = RealTimeThreadSynchronisation
+      Timeout = 0xFFFFFFFF
+      Signals = {
+        Time = {
+          Type = uint64
+        }
+        PXI6259_Status = {
+          Type = uint32
+        }
+        PXI6528_Status = {
+          Type = uint32
+        }
+        PXI6683_Status = {
+          Type = uint8
+        }
+        PXI6683_PtpdStatus = {
+          Type = uint8
+        }
+        GYA_APS_READY = {
+          Type = uint8
+        }
+        GYA_APS_FLT = {
+          Type = uint8
+        }
+        GYA_BPS_READY = {
+          Type = uint8
+        }
+        GYA_BPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_OV = {
+          Type = uint8
+        }
+        MHVPS_OC = {
+          Type = uint8
+        }
+        MHVPS_FLT = {
+          Type = uint8
+        }
+        MHVPS_READY = {
+          Type = uint8
+        }
+        ECPC_MOD = {
+          Type = uint8
+        }
+        FAST_TRIP = {
+          Type = uint8
+        }
+        CRIO_RV1 = {
+          Type = uint8
+        }
+        CRIO_RV2 = {
+          Type = uint8
+        }
+        CRIO_RV3 = {
+          Type = uint8
+        }
+        PLC_ITL = {
+          Type = uint8
+        }
+        PLC_STANDBY = {
+          Type = uint8
+        }
+        PLC_READY = {
+          Type = uint8
+        }
+        PLC_ON = {
+          Type = uint8
+        }
+        PLC_PERMIT = {
+          Type = uint8
+        }
+        PLC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_CC_OP_SELECTED = {
+          Type = uint8
+        }
+        PLC_SYNCMODE = {
+          Type = uint8
+        }
+        TRIGGER = {
+          Type = uint8
+        }
+        BEAM_ON_STAT = {
+          Type = uint8
+        }
+        HVARMED = {
+          Type = uint8
+        }
+        HVINJECTION = {
+          Type = uint8
+        }
+        RFON = {
+          Type = uint8
+        }
+        BEAM_ON_TIME = {
+          Type = uint32
+        }
+        RFON_TIME = {
+          Type = uint32
+        }
+        SHOT_ID = {
+          Type = uint32
+        }
+      }
+    }
+    +FastADC = {
+      Class = "NI6368::NI6368ADC"
+      SamplingFrequency = 1000000
+      DeviceName = "/dev/pxie-6368"
+      IsMultiplexed = 0
+      BoardId = 0
+      ExecutionMode = "RealTimeThread"
+      Calibrate = 1
+      Signals = {
+        Status = {
+          Type = uint32
+          NumberOfElements = 1000
+        }
+        GY_APS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 0
+        }
+        GY_APS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 1
+        }
+        GY_BPS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 2
+        }
+        GY_BPS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 3
+        }
+        GY_MHV_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 4
+        }
+        GY_MHV_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 5
+        }
+        GY_ARC1_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 6
+        }
+        GY_ARC2_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 7
+        }
+        GY_ARC3_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 8
+        }
+        GY_RF_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          ChannelId = 9
+        }
+      }
+    }
+    +TimingBoard = {
+      Class = NI6683H
+      BoardId = 0
+      Signals = {
+        Status = {
+          Type = uint8
+        }
+        PtpdStatus = {
+          Type = uint8
+        }
+        Time = {
+          Type = uint64
+        }
+      }
+    }
+    +DDB4 = {
+      Class = GAMDataSource
+      Signals = {
+        PXI6368_Status = {
+          Type = uint32
+          NumberOfElements = 1000
+        }
+        GY_APS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_APS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_BPS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_BPS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_MHV_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_MHV_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_ARC1_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_ARC2_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_ARC3_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+        GY_RF_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+        }
+      }
+    }
+    +FastAnalogDAN = {
+      Class = "DAN::DANSource"
+      NumberOfBuffers = 10
+      CPUMask = 0x8
+      StackSize = 10000000
+      DanBufferMultiplier = 4
+      StoreOnTrigger = 1
+      ICProgName = "JADA_RF01App"
+      NumberOfPreTriggers = 0
+      NumberOfPostTriggers = 0
+      Signals = {
+        Trigger = {
+          Type = uint8
+        }
+        AI_Time = {
+          Type = uint64
+          TimeSignal = 1
+          AbsoluteTime = 1
+          TimeSignalMultiplier = 1e-9
+        }
+        GY_APS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_APS_V_MEAS"
+        }
+        GY_APS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_APS_I_MEAS"
+        }
+        GY_BPS_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_BPS_V_MEAS"
+        }
+        GY_BPS_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_BPS_I_MEAS"
+        }
+        GY_MHV_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_MHV_V_MEAS"
+        }
+        GY_MHV_I_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_MHV_I_MEAS"
+        }
+        GY_ARC1_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_ARC1_V_MEAS"
+        }
+        GY_ARC2_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_ARC2_V_MEAS"
+        }
+        GY_ARC3_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_ARC3_V_MEAS"
+        }
+        GY_RF_V_MEAS = {
+          Type = float32
+          NumberOfElements = 1000
+          SamplingFrequency = 1000000
+          NodeName = "EC-GN-P01:GY_RF_V_MEAS"
+        }
+      }
+    }
+    +AnalogEpicsOutput = {
+      Class = "EPICSCA::EPICSCAOutput"
+      CPUMask = 0x8
+      StackSize = 10000000
+      NumberOfBuffers = 2
+      Signals = {
+        PXI6368_Status = {
+          Type = uint32
+          PVName = "EC-GN-P01-HWCF:6368-0-STATUS"
+        }
+        GY_APS_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PA1F:PSU3000-ET"
+        }
+        GY_APS_I_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PA1F:PSU3000-IT"
+        }
+        GY_BPS_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PA1F:PSU2000-ET"
+        }
+        GY_BPS_I_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PA1F:PSU2000-IT"
+        }
+        GY_MHV_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PMF:PSU0000-ET-GA"
+        }
+        GY_MHV_I_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-PMF:PSU0000-IT-GA"
+        }
+        GY_ARC1_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-GAF:MOE2810-ET"
+        }
+        GY_ARC2_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-GAF:MOE2820-ET"
+        }
+        GY_ARC3_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-GAF:MOE2830-ET"
+        }
+        GY_RF_V_MEAS = {
+          Type = float32
+          PVName = "EC-GN-P01-GAF:MRR2910-ET"
+        }
+      }
+    }
+    +Th4Bridge = {
+      Class = RealTimeThreadAsyncBridge
+      NumberOfBuffers = 20
+      Signals = {
+        PXI6368_Status = {
+          Type = uint32
+        }
+        GY_APS_V_MEAS = {
+          Type = float32
+        }
+        GY_APS_I_MEAS = {
+          Type = float32
+        }
+        GY_BPS_V_MEAS = {
+          Type = float32
+        }
+        GY_BPS_I_MEAS = {
+          Type = float32
+        }
+        GY_MHV_V_MEAS = {
+          Type = float32
+        }
+        GY_MHV_I_MEAS = {
+          Type = float32
+        }
+        GY_ARC1_V_MEAS = {
+          Type = float32
+        }
+        GY_ARC2_V_MEAS = {
+          Type = float32
+        }
+        GY_ARC3_V_MEAS = {
+          Type = float32
+        }
+        GY_RF_V_MEAS = {
+          Type = float32
+        }
+      }
+    }
+    +DANDIODataSource = {
+      Class = "DAN::DANSource"
+      NumberOfBuffers = 10
+      CPUMask = 15
+      StackSize = 10000000
+      DanBufferMultiplier = 4
+      StoreOnTrigger = 1
+      ICProgName = "JADA_RF01App"
+      NumberOfPreTriggers = 0
+      NumberOfPostTriggers = 0
+      Signals = {
+        DI_Time = {
+          Type = uint64
+          TimeSignal = 1
+          AbsoluteTime = 1
+          TimeSignalMultiplier = 1e-9
+        }
+        PXI6528_Status = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint32
+          NodeName = "EC-GN-P01:PXI6528_Status"
+        }
+        GYA_APS_READY = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint32
+          NodeName = "EC-GN-P01:GYA_APS_READY"
+        }
+        GYA_APS_FLT = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:GYA_APS_FLT"
+        }
+        GYA_BPS_READY = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:GYA_BPS_READY"
+        }
+        GYA_BPS_FLT = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:GYA_BPS_FLT"
+        }
+        MHVPS_OV = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:MHVPS_OV"
+        }
+        MHVPS_OC = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:MHVPS_OC"
+        }
+        MHVPS_FLT = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:MHVPS_FLT"
+        }
+        MHVPS_READY = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:MHVPS_READY"
+        }
+        ECPC_MOD = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:ECPC_MOD"
+        }
+        FAST_TRIP = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:FAST_TRIP"
+        }
+        CRIO_RV1 = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:CRIO_RV1"
+        }
+        CRIO_RV2 = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:CRIO_RV2"
+        }
+        CRIO_RV3 = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:CRIO_RV3"
+        }
+        PLC_ITL = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_ITL"
+        }
+        PLC_STANDBY = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_STANDBY"
+        }
+        PLC_READY = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_READY"
+        }
+        PLC_ON = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_ON"
+        }
+        PLC_PERMIT = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_PERMIT"
+        }
+        PLC_OP_SELECTED = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_OP_SELECTED"
+        }
+        PLC_CC_OP_SELECTED = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_CC_OP_SELECTED"
+        }
+        PLC_SYNCMODE = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:PLC_SYNCMODE"
+        }
+        TRIGGER = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:TRIGGER"
+        }
+        BEAM_ON_STAT = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:BEAM_ON_STAT"
+        }
+        HVARMED = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:HVARMED"
+        }
+        HVINJECTION = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint8
+          NodeName = "EC-GN-P01:HVINJECTION"
+        }
+        RFON = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          NodeName = "EC-GN-P01:RFON"
+          Type = uint8
+        }
+        BEAM_ON_TIME = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          NodeName = "EC-GN-P01:BEAM_ON_TIME"
+          Type = uint32
+        }
+        RFON_TIME = {
+          SamplingFrequency = 20000
+          NumberOfElements = 1000
+          Type = uint32
+          NodeName = "EC-GN-P01:RFON_TIME"
+        }
+      }
+    }
+    +WGAsyncBridge = {
+      Class = RealTimeThreadAsyncBridge
+      NumberOfBuffers = 20
+      Signals = {
+        CCPS_REF = {
+          Type = float32
+        }
+        FHPS_REF = {
+          Type = float32
+        }
+        FHPS_AUTO_STAT = {
+          Type = uint32
+        }
+      }
+    }
+    +NI6259_AO = {
+      Class = NI6259DAC
+      DeviceName = "/dev/pxi6259"
+      BoardId = 0
+      SamplingFrequency = 1000
+      Signals = {
+        CCPS_REF = {
+          Type = float32
+          ChannelId = 0
+          OutputPolarity = "Bipolar"
+        }
+        FHPS_REF = {
+          Type = float32
+          ChannelId = 1
+          OutputPolarity = "Bipolar"
+        }
+      }
+    }
+    +TimerSDN = {
+      Class = LinuxTimer
+      SleepNature = "Busy"
+      SleepPercentage = 40
+      ExecutionMode = "RealTimeThread"
+      CPUMask = 0x200
+      Signals = {
+        Counter = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+      }
+    }
+    +FastTimer = {
+      Class = LinuxTimer
+      SleepNature = "Busy"
+      SleepPercentage = 40
+      ExecutionMode = "RealTimeThread"
+      CPUMask = 0x400
+      Signals = {
+        Counter = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+        AbsoluteTime = {
+          Type = uint64
+        }
+      }
+    }
+    +WGTimer = {
+      Class = LinuxTimer
+      SleepNature = "Busy"
+      SleepPercentage = 40
+      ExecutionMode = "RealTimeThread"
+      CPUMask = 0x700
+      Signals = {
+        Counter = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +EPICSOutputGAM = {
+      Class = IOGAM
+      InputSignals = {
+        PCF_STATE = {
+          DataSource = DDB1
+        }
+        MCPS_ACT_SP = {
+          DataSource = DDB1
+          Type = uint32
+          Value = 0
+        }
+        GCPS_ACT_SP = {
+          DataSource = DDB1
+          Type = uint32
+          Value = 0
+        }
+        BPS_OUT = {
+          DataSource = DDB1
+        }
+        APS_OUT = {
+          DataSource = DDB1
+        }
+        MCPS_OUT = {
+          DataSource = DDB1
+        }
+        GCPS_OUT = {
+          DataSource = DDB1
+        }
+        FHPS_REF = {
+          DataSource = WGAsyncBridge
+        }
+        CSV_LOADED = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        CSV_ERR = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        ELAPSED_TIME = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        HVARMED = {
+          DataSource = DDB1
+          Type = uint8
+        }
+        HVINJECTION = {
+          DataSource = DDB1
+          Type = uint8
+        }
+        RFON = {
+          DataSource = DDB1
+          Type = uint8
+        }
+        MHVPS_OUT = {
+          DataSource = DDB1
+        }
+        PREP_TIME_WF = {
+          DataSource = DDB1
+        }
+        MHVPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        BPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        APS_PREP_WF = {
+          DataSource = DDB1
+        }
+        MCPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        GCPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        FHPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        CCPS_REF = {
+          DataSource = WGAsyncBridge
+        }
+        MHVPS_STOP = {
+          Alias = FAST_STOP
+          DataSource = DDB1
+          Type = uint32
+        }
+        APS_STOP = {
+          Alias = FAST_STOP
+          DataSource = DDB1
+          Type = uint32
+        }
+        BPS_STOP = {
+          Alias = FAST_STOP
+          DataSource = DDB1
+          Type = uint32
+        }
+        BEAM_ON_TIME = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        PCF_FAULT = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        PXI_FAULT = {
+          DataSource = DDB1
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB1
+          Type = uint8
+        }
+        SHOT_ID = {
+          DataSource = DDB1
+        }
+        FHPS_AUTO_STAT = {
+          DataSource = WGAsyncBridge
+        }
+        APS_HVON = {
+          DataSource = DDB1
+        }
+        APS_SWON = {
+          DataSource = DDB1
+        }
+        BPS_HVON = {
+          DataSource = DDB1
+        }
+        BPS_SWON = {
+          DataSource = DDB1
+        }
+        MHVPS_HVON = {
+          DataSource = DDB1
+        }
+        TRIGGER = {
+          DataSource = DDB1
+        }
+        ECPC_MOD = {
+          DataSource = DDB1
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+        }
+        PLC_OP_SELECTED = {
+          DataSource = DDB1
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = DDB1
+        }
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+        }
+        PLC_ITL = {
+          DataSource = DDB1
+        }
+        PLC_STANDBY = {
+          DataSource = DDB1
+        }
+        PLC_READY = {
+          DataSource = DDB1
+        }
+        PLC_ON = {
+          DataSource = DDB1
+        }
+        GYA_APS_FLT = {
+          DataSource = DDB1
+        }
+        GYA_APS_READY = {
+          DataSource = DDB1
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB1
+        }
+        GYA_BPS_READY = {
+          DataSource = DDB1
+        }
+        MHVPS_FLT = {
+          DataSource = DDB1
+        }
+        MHVPS_READY = {
+          DataSource = DDB1
+        }
+        MHVPS_OC = {
+          DataSource = DDB1
+        }
+        MHVPS_OV = {
+          DataSource = DDB1
+        }
+        CRIO_RV1 = {
+          DataSource = DDB1
+        }
+        CRIO_RV2 = {
+          DataSource = DDB1
+        }
+        CRIO_RV3 = {
+          DataSource = DDB1
+        }
+        FAST_TRIP = {
+          DataSource = DDB1
+        }
+        PXI6259_Status = {
+          DataSource = DDB1
+        }
+        PXI6683_Status = {
+          DataSource = DDB1
+        }
+        PXI6683_PtpdStatus = {
+          DataSource = DDB1
+        }
+        PXI6528_Status = {
+          DataSource = DDB1
+        }
+      }
+      OutputSignals = {
+        PCF_STATE = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        MCPS_ACT_SP = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        GCPS_ACT_SP = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        BPS_REF = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        APS_REF = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        MCPS_TRG_CURR_SET = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        GCPS_TRG_CURR_SET = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        FHPS_REF = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        CSV_LOADED = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        CSV_ERR = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        ELAPSED_TIME = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        HVARMED = {
+          DataSource = EPICSCAOutput
+        }
+        HVINJECTION = {
+          DataSource = EPICSCAOutput
+        }
+        RFON = {
+          DataSource = EPICSCAOutput
+        }
+        MHVPS_REF = {
+          DataSource = EPICSCAOutput
+          Type = float32
+        }
+        PREP_TIME_WF = {
+          DataSource = EPICSCAOutput
+        }
+        MHVPS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        BPS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        APS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        MCPS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        GCPS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        FHPS_PREP_WF = {
+          DataSource = EPICSCAOutput
+        }
+        CCPS_REF = {
+          DataSource = EPICSCAOutput
+        }
+        MHVPS_STOP = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        APS_STOP = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        BPS_STOP = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        BEAM_ON_TIME = {
+          DataSource = EPICSCAOutput
+          Type = uint32
+        }
+        PCF_FLT = {
+          DataSource = EPICSCAOutput
+        }
+        PXI_FLT = {
+          DataSource = EPICSCAOutput
+        }
+        BEAM_ON_STAT = {
+          DataSource = EPICSCAOutput
+        }
+        SHOT_ID = {
+          DataSource = EPICSCAOutput
+        }
+        FHPS_AUTO_STAT = {
+          DataSource = EPICSCAOutput
+        }
+        APS_HVON = {
+          DataSource = EPICSCAOutput
+        }
+        APS_SWON = {
+          DataSource = EPICSCAOutput
+        }
+        BPS_HVON = {
+          DataSource = EPICSCAOutput
+        }
+        BPS_SWON = {
+          DataSource = EPICSCAOutput
+        }
+        MHVPS_HVON = {
+          DataSource = EPICSCAOutput
+        }
+        EXT_TRIGGER = {
+          DataSource = EPICSCAOutput
+        }
+        ECPC_MHVPS_MOD = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_PERMIT = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_OP_SELECTED = {
+          DataSource = EPICSCAOutput
+        }
+        CCPS_IN_OP = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_SYNCMODE = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_ITL = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_STANDBY = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_READY = {
+          DataSource = EPICSCAOutput
+        }
+        PLC_ON = {
+          DataSource = EPICSCAOutput
+        }
+        APS_FLT = {
+          DataSource = EPICSCAOutput
+        }
+        APS_READY = {
+          DataSource = EPICSCAOutput
+        }
+        BPS_FLT = {
+          DataSource = EPICSCAOutput
+        }
+        BPS_READY = {
+          DataSource = EPICSCAOutput
+        }
+        MHPS_FLT = {
+          DataSource = EPICSCAOutput
+        }
+        MHPS_READY = {
+          DataSource = EPICSCAOutput
+        }
+        MHPS_OC = {
+          DataSource = EPICSCAOutput
+        }
+        MHPS_OV = {
+          DataSource = EPICSCAOutput
+        }
+        CRIO_RV1 = {
+          DataSource = EPICSCAOutput
+        }
+        CRIO_RV2 = {
+          DataSource = EPICSCAOutput
+        }
+        CRIO_RV3 = {
+          DataSource = EPICSCAOutput
+        }
+        FAST_ITL = {
+          DataSource = EPICSCAOutput
+        }
+        PXI_6259_STATE = {
+          DataSource = EPICSCAOutput
+        }
+        PXI_6683_STATE = {
+          DataSource = EPICSCAOutput
+        }
+        PXI_6683_SYNC = {
+          DataSource = EPICSCAOutput
+        }
+        PXI_6528_STATE = {
+          DataSource = EPICSCAOutput
+        }
+      }
+    }
+    +WFRecordGAM = {
+      Class = JAWFRecordGAM
+      Directory = "../Configurations"
+      InputSignals = {
+        CSV_LOAD = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        Filename = {
+          Alias = CSV_NAME
+          DataSource = EPICSCAInput
+        }
+      }
+      OutputSignals = {
+        PREP_TIME_WF = {
+          DataSource = DDB1
+        }
+        MHVPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        BPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        APS_PREP_WF = {
+          DataSource = DDB1
+        }
+        MCPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        GCPS_PREP_WF = {
+          DataSource = DDB1
+        }
+        FHPS_PREP_WF = {
+          DataSource = DDB1
+        }
+      }
+    }
+    +PreProgrammedGAM = {
+      Class = JAPreProgrammedGAM
+      Directory = "../Configurations"
+      PreProgrammedPeriodMs = 1
+      InputSignals = {
+        CSV_LOAD = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        Filename = {
+          Alias = CSV_NAME
+          DataSource = EPICSCAInput
+        }
+        FHPS_REF = {
+          Alias = FHPS_AUTO_TAGV
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        RFON = {
+          DataSource = DDB1
+          Type = uint8
+        }
+      }
+      OutputSignals = {
+        GYA_PREPRO_TIME = {
+          DataSource = DDB1
+          Type = int32
+        }
+        MHVPS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        BPS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        APS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        MCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+        GCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+        FHPS_PrePro = {
+          DataSource = DDB1
+          Type = float32
+        }
+        CSV_LOADED = {
+          DataSource = DDB1
+          Type = uint32
+        }
+        CSV_ERR = {
+          DataSource = DDB1
+          Type = uint32
+        }
+      }
+    }
+    +PXIErrorGAM = {
+      Class = JAConditionalSignalUpdateGAM
+      Operation = "OR"
+      InputSignals = {
+        PXI6368_Status_3 = {
+          Alias = PXI6368_Status
+          DataSource = Th4Bridge
+          Comparator = "EQUALS"
+          Type = uint32
+          Value = 3
+        }
+        PXI6368_Status_4 = {
+          Alias = PXI6368_Status
+          DataSource = Th4Bridge
+          Comparator = "EQUALS"
+          Type = uint32
+          Value = 4
+        }
+        PXI6528_Status = {
+          DataSource = DDB1
+          Comparator = "GREATER"
+          Type = uint32
+          Value = 0
+        }
+        PXI6259_Status = {
+          DataSource = DDB1
+          Comparator = "GREATER"
+          Type = uint32
+          Value = 0
+        }
+      }
+      OutputSignals = {
+        PXI_FAULT = {
+          DataSource = DDB1
+          Type = uint32
+          DefaultValue = 0
+          Value = 1
+        }
+      }
+    }
+    +MCPSGAM = {
+      Class = IOGAM
+      InputSignals = {
+        MCPS_TRG_CURR_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        GCPS_TRG_CURR_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+      }
+      OutputSignals = {
+        MCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+        GCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+      }
+    }
+    +ChoiceGAM = {
+      Class = JASourceChoiceGAM
+      numberOfPVs = 5
+      InputSignals = {
+        BPS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        BPS_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        BPS_MM = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        APS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        APS_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        APS_MM = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        MHVPS_REF = {
+          DataSource = DDB1
+          Type = float32
+        }
+        MHVPS_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        MHVPS_MM = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        MCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+        MCPS_TRG_CURR_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        MCPS_MM = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        GCPS_TRG_CURR_SET = {
+          DataSource = DDB1
+          Type = float32
+        }
+        GCPS_TRG_CURR_MANUAL = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        GCPS_MM = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+      }
+      OutputSignals = {
+        BPS_OUT = {
+          DataSource = DDB1
+          Type = float32
+        }
+        APS_OUT = {
+          DataSource = DDB1
+          Type = float32
+        }
+        MHVPS_OUT = {
+          DataSource = DDB1
+          Type = float32
+        }
+        MCPS_OUT = {
+          DataSource = DDB1
+          Type = float32
+        }
+        GCPS_OUT = {
+          DataSource = DDB1
+          Type = float32
+        }
+      }
+    }
+    +StateGAM = {
+      Class = ConstantGAM
+      OutputSignals = {
+        PCF_STATE = {
+          DataSource = DDB1
+          Default = 0
+        }
+        PCF_FAULT = {
+          DataSource = DDB1
+          Default = 1
+        }
+      }
+    }
+    +GoErrorGAM = {
+      Class = JAMessageGAM
+      Operation = "OR"
+      InputSignals = {
+        GYA_APS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_OV = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_OC = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MIS_ITL = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_ITL = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoError
+      }
+    }
+    +ResetErrorGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        RESET_FLT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        GYA_APS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        MHVPS_OV = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        MHVPS_OC = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        MHVPS_FLT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        MIS_ITL = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PLC_ITL = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoError
+      }
+    }
+    +GoWaitStandbyGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SELECT = {
+          DataSource = EPICSCAInput
+          Comparator = "EQUALS"
+          Type = uint32
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitStandby
+      }
+    }
+    +GoDisabledGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SELECT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoDisabled
+      }
+    }
+    +GoWaitReadyGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        MCPS_ACT_RB = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 3
+        }
+        MCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+          Type = float32
+          Comparator = "GREATER"
+          Value = 0.0
+        }
+        GCPS_ACT_RB = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 3
+        }
+        GCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+          Type = float32
+          Comparator = "GREATER"
+          Value = 0.0
+        }
+        FHPS_RU = {
+          DataSource = DDB1
+          Comparator = "EQUALS"
+          Type = uint8
+          Value = 1
+        }
+        GY_FHPS_MEAS_ACV = {
+          DataSource = EPICSCAInput
+          Type = float32
+          Comparator = "GREATER"
+          Value = 0.0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitReady
+      }
+    }
+    +GoWaitPermitGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_CC_OP_SELECTED = {
+          DataSource = DDB1
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_READY = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitPermit
+      }
+    }
+    +GoWaitStandbyFromReadyGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_STANDBY = {
+          DataSource = DDB1
+          Type = uint8
+          Value = 0
+          Comparator = "EQUALS"
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitStandby
+      }
+    }
+    +GoWaitReadyFromWaitPermitGAM = {
+      Class = JAMessageGAM
+      Operation = "OR"
+      InputSignals = {
+        PLC_STANDBY = {
+          DataSource = DDB1
+          Type = uint8
+          Value = 0
+          Comparator = "EQUALS"
+        }
+        PLC_READY = {
+          DataSource = DDB1
+          Type = uint8
+          Value = 0
+          Comparator = "EQUALS"
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitReady
+      }
+    }
+    +GoWaitHVONGAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON
+      }
+    }
+    +GoWaitHVON_PREP_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_PREP
+      }
+    }
+    +GoWaitHVON_SDN_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_SDN
+      }
+    }
+    +GoWaitHVON_SDN_PREP_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_SDN_PREP
+      }
+    }
+    +FromWaitHVONToWaitStandby = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_READY = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitStandby
+      }
+    }
+    +FromWaitHVONToWaitPermit = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        APS_HVON = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        BPS_HVON = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        MHVPS_HVON = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        BPS_SWON = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        APS_SWON = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitPermit
+      }
+    }
+    +SyncThreadConsumerGAM = {
+      Class = IOGAM
+      InputSignals = {
+        PXI6259_Status = {
+          DataSource = SynchThread
+          Samples = 20
+          Frequency = 1
+        }
+        PXI6528_Status = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PXI6683_Status = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PXI6683_PtpdStatus = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        GYA_APS_READY = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        GYA_APS_FLT = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        GYA_BPS_READY = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        GYA_BPS_FLT = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        MHVPS_OV = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        MHVPS_OC = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        MHVPS_FLT = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        MHVPS_READY = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        ECPC_MOD = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        FAST_TRIP = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_ITL = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_STANDBY = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_READY = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_ON = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_PERMIT = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_OP_SELECTED = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        PLC_SYNCMODE = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        TRIGGER = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        BEAM_ON_STAT = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        HVARMED = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        HVINJECTION = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        RFON = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        BEAM_ON_TIME = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        RFON_TIME = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        SHOT_ID = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        CRIO_RV1 = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        CRIO_RV2 = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+        CRIO_RV3 = {
+          DataSource = SynchThread
+          Samples = 20
+        }
+      }
+      OutputSignals = {
+        PXI6259_Status = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PXI6528_Status = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PXI6683_Status = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PXI6683_PtpdStatus = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        GYA_APS_READY = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        GYA_APS_FLT = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        GYA_BPS_READY = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        MHVPS_OV = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        MHVPS_OC = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        MHVPS_FLT = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        MHVPS_READY = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        ECPC_MOD = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        FAST_TRIP = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_ITL = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_STANDBY = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_READY = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_ON = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_OP_SELECTED = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        TRIGGER = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        HVARMED = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        HVINJECTION = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        RFON = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        ELAPSED_TIME = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        BEAM_ON_TIME = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        SHOT_ID = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        CRIO_RV1 = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        CRIO_RV2 = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+        CRIO_RV3 = {
+          DataSource = DDB1
+          NumberOfElements = 20
+          Ranges = { { 19 19 } }
+        }
+      }
+    }
+    +EPICSThSyncGAM = {
+      Class = IOGAM
+      InputSignals = {
+        BPS_OUT = {
+          DataSource = DDB1
+        }
+        APS_OUT = {
+          DataSource = DDB1
+        }
+        MHVPS_OUT = {
+          DataSource = DDB1
+        }
+        PLC_STANDBY = {
+          DataSource = DDB1
+        }
+        FHPS_PrePro = {
+          DataSource = DDB1
+        }
+        PXI_FAULT = {
+          DataSource = DDB1
+        }
+      }
+      OutputSignals = {
+        BPS_OUT = {
+          DataSource = Th1Bridge
+        }
+        APS_OUT = {
+          DataSource = Th1Bridge
+        }
+        MHVPS_OUT = {
+          DataSource = Th1Bridge
+        }
+        PLC_STANDBY = {
+          DataSource = Th1Bridge
+        }
+        FHPS_PrePro = {
+          DataSource = Th1Bridge
+        }
+        PXI_FAULT = {
+          DataSource = Th1Bridge
+        }
+      }
+    }
+    +SDNCommandGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Command = {
+          DataSource = SDNCommands
+          NumberOfDimensions = 1
+          NumberOfElements = 64
+          Ranges = { { 0 0 } }
+        }
+        ESDNTime = {
+          DataSource = SDNCommands
+          NumberOfDimensions = 1
+          NumberOfElements = 1
+        }
+      }
+      OutputSignals = {
+        Command = {
+          DataSource = Th2Bridge
+        }
+        ESDNTime = {
+          DataSource = DDB2
+        }
+      }
+    }
+    +SDNReplyGAM = {
+      Class = IOGAM
+      InputSignals = {
+        ESDNTime = {
+          DataSource = DDB2
+        }
+        WaveformPacketID = {
+          DataSource = DDB2
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_APS_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_APS_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+        }
+        GY_GCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+        }
+        GY_FHPS_MEAS_ACI = {
+          DataSource = EPICSCAInput
+        }
+        GY_CCPS_MEAS_DCI = {
+          DataSource = EPICSCAInput
+        }
+      }
+      OutputSignals = {
+        ESDNTime = {
+          DataSource = SDNReply
+        }
+        ReplyWaveformAck = {
+          DataSource = SDNReply
+        }
+        GYA_BPS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_BPS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_APS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_APS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_ARC1_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_ARC2_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_ARC3_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_MHVPS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_MHVPS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_MCPS_CURR_MON = {
+          DataSource = SDNReply
+        }
+        GYA_GCPS_CURR_MON = {
+          DataSource = SDNReply
+        }
+        GYA_FHPS_MEAS_ACI = {
+          DataSource = SDNReply
+        }
+        GYA_CCPS_MEAS_DCI = {
+          DataSource = SDNReply
+          Trigger = 1
+        }
+      }
+    }
+    +SyncThreadProducerGAM = {
+      Class = IOGAM
+      InputSignals = {
+        AbsoluteTime = {
+          DataSource = FastTimer
+        }
+        PXI6259_Status = {
+          Alias = Status
+          DataSource = NI6259_DIO_P0
+        }
+        PXI6528_Status = {
+          DataSource = DDB3
+          Value = 0
+        }
+        PXI6683_Status = {
+          DataSource = TimingBoard
+          Alias = Status
+        }
+        PXI6683_PtpdStatus = {
+          DataSource = TimingBoard
+          Alias = PtpdStatus
+        }
+        GYA_APS_READY = {
+          DataSource = DDB3
+        }
+        GYA_APS_FLT = {
+          DataSource = DDB3
+        }
+        GYA_BPS_READY = {
+          DataSource = DDB3
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB3
+        }
+        MHVPS_OV = {
+          DataSource = DDB3
+        }
+        MHVPS_OC = {
+          DataSource = DDB3
+        }
+        MHVPS_FLT = {
+          DataSource = DDB3
+        }
+        MHVPS_READY = {
+          DataSource = DDB3
+        }
+        ECPC_MOD = {
+          DataSource = DDB3
+        }
+        FAST_TRIP = {
+          DataSource = DDB3
+        }
+        CRIO_RV1 = {
+          DataSource = DDB3
+        }
+        CRIO_RV2 = {
+          DataSource = DDB3
+        }
+        CRIO_RV3 = {
+          DataSource = DDB3
+        }
+        PLC_ITL = {
+          DataSource = DDB3
+        }
+        PLC_STANDBY = {
+          DataSource = DDB3
+        }
+        PLC_READY = {
+          DataSource = DDB3
+        }
+        PLC_ON = {
+          DataSource = DDB3
+        }
+        PLC_PERMIT = {
+          DataSource = DDB3
+        }
+        PLC_OP_SELECTED = {
+          DataSource = DDB3
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = DDB3
+        }
+        PLC_SYNCMODE = {
+          DataSource = DDB3
+        }
+        TRIGGER = {
+          DataSource = DDB3
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB3
+        }
+        HVARMED = {
+          DataSource = DDB3
+        }
+        HVINJECTION = {
+          DataSource = DDB3
+        }
+        RFON = {
+          DataSource = DDB3
+        }
+        BEAM_ON_TIME = {
+          DataSource = DDB3
+        }
+        RFON_TIME = {
+          DataSource = DDB3
+        }
+        SHOT_ID = {
+          DataSource = DDB3
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = SynchThread
+        }
+        PXI6259_Status = {
+          DataSource = SynchThread
+        }
+        PXI6528_Status = {
+          DataSource = SynchThread
+        }
+        PXI6683_Status = {
+          DataSource = SynchThread
+        }
+        PXI6683_PtpdStatus = {
+          DataSource = SynchThread
+        }
+        GYA_APS_READY = {
+          DataSource = SynchThread
+        }
+        GYA_APS_FLT = {
+          DataSource = SynchThread
+        }
+        GYA_BPS_READY = {
+          DataSource = SynchThread
+        }
+        GYA_BPS_FLT = {
+          DataSource = SynchThread
+        }
+        MHVPS_OV = {
+          DataSource = SynchThread
+        }
+        MHVPS_OC = {
+          DataSource = SynchThread
+        }
+        MHVPS_FLT = {
+          DataSource = SynchThread
+        }
+        MHVPS_READY = {
+          DataSource = SynchThread
+        }
+        ECPC_MOD = {
+          DataSource = SynchThread
+        }
+        FAST_TRIP = {
+          DataSource = SynchThread
+        }
+        CRIO_RV1 = {
+          DataSource = SynchThread
+        }
+        CRIO_RV2 = {
+          DataSource = SynchThread
+        }
+        CRIO_RV3 = {
+          DataSource = SynchThread
+        }
+        PLC_ITL = {
+          DataSource = SynchThread
+        }
+        PLC_STANDBY = {
+          DataSource = SynchThread
+        }
+        PLC_READY = {
+          DataSource = SynchThread
+        }
+        PLC_ON = {
+          DataSource = SynchThread
+        }
+        PLC_PERMIT = {
+          DataSource = SynchThread
+        }
+        PLC_OP_SELECTED = {
+          DataSource = SynchThread
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = SynchThread
+        }
+        PLC_SYNCMODE = {
+          DataSource = SynchThread
+        }
+        TRIGGER = {
+          DataSource = SynchThread
+        }
+        BEAM_ON_STAT = {
+          DataSource = SynchThread
+        }
+        HVARMED = {
+          DataSource = SynchThread
+        }
+        HVINJECTION = {
+          DataSource = SynchThread
+        }
+        RFON = {
+          DataSource = SynchThread
+        }
+        BEAM_ON_TIME = {
+          DataSource = SynchThread
+        }
+        RFON_TIME = {
+          DataSource = SynchThread
+        }
+        SHOT_ID = {
+          DataSource = SynchThread
+        }
+      }
+    }
+    +FastEpicsInputGAM = {
+      Class = IOGAM
+      InputSignals = {
+        MHVPS_DT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        APS_HVON_DT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        APS_SWON_DT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        BPS_HVON_DT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        BPS_SWON_DT = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        SHOTLEN = {
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        SHORT_PULSE_MODE = {
+          DataSource = EPICSCAInput
+        }
+      }
+      OutputSignals = {
+        MHVPS_DT = {
+          DataSource = DDB3
+        }
+        APS_HVON_DT = {
+          DataSource = DDB3
+        }
+        APS_SWON_DT = {
+          DataSource = DDB3
+        }
+        BPS_HVON_DT = {
+          DataSource = DDB3
+        }
+        BPS_SWON_DT = {
+          DataSource = DDB3
+        }
+        SHOTLEN = {
+          DataSource = DDB3
+        }
+        SHORT_PULSE_MODE = {
+          DataSource = DDB3
+        }
+      }
+    }
+    +HVPSsOffGAM = {
+      Class = ConstantGAM
+      OutputSignals = {
+        MHVPS_HVON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        BPS_HVON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        BPS_SWON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        APS_HVON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        APS_SWON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        HVARMED = {
+          DataSource = DDB3
+          Default = 0
+        }
+        HVINJECTION = {
+          DataSource = DDB3
+          Default = 0
+        }
+        RFON = {
+          DataSource = DDB3
+          Default = 0
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB3
+          Default = 0
+        }
+      }
+    }
+    +FastStopRequestGAM = {
+      Class = JAConditionalSignalUpdateGAM
+      Operation = "OR"
+      InputSignals = {
+        GYA_APS_FLT = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_OV = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_OC = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MHVPS_FLT = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MIS_ITL = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_ITL = {
+          DataSource = DDB3
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      OutputSignals = {
+        FAST_STOP = {
+          DataSource = DDB3
+          Type = uint8
+          DefaultValue = 0
+          Value = 1
+        }
+      }
+    }
+    +ModeLimitGAM = {
+      Class = JAModeControlGAM
+      InputSignals = {
+        PLC_MODE1 = {
+          DataSource = EPICSCAInput
+        }
+        MD1_SHOTLEN_LIM = {
+          DataSource = EPICSCAInput
+        }
+        PLC_MODE2 = {
+          DataSource = EPICSCAInput
+        }
+        MD2_SHOTLEN_LIM = {
+          DataSource = EPICSCAInput
+        }
+        PLC_MODE3 = {
+          DataSource = EPICSCAInput
+        }
+        MD3_SHOTLEN_LIM = {
+          DataSource = EPICSCAInput
+        }
+        PLC_MODE4 = {
+          DataSource = EPICSCAInput
+        }
+        MD4_SHOTLEN_LIM = {
+          DataSource = EPICSCAInput
+        }
+        RFON = {
+          DataSource = Th2Bridge
+        }
+        Time = {
+          DataSource = Th2Bridge
+        }
+        HVInjection = {
+          DataSource = Th2Bridge
+        }
+      }
+      OutputSignals = {
+        MODE_SHOTLEN_FLAG = {
+          DataSource = DDB3
+        }
+      }
+    }
+    +NI6528_0_ReaderGAM = {
+      Class = "IOExt::ExtractBitGAM"
+      InputSignals = {
+        DI0 = {
+          DataSource = NI6528_0_DIO
+        }
+        DI1 = {
+          DataSource = NI6528_0_DIO
+        }
+        DI2 = {
+          DataSource = NI6528_0_DIO
+        }
+      }
+      OutputSignals = {
+        GYA_APS_READY = {
+          DataSource = DDB3
+        }
+        GYA_APS_FLT = {
+          DataSource = DDB3
+        }
+        GYA_BPS_READY = {
+          DataSource = DDB3
+        }
+        GYA_BPS_FLT = {
+          DataSource = DDB3
+        }
+        MHVPS_OV = {
+          DataSource = DDB3
+        }
+        MHVPS_OC = {
+          DataSource = DDB3
+        }
+        MHVPS_FLT = {
+          DataSource = DDB3
+        }
+        MHVPS_READY = {
+          DataSource = DDB3
+        }
+        ECPC_MOD = {
+          DataSource = DDB3
+        }
+        FAST_TRIP = {
+          DataSource = DDB3
+        }
+        NONE_DI10 = {
+          DataSource = DDB3
+          Type = uint8
+        }
+        CRIO_RV1 = {
+          DataSource = DDB3
+        }
+        CRIO_RV2 = {
+          DataSource = DDB3
+        }
+        CRIO_RV3 = {
+          DataSource = DDB3
+        }
+        PLC_ITL = {
+          DataSource = DDB3
+        }
+        PLC_STANDBY = {
+          DataSource = DDB3
+        }
+        PLC_READY = {
+          DataSource = DDB3
+        }
+        PLC_ON = {
+          DataSource = DDB3
+        }
+        PLC_PERMIT = {
+          DataSource = DDB3
+        }
+        PLC_OP_SELECTED = {
+          DataSource = DDB3
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = DDB3
+        }
+        PLC_SYNCMODE = {
+          DataSource = DDB3
+        }
+        TRIGGER = {
+          DataSource = DDB3
+        }
+      }
+    }
+    +NI6528_0_WriterGAM = {
+      Class = "IOExt::CompactBitGAM"
+      InputSignals = {
+        APS_HVON = {
+          DataSource = DDB3
+        }
+        APS_SWON = {
+          DataSource = DDB3
+        }
+        APS_STOP = {
+          DataSource = DDB3
+        }
+        BPS_HVON = {
+          DataSource = DDB3
+        }
+        BPS_SWON = {
+          DataSource = DDB3
+        }
+        BPS_STOP = {
+          DataSource = DDB3
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB3
+        }
+        DO_REV5 = {
+          DataSource = DDB3
+        }
+        DO_REV6 = {
+          DataSource = DDB3
+        }
+        DO_REV7 = {
+          DataSource = DDB3
+        }
+        DO_REV8 = {
+          DataSource = DDB3
+        }
+        MHVPS_HVON = {
+          DataSource = DDB3
+        }
+        MHVPS_STOP = {
+          DataSource = DDB3
+        }
+        MHVPS_MODSW = {
+          DataSource = DDB3
+        }
+        PCF_FLT = {
+          DataSource = DDB3
+        }
+        HVARMED = {
+          DataSource = DDB3
+        }
+        HVINJECTION = {
+          DataSource = DDB3
+        }
+        RFON = {
+          DataSource = DDB3
+        }
+        FHPS_RU = {
+          DataSource = DDB3
+        }
+        SCM_RU = {
+          DataSource = DDB3
+        }
+        SCM_RD = {
+          DataSource = DDB3
+        }
+        CCPS_IN_OPERATION = {
+          DataSource = DDB3
+        }
+        PXI_FLT = {
+          DataSource = DDB3
+        }
+        NONE_DO23 = {
+          DataSource = DDB3
+          Type = uint8
+          Default = 0
+        }
+      }
+      OutputSignals = {
+        DO3 = {
+          DataSource = NI6528_0_DIO
+        }
+        DO4 = {
+          DataSource = NI6528_0_DIO
+        }
+        DO5 = {
+          DataSource = NI6528_0_DIO
+        }
+      }
+    }
+    +GAMRealTimeStateMachine = {
+      Class = JARTStateMachineGAM
+      ConditionTrigger = 1
+      mhvps_hvon = 4
+      aps_hvon = 1
+      aps_swon = 16
+      bps_hvon = 2
+      bps_swon = 8
+      InputSignals = {
+        Time = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        PLC_ON = {
+          DataSource = DDB3
+        }
+        MHVPS_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        APS_HVON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        APS_SWON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        BPS_HVON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        BPS_SWON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        SHOTLEN = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        FAST_STOP = {
+          DataSource = DDB3
+        }
+        MODE_SHOTLEN_FLAG = {
+          DataSource = DDB3
+        }
+        SHORT_PULSE_MODE = {
+          DataSource = DDB3
+        }
+        MHVPS_MODSW = {
+          DataSource = DDB3
+        }
+        DO_REV6 = {
+          DataSource = DDB3
+        }
+      }
+      OutputSignals = {
+        RTSMValue = {
+          DataSource = DDB3
+          Type = uint32
+          Trigger = 1
+        }
+        BEAM_ON_STAT = {
+          DataSource = DDB3
+        }
+        HVARMED = {
+          DataSource = DDB3
+        }
+        HVINJECTION = {
+          DataSource = DDB3
+        }
+        RFON = {
+          DataSource = DDB3
+        }
+        BeamONTime = {
+          Alias = BEAM_ON_TIME
+          DataSource = DDB3
+        }
+        RFONTime = {
+          Alias = RFON_TIME
+          DataSource = DDB3
+          Type = uint32
+        }
+        SHOT_ID = {
+          DataSource = DDB3
+        }
+        APS_HVON = {
+          DataSource = DDB3
+        }
+        APS_SWON = {
+          DataSource = DDB3
+        }
+        BPS_HVON = {
+          DataSource = DDB3
+        }
+        BPS_SWON = {
+          DataSource = DDB3
+        }
+        MHVPS_HVON = {
+          DataSource = DDB3
+        }
+        NI6259Value = {
+          DataSource = NI6259_DIO_P0
+          Type = uint32
+          Trigger = 1
+        }
+      }
+    }
+    +GAMSDNRealTimeStateMachine = {
+      Class = JASDNRTStateMachineGAM
+      ConditionTrigger = 1
+      mhvps_hvon = 4
+      aps_hvon = 1
+      aps_swon = 16
+      bps_hvon = 2
+      bps_swon = 8
+      InputSignals = {
+        Time = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        PLC_ON = {
+          DataSource = DDB3
+        }
+        MHVPS_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        APS_HVON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        APS_SWON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        BPS_HVON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        BPS_SWON_DT = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        SHOTLEN = {
+          DataSource = DDB3
+          Type = uint32
+        }
+        FAST_STOP = {
+          DataSource = DDB3
+        }
+        MODE_SHOTLEN_FLAG = {
+          DataSource = DDB3
+        }
+        Command = {
+          DataSource = Th2Bridge
+          Type = uint16
+        }
+      }
+      OutputSignals = {
+        RTSMValue = {
+          DataSource = DDB3
+          Trigger = 1
+        }
+        BeamON = {
+          Alias = BEAM_ON_STAT
+          DataSource = DDB3
+          Type = uint8
+        }
+        HVARMED = {
+          DataSource = DDB3
+        }
+        HVINJECTION = {
+          DataSource = DDB3
+        }
+        RFON = {
+          DataSource = DDB3
+        }
+        BeamONTime = {
+          Alias = BEAM_ON_TIME
+          DataSource = DDB3
+          Type = uint32
+        }
+        RFONTime = {
+          Alias = RFON_TIME
+          DataSource = DDB3
+          Type = uint32
+        }
+        SHOT_ID = {
+          DataSource = DDB3
+        }
+      }
+    }
+    +ReadADC = {
+      Class = IOGAM
+      InputSignals = {
+        Status = {
+          DataSource = FastADC
+          Frequency = 1
+        }
+        GY_APS_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_APS_I_MEAS = {
+          DataSource = FastADC
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = FastADC
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = FastADC
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = FastADC
+        }
+        GY_RF_V_MEAS = {
+          DataSource = FastADC
+        }
+      }
+      OutputSignals = {
+        PXI6368_Status = {
+          DataSource = DDB4
+        }
+        GY_APS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_APS_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_RF_V_MEAS = {
+          DataSource = DDB4
+        }
+      }
+    }
+    +PushADCtoDAN = {
+      Class = IOGAM
+      InputSignals = {
+        TRIGGER_DAN = {
+          DataSource = EPICSCAInput
+        }
+        Time = {
+          DataSource = TimingBoard
+        }
+        GY_APS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_APS_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_RF_V_MEAS = {
+          DataSource = DDB4
+        }
+      }
+      OutputSignals = {
+        Trigger = {
+          DataSource = FastAnalogDAN
+        }
+        AI_Time = {
+          DataSource = FastAnalogDAN
+        }
+        GY_APS_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_APS_I_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+        GY_RF_V_MEAS = {
+          DataSource = FastAnalogDAN
+        }
+      }
+    }
+    +PushADCtoEpics = {
+      Class = IOGAM
+      InputSignals = {
+        PXI6368_Status_Async = {
+          Alias = PXI6368_Status
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        PXI6368_Status = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_APS_V_MEAS_Async = {
+          Alias = GY_APS_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_APS_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_APS_I_MEAS_Async = {
+          Alias = GY_APS_I_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_APS_I_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_BPS_V_MEAS_Async = {
+          Alias = GY_BPS_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_BPS_I_MEAS_Async = {
+          Alias = GY_BPS_I_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_MHV_V_MEAS_Async = {
+          Alias = GY_MHV_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_MHV_I_MEAS_Async = {
+          Alias = GY_MHV_I_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC1_V_MEAS_Async = {
+          Alias = GY_ARC1_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC2_V_MEAS_Async = {
+          Alias = GY_ARC2_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC3_V_MEAS_Async = {
+          Alias = GY_ARC3_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_RF_V_MEAS_Async = {
+          Alias = GY_RF_V_MEAS
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+        GY_RF_V_MEAS = {
+          DataSource = DDB4
+          Range = { { 0 0 } }
+        }
+      }
+      OutputSignals = {
+        PXI6368_Status_Async = {
+          Alias = PXI6368_Status
+          DataSource = Th4Bridge
+        }
+        PXI6368_Status = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_APS_V_MEAS_Async = {
+          Alias = GY_APS_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_APS_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_APS_I_MEAS_Async = {
+          Alias = GY_APS_I_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_APS_I_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_BPS_V_MEAS_Async = {
+          Alias = GY_BPS_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_BPS_I_MEAS_Async = {
+          Alias = GY_BPS_I_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_MHV_V_MEAS_Async = {
+          Alias = GY_MHV_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_MHV_I_MEAS_Async = {
+          Alias = GY_MHV_I_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_ARC1_V_MEAS_Async = {
+          Alias = GY_ARC1_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_ARC2_V_MEAS_Async = {
+          Alias = GY_ARC2_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_ARC3_V_MEAS_Async = {
+          Alias = GY_ARC3_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+        GY_RF_V_MEAS_Async = {
+          Alias = GY_RF_V_MEAS
+          DataSource = Th4Bridge
+        }
+        GY_RF_V_MEAS = {
+          DataSource = AnalogEpicsOutput
+        }
+      }
+    }
+    +DANDIOPublisherGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = SynchThread
+          Samples = 1000
+          Frequency = 1
+        }
+        PXI6528_Status = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        GYA_APS_READY = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        GYA_APS_FLT = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        GYA_BPS_READY = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        GYA_BPS_FLT = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        MHVPS_OV = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        MHVPS_OC = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        MHVPS_FLT = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        MHVPS_READY = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        ECPC_MOD = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        FAST_TRIP = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        CRIO_RV1 = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        CRIO_RV2 = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        CRIO_RV3 = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_ITL = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_STANDBY = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_READY = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_ON = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_PERMIT = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_OP_SELECTED = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        PLC_SYNCMODE = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        TRIGGER = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        BEAM_ON_STAT = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        HVARMED = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        HVINJECTION = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        RFON = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        BEAM_ON_TIME = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+        RFON_TIME = {
+          DataSource = SynchThread
+          Samples = 1000
+        }
+      }
+      OutputSignals = {
+        DI_Time = {
+          DataSource = DANDIODataSource
+        }
+        PXI6528_Status = {
+          DataSource = DANDIODataSource
+        }
+        GYA_APS_READY = {
+          DataSource = DANDIODataSource
+        }
+        GYA_APS_FLT = {
+          DataSource = DANDIODataSource
+        }
+        GYA_BPS_READY = {
+          DataSource = DANDIODataSource
+        }
+        GYA_BPS_FLT = {
+          DataSource = DANDIODataSource
+        }
+        MHVPS_OV = {
+          DataSource = DANDIODataSource
+        }
+        MHVPS_OC = {
+          DataSource = DANDIODataSource
+        }
+        MHVPS_FLT = {
+          DataSource = DANDIODataSource
+        }
+        MHVPS_READY = {
+          DataSource = DANDIODataSource
+        }
+        ECPC_MOD = {
+          DataSource = DANDIODataSource
+        }
+        FAST_TRIP = {
+          DataSource = DANDIODataSource
+        }
+        CRIO_RV1 = {
+          DataSource = DANDIODataSource
+        }
+        CRIO_RV2 = {
+          DataSource = DANDIODataSource
+        }
+        CRIO_RV3 = {
+          DataSource = DANDIODataSource
+        }
+        PLC_ITL = {
+          DataSource = DANDIODataSource
+        }
+        PLC_STANDBY = {
+          DataSource = DANDIODataSource
+        }
+        PLC_READY = {
+          DataSource = DANDIODataSource
+        }
+        PLC_ON = {
+          DataSource = DANDIODataSource
+        }
+        PLC_PERMIT = {
+          DataSource = DANDIODataSource
+        }
+        PLC_OP_SELECTED = {
+          DataSource = DANDIODataSource
+        }
+        PLC_CC_OP_SELECTED = {
+          DataSource = DANDIODataSource
+        }
+        PLC_SYNCMODE = {
+          DataSource = DANDIODataSource
+        }
+        TRIGGER = {
+          DataSource = DANDIODataSource
+        }
+        BEAM_ON_STAT = {
+          DataSource = DANDIODataSource
+        }
+        HVARMED = {
+          DataSource = DANDIODataSource
+        }
+        HVINJECTION = {
+          DataSource = DANDIODataSource
+        }
+        RFON = {
+          DataSource = DANDIODataSource
+        }
+        BEAM_ON_TIME = {
+          DataSource = DANDIODataSource
+        }
+        RFON_TIME = {
+          DataSource = DANDIODataSource
+        }
+      }
+    }
+    +CCPSWaveformGAM = {
+      Class = JATriangleWaveGAM
+      InputSignals = {
+        Frequency = {
+          Alias = CCPS_OUTPUT_FREQ
+          DataSource = EPICSCAInput
+        }
+        Amplitude = {
+          Alias = CCPS_OUTPUT_AMP
+          DataSource = EPICSCAInput
+        }
+        Offset = {
+          Alias = CCPS_OUTPUT_OFFS
+          DataSource = EPICSCAInput
+        }
+        PLCSTANDBY = {
+          Alias = PLC_STANDBY
+          DataSource = Th1Bridge
+        }
+      }
+      OutputSignals = {
+        CCPS_REF = {
+          DataSource = DDB6
+        }
+      }
+    }
+    +FHPSSetpointGAM = {
+      Class = IOGAM
+      InputSignals = {
+        FHPS_AUTO_TAGV = {
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+      }
+      OutputSignals = {
+        FHPS_TAGV = {
+          DataSource = DDB6
+        }
+      }
+    }
+    +FHPSRampupGAM = {
+      Class = JARampupGAM
+      InputSignals = {
+        Targetv = {
+          Alias = FHPS_TAGV
+          DataSource = DDB6
+        }
+        Time = {
+          Alias = FHPS_AUTO_TIME
+          DataSource = EPICSCAInput
+          Type = float32
+        }
+        Start = {
+          Alias = FHPS_AUTO_START
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        PLC_STANDBY = {
+          Alias = PLC_STANDBY
+          DataSource = Th1Bridge
+        }
+        MANUAL_AUTO = {
+          Alias = FHPS_MANM
+          DataSource = EPICSCAInput
+          Type = uint32
+        }
+        FHPS_PrePro = {
+          DataSource = Th1Bridge
+        }
+      }
+      OutputSignals = {
+        FHPS_REF = {
+          DataSource = DDB6
+        }
+        FHPS_AUTO_STAT = {
+          DataSource = DDB6
+        }
+      }
+    }
+    +WGProducerGAM = {
+      Class = IOGAM
+      InputSignals = {
+        CCPS_REF = {
+          DataSource = DDB6
+        }
+        CCPS_REF_OUT = {
+          Alias = CCPS_REF
+          DataSource = DDB6
+        }
+        FHPS_REF = {
+          DataSource = DDB6
+        }
+        FHPS_REF_OUT = {
+          Alias = FHPS_REF
+          DataSource = DDB6
+        }
+        FHPS_AUTO_STAT = {
+          Type = uint32
+        }
+      }
+      OutputSignals = {
+        CCPS_REF = {
+          DataSource = WGAsyncBridge
+        }
+        CCPS_REF_OUT = {
+          Alias = CCPS_REF
+          DataSource = NI6259_AO
+        }
+        FHPS_REF = {
+          DataSource = WGAsyncBridge
+        }
+        FHPS_REF_OUT = {
+          Alias = FHPS_REF
+          DataSource = NI6259_AO
+          Trigger = 1
+        }
+        FHPS_AUTO_STAT = {
+          DataSource = WGAsyncBridge
+        }
+      }
+    }
+    +TimeSDNGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = TimerSDN
+        }
+        Counter = {
+          DataSource = TimerSDN
+          Frequency = 1000
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = DDB2
+        }
+        Counter = {
+          DataSource = DDB2
+        }
+      }
+    }
+    +FastTimerGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = FastTimer
+        }
+        Counter = {
+          DataSource = FastTimer
+          Frequency = 20000
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = DDB3
+        }
+        Counter = {
+          DataSource = DDB3
+        }
+      }
+    }
+    +WGTimerGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = WGTimer
+        }
+        Counter = {
+          DataSource = WGTimer
+          Frequency = 1000
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = DDB6
+        }
+        Counter = {
+          DataSource = DDB6
+        }
+      }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +Disabled = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          CPUs = 0x1
+          Functions = { SyncThreadConsumerGAM StateGAM MCPSGAM PXIErrorGAM GoErrorGAM GoWaitStandbyGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          CPUs = 0x2
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          CPUs = 0x4
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM HVPSsOffGAM NI6528_0_WriterGAM SyncThreadProducerGAM }
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          CPUs = 0x8
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          CPUs = 0x10
+          Functions = { DANDIOPublisherGAM }
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitStandby = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM MCPSGAM PXIErrorGAM GoDisabledGAM GoWaitReadyGAM GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM HVPSsOffGAM NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSSetpointGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitReady = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM WFRecordGAM PreProgrammedGAM PXIErrorGAM GoWaitPermitGAM GoWaitStandbyFromReadyGAM GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM HVPSsOffGAM NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSSetpointGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitPermit = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM WFRecordGAM PreProgrammedGAM PXIErrorGAM GoWaitReadyFromWaitPermitGAM GoWaitHVONGAM GoWaitHVON_PREP_GAM GoWaitHVON_SDN_GAM GoWaitHVON_SDN_PREP_GAM GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM HVPSsOffGAM NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSSetpointGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitHVON = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM PXIErrorGAM FromWaitHVONToWaitStandby FromWaitHVONToWaitPermit GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM FastEpicsInputGAM FastStopRequestGAM ModeLimitGAM GAMRealTimeStateMachine NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSSetpointGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitHVON_SDN = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM PXIErrorGAM FromWaitHVONToWaitStandby FromWaitHVONToWaitPermit GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM FastEpicsInputGAM FastStopRequestGAM ModeLimitGAM GAMSDNRealTimeStateMachine NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitHVON_PREP = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM PreProgrammedGAM PXIErrorGAM FromWaitHVONToWaitStandby FromWaitHVONToWaitPermit GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM FastEpicsInputGAM FastStopRequestGAM ModeLimitGAM GAMRealTimeStateMachine NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +WaitHVON_SDN_PREP = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM PreProgrammedGAM PXIErrorGAM FromWaitHVONToWaitStandby FromWaitHVONToWaitPermit GoErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM FastEpicsInputGAM FastStopRequestGAM ModeLimitGAM GAMSDNRealTimeStateMachine SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM FHPSRampupGAM WGProducerGAM }
+        }
+      }
+    }
+    +Error = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = { SyncThreadConsumerGAM StateGAM PXIErrorGAM ResetErrorGAM ChoiceGAM EPICSThSyncGAM EPICSOutputGAM }
+          CPUs = 0x1
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = { TimeSDNGAM SDNCommandGAM SDNReplyGAM }
+          CPUs = 0x2
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = { FastTimerGAM NI6528_0_ReaderGAM HVPSsOffGAM NI6528_0_WriterGAM SyncThreadProducerGAM }
+          CPUs = 0x4
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          Functions = { ReadADC PushADCtoDAN PushADCtoEpics }
+          CPUs = 0x8
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          Functions = { DANDIOPublisherGAM }
+          CPUs = 0x10
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = 0x20
+          Functions = { WGTimerGAM CCPSWaveformGAM WGProducerGAM }
+        }
+      }
+    }
+  }
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = Timings
+  }
+}
