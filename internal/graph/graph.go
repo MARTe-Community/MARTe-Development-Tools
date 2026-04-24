@@ -67,6 +67,9 @@ type Result struct {
 	Meta      map[string]NodeInfo
 	States    map[string]*StateInfo
 	AllGAMIDs map[string]bool
+	// Node lookup maps (graphviz ID → ProjectNode) for subset generation.
+	GAMNodes map[string]*index.ProjectNode
+	DSNodes  map[string]*index.ProjectNode
 }
 
 // edge describes one signal connection.
@@ -85,9 +88,38 @@ type dsSplitEntry struct {
 	earlyReadPorts map[string]bool // DS port IDs (s_+canon) that must go to the read clone
 }
 
+// genOpts controls behaviour of the internal generate function.
+type genOpts struct {
+	stateFilter string
+	// subsetNodes, if non-nil, restricts the graph to this set of ProjectNodes.
+	// IDs remain consistent because the full tree.Walk is still done for ID assignment.
+	subsetNodes map[*index.ProjectNode]bool
+}
+
 // Generate produces a Graphviz DOT graph.
 // stateFilter (if non-empty) restricts to GAMs in that state.
 func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, stateFilter string) Result {
+	return generate(tree, diags, genOpts{stateFilter: stateFilter})
+}
+
+// GenerateSubset produces a focused Graphviz DOT graph containing only the
+// specified nodes (identified by their graphviz IDs from a prior Generate call)
+// plus their connecting edges, with a re-optimised layout for that subset.
+// Graphviz node IDs are preserved so they match /api/meta keys.
+func GenerateSubset(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, nodeIDs []string, existing Result) Result {
+	subset := make(map[*index.ProjectNode]bool)
+	for _, id := range nodeIDs {
+		if n, ok := existing.GAMNodes[id]; ok {
+			subset[n] = true
+		}
+		if n, ok := existing.DSNodes[id]; ok {
+			subset[n] = true
+		}
+	}
+	return generate(tree, diags, genOpts{subsetNodes: subset})
+}
+
+func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, opts genOpts) Result {
 	if diags == nil {
 		diags = make(map[*index.ProjectNode][]NodeDiag)
 	}
@@ -111,13 +143,33 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	sort.Slice(allDSS, func(i, j int) bool { return dsIDMap[allDSS[i]] < dsIDMap[allDSS[j]] })
 	sort.Slice(allGAMs, func(i, j int) bool { return gamIDMap[allGAMs[i]] < gamIDMap[allGAMs[j]] })
 
+	// ── Apply subset filter (GenerateSubset) ──────────────────────────────
+	// IDs are already assigned for all nodes; filtering here keeps IDs consistent
+	// with the full graph so meta-data lookups remain valid.
+	if opts.subsetNodes != nil {
+		var fg []*index.ProjectNode
+		for _, g := range allGAMs {
+			if opts.subsetNodes[g] {
+				fg = append(fg, g)
+			}
+		}
+		allGAMs = fg
+		var fd []*index.ProjectNode
+		for _, d := range allDSS {
+			if opts.subsetNodes[d] {
+				fd = append(fd, d)
+			}
+		}
+		allDSS = fd
+	}
+
 	// ── Extract state info ────────────────────────────────────────────────
 	states := extractStates(tree, gamIDMap)
 
 	// ── Apply state filter to GAMs ────────────────────────────────────────
 	gams := allGAMs
-	if stateFilter != "" {
-		if si, ok := states[stateFilter]; ok {
+	if opts.stateFilter != "" {
+		if si, ok := states[opts.stateFilter]; ok {
 			gamByID := make(map[string]*index.ProjectNode)
 			for _, g := range allGAMs {
 				gamByID[gamIDMap[g]] = g
@@ -203,7 +255,7 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 
 	// ── Apply state filter to DS ──────────────────────────────────────────
 	dss := allDSS
-	if stateFilter != "" {
+	if opts.stateFilter != "" {
 		connectedDS := make(map[*index.ProjectNode]bool)
 		for _, e := range edges {
 			for _, ds := range allDSS {
@@ -664,8 +716,8 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		}
 	}
 
-	if stateFilter != "" {
-		si := states[stateFilter]
+	if opts.stateFilter != "" {
+		si := states[opts.stateFilter]
 		var threadNames []string
 		for t := range si.Threads {
 			threadNames = append(threadNames, t)
@@ -775,7 +827,26 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		allGAMIDs[gamIDMap[g]] = true
 	}
 
-	return Result{DOT: sb.String(), Meta: meta, States: states, AllGAMIDs: allGAMIDs}
+	// Build node-lookup maps: graphviz ID → ProjectNode.
+	// These are used by GenerateSubset to map user-selected IDs back to tree nodes.
+	// We include all nodes in gamIDMap/dsIDMap so that dim nodes (hidden by
+	// state filter but still present in the SVG) are also resolvable.
+	gamNodes := make(map[string]*index.ProjectNode)
+	for n, id := range gamIDMap {
+		gamNodes[id] = n
+	}
+	dsNodes := make(map[string]*index.ProjectNode)
+	for n, id := range dsIDMap {
+		dsNodes[id] = n
+	}
+	// For split DS, also map the _r clone ID to the same ProjectNode.
+	for _, ds := range dss {
+		if sp := dsSplitMap[ds]; sp.isMixed {
+			dsNodes[sp.readID] = ds
+		}
+	}
+
+	return Result{DOT: sb.String(), Meta: meta, States: states, AllGAMIDs: allGAMIDs, GAMNodes: gamNodes, DSNodes: dsNodes}
 }
 
 // buildDSSigs builds the full signal list for a DS (explicit + implicit).

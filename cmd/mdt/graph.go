@@ -69,6 +69,8 @@ func runGraph(args []string) {
 
 	type fullResult struct {
 		allResult graph.Result
+		tree      *index.ProjectTree
+		nodeDiags map[*index.ProjectNode][]graph.NodeDiag
 	}
 
 	buildAll := func(files []string) fullResult {
@@ -107,7 +109,7 @@ func runGraph(args []string) {
 			})
 		}
 
-		return fullResult{allResult: graph.Generate(tree, nodeDiags, "")}
+		return fullResult{allResult: graph.Generate(tree, nodeDiags, ""), tree: tree, nodeDiags: nodeDiags}
 	}
 
 	latestMtime := func(files []string) time.Time {
@@ -258,6 +260,27 @@ func runGraph(args []string) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(out)
+	})
+
+	mux.HandleFunc("/api/focused", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			NodeIDs []string `json:"nodeIds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.NodeIDs) == 0 {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		stateMu.RLock()
+		c := current
+		stateMu.RUnlock()
+		res := graph.GenerateSubset(c.tree, c.nodeDiags, body.NodeIDs, c.allResult)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write([]byte(res.DOT))
 	})
 
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
@@ -416,6 +439,15 @@ const graphHTML = `<!DOCTYPE html>
     .sb-sig .arrow.out    { color: #d07030; }
     .sb-sig-name { overflow: hidden; text-overflow: ellipsis; }
 
+    /* ── Pin button in sidebar ── */
+    .sb-pin {
+      font-size: 10px; cursor: pointer; flex-shrink: 0;
+      color: #3a4856; padding: 0 3px; border-radius: 2px;
+      transition: color 0.15s, opacity 0.15s; opacity: 0.4; line-height: 1;
+    }
+    .sb-pin:hover { opacity: 1; color: #8b949e; }
+    .sb-pin.pinned { color: #58a6ff; opacity: 1; }
+
     /* ── Graph area ── */
     #graph-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
     #error {
@@ -425,6 +457,7 @@ const graphHTML = `<!DOCTYPE html>
     }
     #graph {
       flex: 1; overflow: hidden; position: relative; cursor: default;
+      transition: opacity 0.18s ease;
       background-color: #0d1117;
       background-image:
         linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
@@ -517,6 +550,9 @@ const graphHTML = `<!DOCTYPE html>
       <div id="hdr-sep"></div>
       <span id="sel-info"></span>
       <button id="btn-clear">✕ Clear</button>
+      <button class="hdr-btn" id="btn-focus"      title="Draw focused layout for selected nodes" style="display:none">⊞ Focus</button>
+      <button class="hdr-btn" id="btn-watchlist"  title="Draw watchlist graph" style="display:none">◉ 0</button>
+      <button class="hdr-btn active" id="btn-exit-focus" title="Return to full graph" style="display:none">← Full</button>
       <div id="hdr-sep"></div>
       <button class="hdr-btn" id="btn-home"    title="Reset view (Home)">⌂</button>
       <button class="hdr-btn" id="btn-zoomin"  title="Zoom in (+)">+</button>
@@ -594,6 +630,10 @@ const graphHTML = `<!DOCTYPE html>
     let searchItems      = [];
     let searchActiveIdx  = -1;
     let sidebarOpen      = true;
+    let mainDot          = null;  // always the full-graph DOT, kept fresh on reload
+    let focusMode        = false; // true when showing a focused/watchlist subset
+    let watchlist        = new Set(); // node IDs pinned to watchlist
+    let pendingRestore   = null;  // {pan, zoom} to restore after file-change reload
 
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -706,81 +746,109 @@ const graphHTML = `<!DOCTYPE html>
         fetch('/api/meta').then(r => r.json()).catch(() => ({})),
       ])
       .then(([dot, meta]) => {
+        mainDot = dot;
         metaData = meta;
         buildSearchIndex();
-        renderDot(dot);
+        // Exit focus mode on reload (file changed → show updated full graph).
+        focusMode = false;
+        $('btn-exit-focus').style.display = 'none';
+        renderDot(dot, false);
         renderSidebar('');
       })
       .catch(err => { showError(err.message); setStatus('Error'); });
     }
 
     // ── Render ─────────────────────────────────────────────────────────────
-    function renderDot(dot) {
+    // animate=true: fade out current graph, swap SVG, fade in.
+    // View is restored from pendingRestore if set (file-change reload).
+    function renderDot(dot, animate) {
       if (!vizInstance) return;
-      let svg;
-      try { svg = vizInstance.renderSVGElement(dot); }
-      catch(e) { showError('Render: '+e.message); return; }
-      clearError();
 
-      svg.querySelectorAll('.graph > polygon, .graph > ellipse').forEach(el => {
-        el.setAttribute('fill','none'); el.setAttribute('stroke','none');
-      });
+      const doRender = () => {
+        let svg;
+        try { svg = vizInstance.renderSVGElement(dot); }
+        catch(e) { showError('Render: '+e.message); graphEl.style.opacity='1'; return; }
+        clearError();
 
-      const hint = $('sel-hint');
-      graphEl.innerHTML = '';
-      graphEl.appendChild(svg);
-      graphEl.appendChild(hint);
-
-      svg.setAttribute('width','100%'); svg.setAttribute('height','100%');
-
-      if (panZoom) { try { panZoom.destroy(); } catch(_) {} panZoom = null; }
-
-      panZoom = svgPanZoom(svg, {
-        zoomEnabled: true, panEnabled: true, controlIconsEnabled: false,
-        dblClickZoomEnabled: true, fit: true, center: true,
-        minZoom: 0.03, maxZoom: 20,
-      });
-      panZoom.fit(); panZoom.center();
-
-      // Build adjacency
-      adj = {};
-      svg.querySelectorAll('.edge').forEach(el => {
-        const raw = el.querySelector('title')?.textContent ?? '';
-        const idx = raw.indexOf('->');
-        if (idx < 0) return;
-        const from = raw.substring(0,idx).trim().split(':')[0];
-        const to   = raw.substring(idx+2).trim().split(':')[0];
-        if (!adj[from]) adj[from] = new Set();
-        if (!adj[to])   adj[to]   = new Set();
-        adj[from].add(to); adj[to].add(from);
-      });
-
-      // Re-apply state/thread filters with updated adjacency
-      applyStateFilter();
-      applyThreadFilter();
-
-      svg.querySelectorAll('.node').forEach(el => {
-        const id = el.querySelector('title')?.textContent?.trim()?.split(':')[0];
-        if (!id) return;
-        el.style.cursor = 'pointer';
-        el.addEventListener('click', e => {
-          e.stopPropagation(); hideTooltip();
-          if (e.shiftKey) {
-            if (selected.has(id)) selected.delete(id); else selected.add(id);
-          } else {
-            selected = (selected.size===1 && selected.has(id)) ? new Set() : new Set([id]);
-          }
-          applyFilter(svg);
+        svg.querySelectorAll('.graph > polygon, .graph > ellipse').forEach(el => {
+          el.setAttribute('fill','none'); el.setAttribute('stroke','none');
         });
-        el.addEventListener('mouseover',  e => showTooltip(id, e.clientX, e.clientY));
-        el.addEventListener('mousemove',  e => { if (tooltipEl.style.display!=='none') placeTooltip(e.clientX, e.clientY); });
-        el.addEventListener('mouseleave', () => hideTooltip());
-      });
-      svg.addEventListener('click', () => { selected.clear(); applyFilter(svg); });
 
-      selected.clear();
-      applyFilter(svg);
-      setStatus('Updated '+new Date().toLocaleTimeString());
+        const hint = $('sel-hint');
+        graphEl.innerHTML = '';
+        graphEl.appendChild(svg);
+        graphEl.appendChild(hint);
+
+        svg.setAttribute('width','100%'); svg.setAttribute('height','100%');
+
+        if (panZoom) { try { panZoom.destroy(); } catch(_) {} panZoom = null; }
+
+        panZoom = svgPanZoom(svg, {
+          zoomEnabled: true, panEnabled: true, controlIconsEnabled: false,
+          dblClickZoomEnabled: true, fit: true, center: true,
+          minZoom: 0.03, maxZoom: 20,
+        });
+
+        // Restore saved view (file-change reload) or fit/center (layout change).
+        if (pendingRestore) {
+          panZoom.zoom(pendingRestore.zoom);
+          panZoom.pan(pendingRestore.pan);
+          pendingRestore = null;
+        } else {
+          panZoom.fit(); panZoom.center();
+        }
+
+        // Build adjacency
+        adj = {};
+        svg.querySelectorAll('.edge').forEach(el => {
+          const raw = el.querySelector('title')?.textContent ?? '';
+          const idx = raw.indexOf('->');
+          if (idx < 0) return;
+          const from = raw.substring(0,idx).trim().split(':')[0];
+          const to   = raw.substring(idx+2).trim().split(':')[0];
+          if (!adj[from]) adj[from] = new Set();
+          if (!adj[to])   adj[to]   = new Set();
+          adj[from].add(to); adj[to].add(from);
+        });
+
+        // Re-apply state/thread filters with updated adjacency
+        applyStateFilter();
+        applyThreadFilter();
+
+        svg.querySelectorAll('.node').forEach(el => {
+          const id = el.querySelector('title')?.textContent?.trim()?.split(':')[0];
+          if (!id) return;
+          el.style.cursor = 'pointer';
+          el.addEventListener('click', e => {
+            e.stopPropagation(); hideTooltip();
+            if (e.shiftKey) {
+              if (selected.has(id)) selected.delete(id); else selected.add(id);
+            } else {
+              selected = (selected.size===1 && selected.has(id)) ? new Set() : new Set([id]);
+            }
+            applyFilter(svg);
+          });
+          el.addEventListener('mouseover',  e => showTooltip(id, e.clientX, e.clientY));
+          el.addEventListener('mousemove',  e => { if (tooltipEl.style.display!=='none') placeTooltip(e.clientX, e.clientY); });
+          el.addEventListener('mouseleave', () => hideTooltip());
+        });
+        svg.addEventListener('click', () => { selected.clear(); applyFilter(svg); });
+
+        selected.clear();
+        applyFilter(svg);
+        setStatus('Updated '+new Date().toLocaleTimeString());
+
+        if (animate) {
+          requestAnimationFrame(() => { graphEl.style.opacity = '1'; });
+        }
+      };
+
+      if (animate) {
+        graphEl.style.opacity = '0';
+        setTimeout(doRender, 180);
+      } else {
+        doRender();
+      }
     }
 
     // ── Filter ─────────────────────────────────────────────────────────────
@@ -788,6 +856,7 @@ const graphHTML = `<!DOCTYPE html>
       const any = selected.size > 0;
       btnClear.style.display  = any ? '' : 'none';
       selInfoEl.style.display = any ? '' : 'none';
+      $('btn-focus').style.display = (any && !focusMode) ? '' : 'none';
       if (any) {
         selInfoEl.textContent = selected.size===1
           ? metaData[[...selected][0]]?.name || [...selected][0]
@@ -833,6 +902,50 @@ const graphHTML = `<!DOCTYPE html>
       renderSidebar(sbFilterEl.value);
     });
 
+    // ── Focused layout ─────────────────────────────────────────────────────
+    async function loadFocusedGraph(nodeIds) {
+      setStatus('Rendering…');
+      try {
+        const r = await fetch('/api/focused', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({nodeIds: [...nodeIds]})
+        });
+        if (!r.ok) throw new Error('HTTP '+r.status);
+        const dot = await r.text();
+        focusMode = true;
+        $('btn-exit-focus').style.display = '';
+        $('btn-focus').style.display = 'none';
+        renderDot(dot, true);
+      } catch(e) { showError('Focused layout: '+e.message); }
+    }
+
+    $('btn-focus').addEventListener('click', () => {
+      if (selected.size === 0) return;
+      // Include selected nodes + their 1-hop neighbours for context.
+      const ids = new Set(selected);
+      selected.forEach(id => { (adj[id]||new Set()).forEach(nb => ids.add(nb)); });
+      loadFocusedGraph(ids);
+    });
+
+    $('btn-exit-focus').addEventListener('click', () => {
+      focusMode = false;
+      $('btn-exit-focus').style.display = 'none';
+      if (mainDot) renderDot(mainDot, true);
+    });
+
+    $('btn-watchlist').addEventListener('click', () => {
+      if (watchlist.size === 0) return;
+      // Include watched nodes + their DS neighbours to show signal connections.
+      const ids = new Set(watchlist);
+      watchlist.forEach(id => {
+        (adj[id]||new Set()).forEach(nb => {
+          if (metaData[nb]?.kind === 'ds') ids.add(nb);
+        });
+      });
+      loadFocusedGraph(ids);
+    });
+
     // ── Sidebar tree ───────────────────────────────────────────────────────
     function renderSidebar(filter) {
       const fq = filter.toLowerCase().trim();
@@ -875,11 +988,13 @@ const graphHTML = `<!DOCTYPE html>
         const icon     = n.kind==='ds' ? '◼' : (n.iogam ? '⇄' : '▶');
         const splitLbl = n.splitSide==='r' ? ' <span style="color:#1a4a6a;font-size:9px">·src</span>'
                        : n.splitSide==='w' ? ' <span style="color:#1a4a6a;font-size:9px">·snk</span>' : '';
+        const pinned = watchlist.has(id);
         let h = '<div class="sb-node'+(dimmed?' dimmed':'')+(focused?' focused':'')+'" data-id="'+id+'">';
         h += '<span class="sb-toggle">'+(sigs.length?(expanded?'▼':'▶'):'')+'</span>';
         h += '<span class="sb-icon">'+icon+'</span>';
         h += '<span class="sb-name">'+esc(n.name)+splitLbl+'</span>';
         h += '<span class="sb-cls">'+esc(n.class||'')+'</span>';
+        h += '<span class="sb-pin'+(pinned?' pinned':'')+'" data-pin="'+id+'" title="'+(pinned?'Remove from':'Add to')+' watchlist">⊕</span>';
         h += '</div>';
         if (expanded || fq) {
           sigs.forEach(s => {
@@ -929,6 +1044,25 @@ const graphHTML = `<!DOCTYPE html>
       sbTreeEl.querySelectorAll('.sb-sig').forEach(el => {
         el.addEventListener('click', () => focusNode(el.dataset.id));
       });
+      sbTreeEl.querySelectorAll('.sb-pin').forEach(el => {
+        el.addEventListener('click', e => {
+          e.stopPropagation();
+          const id = el.dataset.pin;
+          if (watchlist.has(id)) watchlist.delete(id); else watchlist.add(id);
+          updateWatchlistBtn();
+          renderSidebar(sbFilterEl.value);
+        });
+      });
+    }
+
+    function updateWatchlistBtn() {
+      const btn = $('btn-watchlist');
+      if (watchlist.size > 0) {
+        btn.style.display = '';
+        btn.textContent = '◉ '+watchlist.size;
+      } else {
+        btn.style.display = 'none';
+      }
     }
 
     sbFilterEl.addEventListener('input', () => renderSidebar(sbFilterEl.value));
@@ -1122,8 +1256,17 @@ const graphHTML = `<!DOCTYPE html>
     // ── SSE ────────────────────────────────────────────────────────────────
     function connectSSE() {
       const es = new EventSource('/events');
-      es.onmessage = e => { if (e.data==='reload') loadGraph(); };
-      es.onerror   = () => { es.close(); setTimeout(connectSSE, 2000); };
+      es.onmessage = e => {
+        if (e.data==='reload') {
+          // Save current pan/zoom so loadGraph can restore it after re-render.
+          // Only save when not in focus mode (focus view will be exited on reload).
+          if (panZoom && !focusMode) {
+            pendingRestore = {pan: panZoom.getPan(), zoom: panZoom.getZoom()};
+          }
+          loadGraph();
+        }
+      };
+      es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };
     }
     connectSSE();
   })();
