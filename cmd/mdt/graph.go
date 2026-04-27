@@ -32,15 +32,20 @@ func runGraph(args []string) {
 		arg := args[i]
 		switch {
 		case arg == "-P" && i+1 < len(args):
-			rootPath = args[i+1]; i++
+			rootPath = args[i+1]
+			i++
 		case arg == "-p" && i+1 < len(args):
-			projectFilter = args[i+1]; i++
+			projectFilter = args[i+1]
+			i++
 		case arg == "-port" && i+1 < len(args):
-			fmt.Sscanf(args[i+1], "%d", &port); i++
+			fmt.Sscanf(args[i+1], "%d", &port)
+			i++
 		case strings.HasPrefix(arg, "-v"):
 			pair := arg[2:]
 			parts := strings.SplitN(pair, "=", 2)
-			if len(parts) == 2 { overrides[parts[0]] = parts[1] }
+			if len(parts) == 2 {
+				overrides[parts[0]] = parts[1]
+			}
 		default:
 			explicitFiles = append(explicitFiles, arg)
 		}
@@ -77,17 +82,23 @@ func runGraph(args []string) {
 		tree := index.NewProjectTree()
 		for _, file := range files {
 			content, err := os.ReadFile(file)
-			if err != nil { continue }
+			if err != nil {
+				continue
+			}
 			p := parser.NewParser(string(content))
 			config, _ := p.Parse()
-			if config == nil { continue }
+			if config == nil {
+				continue
+			}
 			if projectFilter != "" {
 				fileProj := ""
 				if config.Package != nil {
 					parts := strings.Split(config.Package.URI, ".")
 					fileProj = strings.TrimSpace(parts[0])
 				}
-				if fileProj != projectFilter { continue }
+				if fileProj != projectFilter {
+					continue
+				}
 			}
 			tree.AddFile(file, config)
 		}
@@ -99,11 +110,17 @@ func runGraph(args []string) {
 		nodeDiags := make(map[*index.ProjectNode][]graph.NodeDiag)
 		for _, d := range v.Diagnostics {
 			node := tree.GetNodeContaining(d.File, d.Position)
-			if node == nil { continue }
+			if node == nil {
+				continue
+			}
 			target := findRelevantAncestor(tree, node)
-			if target == nil { continue }
+			if target == nil {
+				continue
+			}
 			sev := graph.DiagError
-			if d.Level == validator.LevelWarning { sev = graph.DiagWarning }
+			if d.Level == validator.LevelWarning {
+				sev = graph.DiagWarning
+			}
 			nodeDiags[target] = append(nodeDiags[target], graph.NodeDiag{
 				Severity: sev, Message: d.Message,
 			})
@@ -130,7 +147,10 @@ func runGraph(args []string) {
 	broadcast := func(msg string) {
 		clientsMu.Lock()
 		for ch := range clients {
-			select { case ch <- msg: default: }
+			select {
+			case ch <- msg:
+			default:
+			}
 		}
 		clientsMu.Unlock()
 	}
@@ -144,9 +164,12 @@ func runGraph(args []string) {
 			files := collectFiles()
 			mtime := latestMtime(files)
 			if mtime.After(lastMtime) || len(files) != lastCount {
-				lastMtime = mtime; lastCount = len(files)
+				lastMtime = mtime
+				lastCount = len(files)
 				res := buildAll(files)
-				stateMu.Lock(); current = res; stateMu.Unlock()
+				stateMu.Lock()
+				current = res
+				stateMu.Unlock()
 				broadcast("reload")
 			}
 		}
@@ -205,7 +228,9 @@ func runGraph(args []string) {
 
 		toDiag := func(d graph.NodeDiag) diagJSON {
 			sev := "error"
-			if d.Severity == graph.DiagWarning { sev = "warning" }
+			if d.Severity == graph.DiagWarning {
+				sev = "warning"
+			}
 			return diagJSON{Severity: sev, Message: d.Message}
 		}
 		toSig := func(s graph.SigInfo) sigJSON {
@@ -214,7 +239,9 @@ func runGraph(args []string) {
 				Type: s.Type, NumElems: s.NumElems,
 				Doc: s.Doc, Dir: s.Dir, Implicit: s.Implicit,
 			}
-			for _, d := range s.Diags { sj.Diags = append(sj.Diags, toDiag(d)) }
+			for _, d := range s.Diags {
+				sj.Diags = append(sj.Diags, toDiag(d))
+			}
 			return sj
 		}
 
@@ -225,10 +252,18 @@ func runGraph(args []string) {
 				Doc: n.Doc, Conditional: n.Conditional, IOGAM: n.IOGAM,
 				Fields: n.Fields, SplitSide: n.SplitSide, CloneGroup: n.CloneGroup,
 			}
-			for _, s := range n.InSigs  { nj.InSigs  = append(nj.InSigs,  toSig(s)) }
-			for _, s := range n.OutSigs { nj.OutSigs = append(nj.OutSigs, toSig(s)) }
-			for _, s := range n.DSSigs  { nj.DSSigs  = append(nj.DSSigs,  toSig(s)) }
-			for _, d := range n.Diags   { nj.Diags   = append(nj.Diags,   toDiag(d)) }
+			for _, s := range n.InSigs {
+				nj.InSigs = append(nj.InSigs, toSig(s))
+			}
+			for _, s := range n.OutSigs {
+				nj.OutSigs = append(nj.OutSigs, toSig(s))
+			}
+			for _, s := range n.DSSigs {
+				nj.DSSigs = append(nj.DSSigs, toSig(s))
+			}
+			for _, d := range n.Diags {
+				nj.Diags = append(nj.Diags, toDiag(d))
+			}
 			out[id] = nj
 		}
 
@@ -285,13 +320,18 @@ func runGraph(args []string) {
 
 	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
-		if !ok { http.Error(w, "SSE not supported", 500); return }
+		if !ok {
+			http.Error(w, "SSE not supported", 500)
+			return
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 
 		ch := make(chan string, 8)
-		clientsMu.Lock(); clients[ch] = true; clientsMu.Unlock()
+		clientsMu.Lock()
+		clients[ch] = true
+		clientsMu.Unlock()
 		defer func() { clientsMu.Lock(); delete(clients, ch); clientsMu.Unlock() }()
 
 		for {
@@ -328,10 +368,14 @@ func openBrowser(url string) {
 	time.Sleep(300 * time.Millisecond)
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
-	case "linux":   cmd = exec.Command("xdg-open", url)
-	case "darwin":  cmd = exec.Command("open", url)
-	case "windows": cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default: return
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		return
 	}
 	cmd.Start()
 }
@@ -786,7 +830,7 @@ const graphHTML = `<!DOCTYPE html>
         panZoom = svgPanZoom(svg, {
           zoomEnabled: true, panEnabled: true, controlIconsEnabled: false,
           dblClickZoomEnabled: true, fit: true, center: true,
-          minZoom: 0.03, maxZoom: 20,
+          minZoom: 0.03, maxZoom: 100,
         });
 
         // Restore saved view (file-change reload) or fit/center (layout change).

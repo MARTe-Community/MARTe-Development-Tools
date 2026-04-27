@@ -9,7 +9,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
-const maxSigDisplay = 16
+const maxSigDisplay = 128
 
 // DiagSeverity represents error (0) or warning (1).
 type DiagSeverity int
@@ -450,7 +450,7 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	for _, ds := range dss {
 		split := dsSplitMap[ds]
 		if split.isMixed {
-			srcIDs = append(srcIDs, split.readID)       // clone always leftmost (rank=min)
+			srcIDs = append(srcIDs, split.readID)              // clone always leftmost (rank=min)
 			mixedMainIDs = append(mixedMainIDs, split.writeID) // rank from nodeRank
 		} else if len(dsWriteSigs[ds]) == 0 {
 			srcIDs = append(srcIDs, split.readID) // pure source
@@ -940,7 +940,6 @@ func filterDSSigsForMain(sigs []SigInfo, earlyPorts map[string]bool) []SigInfo {
 	return out
 }
 
-
 // buildGAMSigs extracts sorted InputSignals and OutputSignals for a GAM.
 func buildGAMSigs(tree *index.ProjectTree, n *index.ProjectNode, diags map[*index.ProjectNode][]NodeDiag) (inSigs, outSigs []SigInfo) {
 	if c, ok := n.Children["InputSignals"]; ok {
@@ -1180,7 +1179,8 @@ func diagMark(nd []NodeDiag) string {
 
 // dsLabel builds the HTML label for a DataSource node.
 // splitSide: "" = single node, "r" = read clone (early signals only),
-//            "w" = pure sink main node, "m" = mixed main node (writes + late reads).
+//
+//	"w" = pure sink main node, "m" = mixed main node (writes + late reads).
 //
 // Cell alignment is determined per-signal from Dir, so a mixed main node
 // correctly shows "← name" (LEFT) for incoming signals and "name →" (RIGHT)
