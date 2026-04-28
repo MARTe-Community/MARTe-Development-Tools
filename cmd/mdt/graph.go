@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,15 +18,23 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/graph"
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
+	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
+
+// fullResult bundles the generated graph data with the source tree and diagnostics.
+type fullResult struct {
+	allResult graph.Result
+	tree      *index.ProjectTree
+	nodeDiags map[*index.ProjectNode][]graph.NodeDiag
+}
 
 func runGraph(args []string) {
 	var explicitFiles []string
 	rootPath := ""
 	projectFilter := ""
-	port := 8080
+	port := 0
 	overrides := make(map[string]string)
 
 	for i := 0; i < len(args); i++ {
@@ -70,12 +79,6 @@ func runGraph(args []string) {
 			})
 		}
 		return files
-	}
-
-	type fullResult struct {
-		allResult graph.Result
-		tree      *index.ProjectTree
-		nodeDiags map[*index.ProjectNode][]graph.NodeDiag
 	}
 
 	buildAll := func(files []string) fullResult {
@@ -345,12 +348,17 @@ func runGraph(args []string) {
 		}
 	})
 
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		logger.Fatalf("Listen error: %v\n", err)
+	}
+	port = ln.Addr().(*net.TCPAddr).Port
 	url := fmt.Sprintf("http://localhost:%d", port)
 	logger.Printf("MARTe graph server running at %s\n", url)
 	logger.Println("Watching for file changes. Press Ctrl+C to stop.")
 
 	go openBrowser(url)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), mux); err != nil {
+	if err := http.Serve(ln, mux); err != nil {
 		logger.Fatalf("Server error: %v\n", err)
 	}
 }
@@ -362,6 +370,261 @@ func findRelevantAncestor(tree *index.ProjectTree, n *index.ProjectNode) *index.
 		}
 	}
 	return n
+}
+
+// runGraphLSP starts the graph HTTP server in LSP-driven mode.
+// Call this in a goroutine before lsp.RunServer(); it reacts to GraphNotifyFn callbacks
+// from the LSP to rebuild the graph and push SSE events to connected browsers.
+func runGraphLSP(port int) {
+	var stateMu sync.RWMutex
+	var current fullResult
+
+	var clientsMu sync.Mutex
+	clients := make(map[chan string]bool)
+	broadcast := func(msg string) {
+		clientsMu.Lock()
+		for ch := range clients {
+			select {
+			case ch <- msg:
+			default:
+			}
+		}
+		clientsMu.Unlock()
+	}
+
+	// buildFromLSP rebuilds the graph data from the current LSP session snapshot.
+	buildFromLSP := func() fullResult {
+		if lsp.GlobalSession == nil {
+			return fullResult{}
+		}
+		views := lsp.GlobalSession.Views()
+		if len(views) == 0 {
+			return fullResult{}
+		}
+		view := views[0]
+		snap := view.Snapshot()
+		tree := snap.Tree()
+		if tree == nil || tree.Root == nil {
+			return fullResult{}
+		}
+
+		v := validator.NewValidator(tree, view.Root(), nil)
+		v.ValidateProject(context.Background())
+
+		nodeDiags := make(map[*index.ProjectNode][]graph.NodeDiag)
+		for _, d := range v.Diagnostics {
+			node := tree.GetNodeContaining(d.File, d.Position)
+			if node == nil {
+				continue
+			}
+			target := findRelevantAncestor(tree, node)
+			if target == nil {
+				continue
+			}
+			sev := graph.DiagError
+			if d.Level == validator.LevelWarning {
+				sev = graph.DiagWarning
+			}
+			nodeDiags[target] = append(nodeDiags[target], graph.NodeDiag{
+				Severity: sev, Message: d.Message,
+			})
+		}
+
+		return fullResult{
+			allResult: graph.Generate(tree, nodeDiags, ""),
+			tree:      tree,
+			nodeDiags: nodeDiags,
+		}
+	}
+
+	// Wire LSP callbacks: "reload" rebuilds the graph; "focus" sends a highlight event.
+	lsp.GraphNotifyFn = func(event, data string) {
+		switch event {
+		case "reload":
+			res := buildFromLSP()
+			stateMu.Lock()
+			current = res
+			stateMu.Unlock()
+			broadcast("reload")
+		case "focus":
+			broadcast("focus:" + data)
+		}
+	}
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(graphHTML))
+	})
+
+	mux.HandleFunc("/api/dot", func(w http.ResponseWriter, r *http.Request) {
+		stateMu.RLock()
+		dot := current.allResult.DOT
+		stateMu.RUnlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write([]byte(dot))
+	})
+
+	mux.HandleFunc("/api/meta", func(w http.ResponseWriter, r *http.Request) {
+		stateMu.RLock()
+		res := current.allResult
+		stateMu.RUnlock()
+
+		type diagJSON struct {
+			Severity string `json:"severity"`
+			Message  string `json:"message"`
+		}
+		type sigJSON struct {
+			LocalName string     `json:"localName"`
+			DSName    string     `json:"dsName"`
+			Type      string     `json:"type"`
+			NumElems  string     `json:"numElems"`
+			Doc       string     `json:"doc"`
+			Dir       string     `json:"dir"`
+			Implicit  bool       `json:"implicit"`
+			Diags     []diagJSON `json:"diags,omitempty"`
+		}
+		type nodeJSON struct {
+			Name        string            `json:"name"`
+			Kind        string            `json:"kind"`
+			Class       string            `json:"class"`
+			Doc         string            `json:"doc"`
+			Conditional bool              `json:"conditional"`
+			IOGAM       bool              `json:"iogam"`
+			Fields      map[string]string `json:"fields"`
+			InSigs      []sigJSON         `json:"inSigs,omitempty"`
+			OutSigs     []sigJSON         `json:"outSigs,omitempty"`
+			DSSigs      []sigJSON         `json:"dsSigs,omitempty"`
+			Diags       []diagJSON        `json:"diags,omitempty"`
+			SplitSide   string            `json:"splitSide,omitempty"`
+			CloneGroup  []string          `json:"cloneGroup,omitempty"`
+		}
+		toDiag := func(d graph.NodeDiag) diagJSON {
+			sev := "error"
+			if d.Severity == graph.DiagWarning {
+				sev = "warning"
+			}
+			return diagJSON{Severity: sev, Message: d.Message}
+		}
+		toSig := func(s graph.SigInfo) sigJSON {
+			sj := sigJSON{
+				LocalName: s.LocalName, DSName: s.DSName,
+				Type: s.Type, NumElems: s.NumElems,
+				Doc: s.Doc, Dir: s.Dir, Implicit: s.Implicit,
+			}
+			for _, d := range s.Diags {
+				sj.Diags = append(sj.Diags, toDiag(d))
+			}
+			return sj
+		}
+		out := make(map[string]nodeJSON)
+		for id, n := range res.Meta {
+			nj := nodeJSON{
+				Name: n.Name, Kind: n.Kind, Class: n.Class,
+				Doc: n.Doc, Conditional: n.Conditional, IOGAM: n.IOGAM,
+				Fields: n.Fields, SplitSide: n.SplitSide, CloneGroup: n.CloneGroup,
+			}
+			for _, s := range n.InSigs {
+				nj.InSigs = append(nj.InSigs, toSig(s))
+			}
+			for _, s := range n.OutSigs {
+				nj.OutSigs = append(nj.OutSigs, toSig(s))
+			}
+			for _, s := range n.DSSigs {
+				nj.DSSigs = append(nj.DSSigs, toSig(s))
+			}
+			for _, d := range n.Diags {
+				nj.Diags = append(nj.Diags, toDiag(d))
+			}
+			out[id] = nj
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(out)
+	})
+
+	mux.HandleFunc("/api/states", func(w http.ResponseWriter, r *http.Request) {
+		stateMu.RLock()
+		states := current.allResult.States
+		stateMu.RUnlock()
+		type threadJSON struct {
+			GAMIDs []string `json:"gamIds"`
+		}
+		type stateJSON struct {
+			Threads map[string]threadJSON `json:"threads"`
+		}
+		out := make(map[string]stateJSON)
+		for name, si := range states {
+			sj := stateJSON{Threads: make(map[string]threadJSON)}
+			for t, ids := range si.Threads {
+				sj.Threads[t] = threadJSON{GAMIDs: ids}
+			}
+			out[name] = sj
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		json.NewEncoder(w).Encode(out)
+	})
+
+	mux.HandleFunc("/api/focused", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			NodeIDs []string `json:"nodeIds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.NodeIDs) == 0 {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		stateMu.RLock()
+		c := current
+		stateMu.RUnlock()
+		res := graph.GenerateSubset(c.tree, c.nodeDiags, body.NodeIDs, c.allResult)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Write([]byte(res.DOT))
+	})
+
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "SSE not supported", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		ch := make(chan string, 8)
+		clientsMu.Lock()
+		clients[ch] = true
+		clientsMu.Unlock()
+		defer func() { clientsMu.Lock(); delete(clients, ch); clientsMu.Unlock() }()
+		for {
+			select {
+			case msg := <-ch:
+				fmt.Fprintf(w, "data: %s\n\n", msg)
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
+	})
+
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		logger.Fatalf("Graph listen error: %v\n", err)
+	}
+	port = ln.Addr().(*net.TCPAddr).Port
+	url := fmt.Sprintf("http://localhost:%d", port)
+	logger.Printf("MARTe graph server running at %s (LSP mode)\n", url)
+	go openBrowser(url)
+	if err := http.Serve(ln, mux); err != nil {
+		logger.Fatalf("Graph server error: %v\n", err)
+	}
 }
 
 func openBrowser(url string) {
@@ -572,6 +835,26 @@ const graphHTML = `<!DOCTYPE html>
     #tooltip .tt-iogam-pair { font-size: 10px; color: #8b949e; display: flex; gap: 8px; justify-content: space-between; }
     #tooltip .tt-iogam-pair .inp { color: #4d8fdd; }
     #tooltip .tt-iogam-pair .out { color: #d07030; }
+
+    /* ── Help modal ── */
+    #help-overlay {
+      display: none; position: fixed; inset: 0; z-index: 300;
+      background: rgba(0,0,0,0.6); align-items: center; justify-content: center;
+    }
+    #help-overlay.active { display: flex; }
+    #help-box {
+      width: 500px; background: #161b22; border: 1px solid #30363d;
+      border-radius: 8px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+      max-height: 80vh; overflow-y: auto;
+    }
+    #help-box h2 { font-size: 12px; color: #58a6ff; padding: 10px 14px; border-bottom: 1px solid #21262d; letter-spacing: 0.5px; }
+    .help-section { padding: 7px 14px; border-top: 1px solid #21262d; }
+    .help-section:first-of-type { border-top: none; }
+    .help-section h3 { font-size: 9px; color: #484f58; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .help-row { display: flex; gap: 10px; font-size: 11px; padding: 2px 0; }
+    .help-key { color: #8b949e; font-family: monospace; min-width: 130px; flex-shrink: 0; }
+    .help-key kbd { background:#21262d; border:1px solid #30363d; border-radius:3px; padding:0 4px; color:#c9d1d9; font-size:10px; }
+    .help-desc { color: #6e7681; }
   </style>
 </head>
 <body>
@@ -603,6 +886,7 @@ const graphHTML = `<!DOCTYPE html>
       <button class="hdr-btn" id="btn-zoomout" title="Zoom out (−)">−</button>
       <div id="hdr-sep"></div>
       <button class="hdr-btn" id="btn-search"  title="Search (/)">⌕</button>
+      <button class="hdr-btn" id="btn-help"    title="Help (?)">?</button>
       <div id="hdr-sep"></div>
       <span id="status">Loading…</span>
     </div>
@@ -629,6 +913,51 @@ const graphHTML = `<!DOCTYPE html>
   </div>
 
   <div id="tooltip"></div>
+
+  <!-- Help overlay -->
+  <div id="help-overlay">
+    <div id="help-box">
+      <h2>MARTe Signal Flow Graph — Features &amp; Shortcuts</h2>
+      <div class="help-section">
+        <h3>Navigation</h3>
+        <div class="help-row"><span class="help-key"><kbd>/</kbd> or ⌕ button</span><span class="help-desc">Open node/signal search</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Home</kbd> / <kbd>h</kbd></span><span class="help-desc">Reset view — fit entire graph</span></div>
+        <div class="help-row"><span class="help-key">+ / − buttons</span><span class="help-desc">Zoom in / out</span></div>
+        <div class="help-row"><span class="help-key"><kbd>Tab</kbd></span><span class="help-desc">Cycle split DataSource clones (read ↔ write)</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Selection</h3>
+        <div class="help-row"><span class="help-key">Click node</span><span class="help-desc">Select node and highlight its connections</span></div>
+        <div class="help-row"><span class="help-key">Shift+click</span><span class="help-desc">Add node to multi-selection</span></div>
+        <div class="help-row"><span class="help-key">Click background</span><span class="help-desc">Clear selection</span></div>
+        <div class="help-row"><span class="help-key">✕ Clear button</span><span class="help-desc">Clear selection</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Focus &amp; Watchlist</h3>
+        <div class="help-row"><span class="help-key">⊞ Focus button</span><span class="help-desc">Draw optimised layout for selected nodes + 1-hop neighbours</span></div>
+        <div class="help-row"><span class="help-key">⊕ pin (sidebar)</span><span class="help-desc">Pin/unpin a node to the watchlist</span></div>
+        <div class="help-row"><span class="help-key">◉ N button</span><span class="help-desc">Draw optimised watchlist graph (pinned nodes + their DataSources)</span></div>
+        <div class="help-row"><span class="help-key">← Full button</span><span class="help-desc">Return to full graph and clear all filters</span></div>
+      </div>
+      <div class="help-section">
+        <h3>State &amp; Thread Filtering</h3>
+        <div class="help-row"><span class="help-key">State dropdown</span><span class="help-desc">Show only GAMs active in a MARTe state with optimised layout</span></div>
+        <div class="help-row"><span class="help-key">Thread dropdown</span><span class="help-desc">Show only GAMs in a specific thread with optimised layout</span></div>
+        <div class="help-row"><span class="help-key">← Full button</span><span class="help-desc">Clear state/thread filter and return to full graph</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Sidebar</h3>
+        <div class="help-row"><span class="help-key">Click node</span><span class="help-desc">Expand signals, select in graph and zoom in</span></div>
+        <div class="help-row"><span class="help-key">Ctrl+click</span><span class="help-desc">Deselect a node</span></div>
+        <div class="help-row"><span class="help-key">Sidebar filter box</span><span class="help-desc">Filter object tree by node name or signal name</span></div>
+        <div class="help-row"><span class="help-key">☰ button</span><span class="help-desc">Collapse / expand sidebar</span></div>
+      </div>
+      <div class="help-section">
+        <h3>Live Reload</h3>
+        <div class="help-row"><span class="help-key">Automatic</span><span class="help-desc">Graph reloads when .marte files change; pan/zoom position is preserved</span></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Search overlay -->
   <div id="search-overlay">
@@ -678,6 +1007,8 @@ const graphHTML = `<!DOCTYPE html>
     let focusMode        = false; // true when showing a focused/watchlist subset
     let watchlist        = new Set(); // node IDs pinned to watchlist
     let pendingRestore   = null;  // {pan, zoom} to restore after file-change reload
+    let nameToId         = {};    // node RealName → graph node ID (for LSP cursor tracking)
+    let focusDebounce    = null;  // debounce timer for LSP focus events
 
     function esc(s) {
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -720,17 +1051,13 @@ const graphHTML = `<!DOCTYPE html>
       threadVisible = null;
       rebuildThreadSelect();
       applyStateFilter();
-      const svg = graphEl.querySelector('svg');
-      if (svg) applyFilter(svg);
-      renderSidebar(sbFilterEl.value);
+      applyFilteredLayout();
     });
 
     threadSelEl.addEventListener('change', () => {
       currentThread = threadSelEl.value;
       applyThreadFilter();
-      const svg = graphEl.querySelector('svg');
-      if (svg) applyFilter(svg);
-      renderSidebar(sbFilterEl.value);
+      applyFilteredLayout();
     });
 
     function rebuildThreadSelect() {
@@ -748,6 +1075,16 @@ const graphHTML = `<!DOCTYPE html>
       threadSelEl.style.display = 'inline-block';
     }
 
+    // expandDSClones adds all cloneGroup members for every DS node already in vis.
+    function expandDSClones(vis) {
+      [...vis].forEach(id => {
+        const n = metaData[id];
+        if (n && n.kind === 'ds' && n.cloneGroup) {
+          n.cloneGroup.forEach(cid => vis.add(cid));
+        }
+      });
+    }
+
     function applyStateFilter() {
       if (!currentState || !statesData[currentState]) {
         stateVisible = null; return;
@@ -762,6 +1099,7 @@ const graphHTML = `<!DOCTYPE html>
           if (metaData[nb] && metaData[nb].kind === 'ds') vis.add(nb);
         });
       });
+      expandDSClones(vis);
       stateVisible = vis;
     }
 
@@ -773,13 +1111,31 @@ const graphHTML = `<!DOCTYPE html>
       if (!td) { threadVisible = null; return; }
       const gamIds = new Set(td.gamIds || []);
       const vis = new Set(gamIds);
-      // Include DS neighbours of thread GAMs
+      // Include DS neighbours of thread GAMs (and their clone siblings)
       gamIds.forEach(id => {
         (adj[id] || new Set()).forEach(nb => {
           if (metaData[nb] && metaData[nb].kind === 'ds') vis.add(nb);
         });
       });
+      expandDSClones(vis);
       threadVisible = vis;
+    }
+
+    // ── Filtered layout ────────────────────────────────────────────────────
+    // Called when state/thread filter changes. Generates a focused layout for
+    // the visible nodes, or returns to the full graph when no filter is active.
+    async function applyFilteredLayout() {
+      const vis = threadVisible ?? stateVisible;
+      if (vis && vis.size > 0) {
+        await loadFocusedGraph(vis);
+      } else {
+        focusMode = false;
+        $('btn-exit-focus').style.display = 'none';
+        $('btn-focus').style.display = 'none';
+        if (mainDot) renderDot(mainDot, true);
+        else loadGraph();
+      }
+      renderSidebar(sbFilterEl.value);
     }
 
     // ── Load ───────────────────────────────────────────────────────────────
@@ -792,6 +1148,9 @@ const graphHTML = `<!DOCTYPE html>
       .then(([dot, meta]) => {
         mainDot = dot;
         metaData = meta;
+        // Build name → ID map for LSP cursor tracking.
+        nameToId = {};
+        Object.entries(metaData).forEach(([id, n]) => { if (!nameToId[n.name]) nameToId[n.name] = id; });
         buildSearchIndex();
         // Exit focus mode on reload (file changed → show updated full graph).
         focusMode = false;
@@ -924,19 +1283,19 @@ const graphHTML = `<!DOCTYPE html>
         let visible = true;
         if (nodeFilter && !nodeFilter.has(id)) visible = false;
         if (selVisible && !selVisible.has(id)) visible = false;
-        el.style.opacity = visible ? '1' : (selVisible ? '0.07' : '0.08');
+        el.style.opacity = visible ? '1' : (selVisible ? '0.22' : '0.22');
         el.style.filter  = (any && selected.has(id) && visible) ? 'drop-shadow(0 0 5px #58a6ff)' : '';
       });
       svg.querySelectorAll('.edge').forEach(el => {
         const raw = el.querySelector('title')?.textContent ?? '';
         const idx = raw.indexOf('->');
-        if (idx<0) { el.style.opacity='0.04'; return; }
+        if (idx<0) { el.style.opacity='0.12'; return; }
         const from = raw.substring(0,idx).trim().split(':')[0];
         const to   = raw.substring(idx+2).trim().split(':')[0];
         let vis = true;
         if (nodeFilter && (!nodeFilter.has(from) || !nodeFilter.has(to))) vis = false;
         if (selVisible  && (!selVisible.has(from)  || !selVisible.has(to)))  vis = false;
-        el.style.opacity = vis ? '1' : '0.04';
+        el.style.opacity = vis ? '1' : '0.12';
       });
     }
 
@@ -974,8 +1333,17 @@ const graphHTML = `<!DOCTYPE html>
 
     $('btn-exit-focus').addEventListener('click', () => {
       focusMode = false;
+      currentState = '';
+      currentThread = '';
+      stateVisible = null;
+      threadVisible = null;
+      stateSelEl.value = '';
+      threadSelEl.value = '';
+      threadSelEl.style.display = 'none';
       $('btn-exit-focus').style.display = 'none';
+      $('btn-focus').style.display = 'none';
       if (mainDot) renderDot(mainDot, true);
+      renderSidebar(sbFilterEl.value);
     });
 
     $('btn-watchlist').addEventListener('click', () => {
@@ -1254,6 +1622,11 @@ const graphHTML = `<!DOCTYPE html>
     searchOverlay.addEventListener('click', e => { if (e.target===searchOverlay) closeSearch(); });
     $('btn-search').addEventListener('click', openSearch);
 
+    // ── Help ───────────────────────────────────────────────────────────────
+    const helpOverlay = $('help-overlay');
+    $('btn-help').addEventListener('click', () => helpOverlay.classList.toggle('active'));
+    helpOverlay.addEventListener('click', e => { if (e.target===helpOverlay) helpOverlay.classList.remove('active'); });
+
     function focusNode(nodeId) {
       const svg = graphEl.querySelector('svg'); if (!svg || !panZoom) return;
       let targetEl = null;
@@ -1266,24 +1639,44 @@ const graphHTML = `<!DOCTYPE html>
       applyFilter(svg);
       renderSidebar(sbFilterEl.value);
 
-      // Pan to centre the node using screen-space coordinates so the result
-      // is correct regardless of current zoom level or SVG transform state.
-      const nodeRect = targetEl.getBoundingClientRect();
+      // Read all geometry BEFORE any transform changes to avoid stale layout reads.
       const svgRect  = svg.getBoundingClientRect();
-      const nodeCX   = (nodeRect.left + nodeRect.right)  / 2;
-      const nodeCY   = (nodeRect.top  + nodeRect.bottom) / 2;
+      const nodeRect = targetEl.getBoundingClientRect();
       const svgCX    = svgRect.left + svgRect.width  / 2;
       const svgCY    = svgRect.top  + svgRect.height / 2;
-      const pan      = panZoom.getPan();
-      panZoom.pan({ x: pan.x + svgCX - nodeCX, y: pan.y + svgCY - nodeCY });
+      const nodeCX   = (nodeRect.left + nodeRect.right)  / 2;
+      const nodeCY   = (nodeRect.top  + nodeRect.bottom) / 2;
+      const curZoom  = panZoom.getZoom();
+
+      // Natural node size at zoom=1 (initial-fit state).
+      const nW = nodeRect.width  / curZoom;
+      const nH = nodeRect.height / curZoom;
+
+      // Target zoom: node fills 80% of the smaller viewport dimension.
+      const newZoom = (nW > 2 && nH > 2)
+        ? Math.min(Math.max(Math.min(svgRect.width * 0.8 / nW, svgRect.height * 0.8 / nH), 0.3), 8)
+        : curZoom;
+
+      // zoom(newZoom) scales around the viewport centre, so the node's new screen position is:
+      //   nodeCXafter = svgCX + (nodeCX - svgCX) × scale
+      // The pan delta required to bring the node to centre:
+      //   dx = svgCX - nodeCXafter = (svgCX - nodeCX) × scale
+      const scale = newZoom / curZoom;
+      const dx = (svgCX - nodeCX) * scale;
+      const dy = (svgCY - nodeCY) * scale;
+
+      panZoom.zoom(newZoom);                          // zoom around viewport centre
+      const pan = panZoom.getPan();                   // read updated pan post-zoom
+      panZoom.pan({ x: pan.x + dx, y: pan.y + dy }); // shift to centre the node
     }
 
     // ── Key bindings ───────────────────────────────────────────────────────
     document.addEventListener('keydown', e => {
       const tag = document.activeElement.tagName;
       if (tag === 'INPUT' || tag === 'SELECT') return;
+      if (e.key === '?') { e.preventDefault(); helpOverlay.classList.toggle('active'); }
       if (e.key === '/') { e.preventDefault(); openSearch(); }
-      if (e.key === 'Escape') closeSearch();
+      if (e.key === 'Escape') { closeSearch(); helpOverlay.classList.remove('active'); }
       if (e.key === 'Home' || e.key === 'h') { panZoom?.fit(); panZoom?.center(); }
       if (e.key === 'Tab' && selected.size === 1) {
         e.preventDefault();
@@ -1301,13 +1694,21 @@ const graphHTML = `<!DOCTYPE html>
     function connectSSE() {
       const es = new EventSource('/events');
       es.onmessage = e => {
-        if (e.data==='reload') {
+        if (e.data === 'reload') {
           // Save current pan/zoom so loadGraph can restore it after re-render.
           // Only save when not in focus mode (focus view will be exited on reload).
           if (panZoom && !focusMode) {
             pendingRestore = {pan: panZoom.getPan(), zoom: panZoom.getZoom()};
           }
           loadGraph();
+        } else if (e.data.startsWith('focus:')) {
+          // LSP cursor moved to a named node — debounce and pan/zoom to it.
+          const name = e.data.slice(6);
+          clearTimeout(focusDebounce);
+          focusDebounce = setTimeout(() => {
+            const id = nameToId[name];
+            if (id && !focusMode) focusNode(id);
+          }, 200);
         }
       };
       es.onerror = () => { es.close(); setTimeout(connectSSE, 2000); };

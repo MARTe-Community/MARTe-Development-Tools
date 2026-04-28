@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,6 +46,23 @@ func main() {
 }
 
 func runLSP() {
+	args := os.Args[2:]
+	graphEnabled := false
+	graphPort := 0
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--graph":
+			graphEnabled = true
+		case strings.HasPrefix(args[i], "--graph-port="):
+			fmt.Sscanf(strings.TrimPrefix(args[i], "--graph-port="), "%d", &graphPort)
+		case args[i] == "--graph-port" && i+1 < len(args):
+			fmt.Sscanf(args[i+1], "%d", &graphPort)
+			i++
+		}
+	}
+	if graphEnabled {
+		go runGraphLSP(graphPort)
+	}
 	lsp.RunServer()
 }
 

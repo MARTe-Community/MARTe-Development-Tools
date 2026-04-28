@@ -328,6 +328,10 @@ var SynchronousValidation = true // Default to true for tests
 // When nil, diagnostics are published via the legacy JSON-RPC send() path (test/legacy mode).
 var PublishDiagnosticsFn func(ctx context.Context, fileURI string, diags []LSPDiagnostic)
 
+// GraphNotifyFn, when non-nil, is called after validation completes ("reload") or when the
+// cursor lands on a named node ("focus", data=RealName).  Set by cmd/mdt when --graph is used.
+var GraphNotifyFn func(event, data string)
+
 var (
 	valMu      sync.Mutex
 	valCancels = make(map[string]context.CancelFunc)
@@ -924,6 +928,11 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 		lastPublished[fileURI] = hash
 		publishDiagnosticsForFile(ctx, fileURI, diags)
 	}
+
+	// Notify graph server that the project tree has been updated.
+	if GraphNotifyFn != nil {
+		GraphNotifyFn("reload", "")
+	}
 }
 
 func collectFiles(node *index.ProjectNode, files map[string]bool) {
@@ -962,6 +971,16 @@ func HandleHover(params HoverParams) *Hover {
 	}
 
 	container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+
+	// Notify graph server to focus on the enclosing GAM or DataSource.
+	if GraphNotifyFn != nil && container != nil {
+		for cur := container; cur != nil; cur = cur.Parent {
+			if tree.IsGAM(cur) || tree.IsDataSource(cur) {
+				GraphNotifyFn("focus", cur.RealName)
+				break
+			}
+		}
+	}
 
 	var content string
 
