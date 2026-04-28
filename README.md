@@ -10,6 +10,7 @@
 
 - **Portability**: A single statically compiled executable compatible with any Linux 3.2+ machine (as well as possible to compile and run on Windows and Mac OS X)
 - **LSP Server**: Real-time syntax checking, validation, autocomplete, hover documentation, navigation (Go to Definition/References), Inlay Hints (inline types and evaluation), and hierarchical Document/Workspace Symbols.
+- **Signal Flow Graph**: Interactive browser-based visualisation of GAM/DataSource signal flow, with state/thread filtering, focus layouts, watchlists, and live reload.
 - **Builder**: Merges multiple configuration files into a single, ordered output file.
 - **Formatter**: Standardizes configuration file formatting.
 - **Validator**: Advanced semantic validation using [CUE](https://cuelang.org/) schemas, ensuring type safety and structural correctness.
@@ -37,6 +38,7 @@ Few additional features have been added to the standard MARTe configuration lang
 - [Step-by-Step Tutorial](docs/TUTORIAL.md)
 - [Editor Integration Guide](docs/EDITOR_INTEGRATION.md)
 - [Configuration Guide](docs/CONFIGURATION_GUIDE.md)
+- [Signal Flow Graph Guide](docs/GRAPH_GUIDE.md)
 - [Examples Readme](/examples/README.md)
 
 ## Installation
@@ -69,9 +71,13 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   ```bash
   mdt fmt path/to/file.marte
   ```
+- **Graph**: Open an interactive signal-flow graph in the browser.
+  ```bash
+  mdt graph [-P folder_path] [-p project_name] [-port PORT] [-vVAR=VAL] [files...]
+  ```
 - **LSP**: Start the language server (used by editor plugins).
   ```bash
-  mdt lsp
+  mdt lsp [--graph [--graph-port=PORT]]
   ```
 
 ### Editor Integration

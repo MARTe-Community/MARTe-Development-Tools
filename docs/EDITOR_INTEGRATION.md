@@ -20,6 +20,17 @@ mdt lsp
 
 It communicates via **stdio**.
 
+### Live signal-flow graph alongside the LSP
+
+Pass `--graph` to run an interactive signal-flow graph in the browser at the same time as the LSP server:
+
+```bash
+mdt lsp --graph
+mdt lsp --graph --graph-port=9090   # bind to a specific port
+```
+
+The graph rebuilds on every file save and follows the cursor: hovering over a GAM or DataSource in the editor zooms the graph to that node. See the [Signal Flow Graph Guide](GRAPH_GUIDE.md) for full details.
+
 ## VS Code
 
 You can use a generic LSP extension like [Generic LSP Client](https://marketplace.visualstudio.com/items?itemName=summne.vscode-generic-lsp-client) or configure a custom task.
@@ -35,6 +46,8 @@ You can use a generic LSP extension like [Generic LSP Client](https://marketplac
         "languageId": "marte",
         "command": "mdt",
         "args": ["lsp"],
+        // To also open the live signal graph in the browser:
+        // "args": ["lsp", "--graph"],
         "rootUri": "${workspaceFolder}"
     }
 ]
@@ -59,6 +72,8 @@ local configs = require'lspconfig.configs'
 if not configs.marte then
   configs.marte = {
     default_config = {
+      -- Add '--graph' to also open the live signal graph in the browser:
+      -- cmd = {'mdt', 'lsp', '--graph'},
       cmd = {'mdt', 'lsp'},
       filetypes = {'marte'},
       root_dir = lspconfig.util.root_pattern('.git', 'go.mod', '.marte_schema.cue'),
@@ -92,6 +107,8 @@ language-servers = [ "mdt-lsp" ]
 
 [language-server.mdt-lsp]
 command = "mdt"
+# Add "--graph" to also open the live signal graph in the browser:
+# args = ["lsp", "--graph"]
 args = ["lsp"]
 ```
 
