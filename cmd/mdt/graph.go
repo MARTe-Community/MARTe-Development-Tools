@@ -1030,17 +1030,41 @@ const graphHTML = `<!DOCTYPE html>
       .then(v => { vizInstance = v; initStates(); })
       .catch(err => showError('Viz.js: ' + err));
 
-    async function initStates() {
+    // refreshStates fetches /api/states and repopulates the state dropdown.
+    // Preserves the currently selected state and thread if they still exist in
+    // the new data (so that live-reload doesn't reset active filters).
+    async function refreshStates() {
       try {
         const r = await fetch('/api/states');
         statesData = await r.json();
-        const names = Object.keys(statesData).sort();
-        names.forEach(s => {
-          const opt = document.createElement('option');
-          opt.value = s; opt.textContent = s;
-          stateSelEl.appendChild(opt);
-        });
-      } catch(_) {}
+      } catch(_) { return; }
+      const prevState  = stateSelEl.value;
+      const prevThread = threadSelEl.value;
+      stateSelEl.innerHTML = '<option value="">All states</option>';
+      const names = Object.keys(statesData).sort();
+      names.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s;
+        stateSelEl.appendChild(opt);
+      });
+      // Restore previously selected state if it still exists.
+      if (prevState && statesData[prevState]) {
+        stateSelEl.value = prevState;
+        currentState = prevState;
+        rebuildThreadSelect();
+        if (prevThread && statesData[prevState]?.threads?.[prevThread]) {
+          threadSelEl.value = prevThread;
+          currentThread = prevThread;
+        }
+      } else {
+        currentState  = '';
+        currentThread = '';
+        rebuildThreadSelect();
+      }
+    }
+
+    async function initStates() {
+      await refreshStates();
       loadGraph();
     }
 
@@ -1700,7 +1724,9 @@ const graphHTML = `<!DOCTYPE html>
           if (panZoom && !focusMode) {
             pendingRestore = {pan: panZoom.getPan(), zoom: panZoom.getZoom()};
           }
-          loadGraph();
+          // Re-fetch states so dropdowns stay current (critical in LSP mode where
+          // the server may have been empty when the page first loaded).
+          refreshStates().then(() => loadGraph());
         } else if (e.data.startsWith('focus:')) {
           // LSP cursor moved to a named node — debounce and pan/zoom to it.
           const name = e.data.slice(6);

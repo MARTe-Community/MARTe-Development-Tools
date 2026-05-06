@@ -108,12 +108,34 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 // Graphviz node IDs are preserved so they match /api/meta keys.
 func GenerateSubset(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, nodeIDs []string, existing Result) Result {
 	subset := make(map[*index.ProjectNode]bool)
+	var subsetGAMs []*index.ProjectNode
 	for _, id := range nodeIDs {
 		if n, ok := existing.GAMNodes[id]; ok {
 			subset[n] = true
+			subsetGAMs = append(subsetGAMs, n)
 		}
 		if n, ok := existing.DSNodes[id]; ok {
 			subset[n] = true
+		}
+	}
+	// Expand the subset to include every DS that any subset GAM connects to.
+	// The caller's adjacency map may be stale (built from a previous focused
+	// SVG), so some DS nodes reachable from the selected GAMs may have been
+	// missing from nodeIDs.  Without this expansion those DS nodes would not
+	// be declared in the generated DOT, causing Graphviz to auto-create plain
+	// rectangles ("ghost nodes") wherever the edges reference them.
+	for _, gam := range subsetGAMs {
+		for _, dir := range []string{"InputSignals", "OutputSignals"} {
+			c, ok := gam.Children[dir]
+			if !ok {
+				continue
+			}
+			for _, sig := range c.Children {
+				ds, _ := resolveSignal(tree, sig, gam)
+				if ds != nil {
+					subset[ds] = true
+				}
+			}
 		}
 	}
 	return generate(tree, diags, genOpts{subsetNodes: subset})
@@ -292,18 +314,62 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	// Phase 3: flag read edges where the reader executes before the first
 	//   writer as "early".  Only those signals need a read clone.
 
-	// Phase 1: GAM thread execution positions.
-	// Always derived from ALL states, regardless of stateFilter.
-	// This keeps ranks consistent between the full view and any filtered view —
-	// a GAM that appears in multiple states always gets the same column position
-	// so switching state filters does not cause layout shifts.
-	gamThreadPos := make(map[string]int) // graphviz GAM ID → thread position
-	for _, si := range states {
-		for _, ids := range si.Threads {
-			for pos, id := range ids {
-				if existing, ok := gamThreadPos[id]; !ok || pos > existing {
-					gamThreadPos[id] = pos
+	// Phase 1: GAM execution ranks derived from thread Functions order.
+	//
+	// With a state filter: positions come from that state's threads only (0-based
+	// index in the Functions list). GAMs in a later thread that share names with
+	// an earlier thread take the max position, mirroring MARTe2 scheduling.
+	//
+	// Without a filter: compute a topological (longest-path) rank across the
+	// union of all thread orderings. For every pair of consecutive GAMs A, B in
+	// any Functions list the constraint A < B is recorded; the longest path to
+	// each GAM gives its column rank so the merged graph reflects the combined
+	// execution order, e.g.:
+	//   State1.ThreadA: [G1, G2, G3]  →  G1→G2, G2→G3
+	//   State2.ThreadB: [G2, G4, G3]  →  G2→G4, G4→G3
+	//   Result: G1(0) G2(1) G4(2) G3(3)
+	gamThreadPos := make(map[string]int) // graphviz GAM ID → execution rank
+
+	// Initialise every known GAM to rank 0.
+	for _, g := range allGAMs {
+		gamThreadPos[gamIDMap[g]] = 0
+	}
+
+	if opts.stateFilter != "" {
+		// Filtered view: use positions from this state's threads only.
+		if si, ok := states[opts.stateFilter]; ok {
+			for _, ids := range si.Threads {
+				for pos, id := range ids {
+					if cur := gamThreadPos[id]; pos > cur {
+						gamThreadPos[id] = pos
+					}
 				}
+			}
+		}
+	} else {
+		// Unfiltered: build ordering constraints from all states/threads and
+		// compute the topological longest-path rank for each GAM.
+		type orderEdge struct{ from, to string }
+		var orderEdges []orderEdge
+		for _, si := range states {
+			for _, ids := range si.Threads {
+				for i := 1; i < len(ids); i++ {
+					orderEdges = append(orderEdges, orderEdge{ids[i-1], ids[i]})
+				}
+			}
+		}
+		// Bellman-Ford longest path: rank[to] = max(rank[to], rank[from]+1).
+		for range orderEdges {
+			changed := false
+			for _, e := range orderEdges {
+				r := gamThreadPos[e.from]
+				if cur := gamThreadPos[e.to]; cur < r+1 {
+					gamThreadPos[e.to] = r + 1
+					changed = true
+				}
+			}
+			if !changed {
+				break
 			}
 		}
 	}
