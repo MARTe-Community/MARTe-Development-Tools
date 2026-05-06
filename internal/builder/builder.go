@@ -511,6 +511,17 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 			elements = append(elements, b.formatValueWithCtx(e, ctx))
 		}
 		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
+	case *parser.ConditionalArrayElements:
+		cond := b.tree.EvaluateValue(v.Condition, ctx)
+		branch := v.Else
+		if b.tree.IsTrue(cond) {
+			branch = v.Then
+		}
+		parts := []string{}
+		for _, e := range branch {
+			parts = append(parts, b.formatValueWithCtx(e, ctx))
+		}
+		return strings.Join(parts, " ")
 	default:
 		return ""
 	}

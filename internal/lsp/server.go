@@ -2571,6 +2571,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	var targetNode *index.ProjectNode
 	var targetField *parser.Field
+	var varName string
 	if res.Node != nil {
 		if res.Node.Target != nil {
 			targetNode = res.Node.Target
@@ -2580,14 +2581,15 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 	} else if res.Field != nil {
 		targetField = res.Field
 	} else if res.Reference != nil {
-		if res.Reference.Target != nil {
+		if res.Reference.IsVariable {
+			varName = res.Reference.Name
+		} else if res.Reference.Target != nil {
 			targetNode = res.Reference.Target
-			if targetNode == nil {
-				targetNode = res.Reference.Target
-			}
 		} else {
 			return nil
 		}
+	} else if res.Variable != nil {
+		varName = res.Variable.Name
 	}
 
 	changes := make(map[string][]TextEdit)
@@ -2595,6 +2597,49 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 	addEdit := func(file string, rng Range, newText string) {
 		uri := "file://" + file
 		changes[uri] = append(changes[uri], TextEdit{Range: rng, NewText: newText})
+	}
+
+	if varName != "" {
+		// Rename variable definition(s) with this name
+		tree.Walk(func(n *index.ProjectNode) {
+			for name, vi := range n.Variables {
+				if name != varName || vi.Def == nil {
+					continue
+				}
+				// Skip synthetic variables (foreach loop vars, template params)
+				if strings.HasPrefix(vi.Def.TypeExpr, "loop ") || strings.HasPrefix(vi.Def.TypeExpr, "template parameter:") {
+					continue
+				}
+				macro := "#var "
+				if vi.Def.IsConst {
+					macro = "#let "
+				}
+				// Position.Column is 1-indexed, pointing to '#' of the macro keyword.
+				// The variable name starts after the macro (e.g. "#var ") = len(macro) chars later.
+				nameColLSP := vi.Def.Position.Column - 1 + len(macro)
+				rng := Range{
+					Start: Position{Line: vi.Def.Position.Line - 1, Character: nameColLSP},
+					End:   Position{Line: vi.Def.Position.Line - 1, Character: nameColLSP + len(varName)},
+				}
+				addEdit(vi.File, rng, params.NewName)
+			}
+		})
+
+		// Rename all @varName reference sites
+		for _, ref := range tree.References {
+			if ref.IsVariable && ref.Name == varName {
+				// ref.Position.Column is 1-indexed, pointing to '@'.
+				// The name text (without '@') starts one character later.
+				nameColLSP := ref.Position.Column // 0-indexed: (Column-1)+1 = Column
+				rng := Range{
+					Start: Position{Line: ref.Position.Line - 1, Character: nameColLSP},
+					End:   Position{Line: ref.Position.Line - 1, Character: nameColLSP + len(varName)},
+				}
+				addEdit(ref.File, rng, params.NewName)
+			}
+		}
+
+		return &WorkspaceEdit{Changes: changes}
 	}
 
 	if targetNode != nil {

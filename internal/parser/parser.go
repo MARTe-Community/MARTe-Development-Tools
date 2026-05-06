@@ -267,6 +267,73 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 	}, true
 }
 
+// parseConditionalArrayElements parses a #if block that appears inside an array:
+//
+//	{ X  #if cond  Y  Z  #else  W  #end  V }
+//
+// The returned ConditionalArrayElements holds the two value-lists (Then / Else).
+func (p *Parser) parseConditionalArrayElements(startTok Token) (Value, bool) {
+	cond, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+	if p.peek().Type == TokenLBrace {
+		p.next()
+	}
+	thenElems, endTok, ok := p.parseArrayValueBlock()
+	if !ok {
+		return nil, false
+	}
+	var elseElems []Value
+	if endTok.Type == TokenElse {
+		if p.peek().Type == TokenLBrace {
+			p.next()
+		}
+		elseElems, endTok, ok = p.parseArrayValueBlock()
+		if !ok {
+			return nil, false
+		}
+	}
+	if endTok.Type != TokenEnd {
+		p.addError(endTok.Position, "expected #end")
+	}
+	return &ConditionalArrayElements{
+		Position:    startTok.Position,
+		EndPosition: endTok.Position,
+		Condition:   cond,
+		Then:        thenElems,
+		Else:        elseElems,
+	}, true
+}
+
+// parseArrayValueBlock parses a sequence of Values until a #else, #end, or EOF
+// token is consumed.  It supports nested #if blocks.
+func (p *Parser) parseArrayValueBlock() ([]Value, Token, bool) {
+	var elems []Value
+	for {
+		t := p.peek()
+		switch t.Type {
+		case TokenElse, TokenEnd, TokenEOF:
+			return elems, p.next(), true
+		case TokenComma:
+			p.next()
+		case TokenIf:
+			ifTok := p.next()
+			elem, ok := p.parseConditionalArrayElements(ifTok)
+			if !ok {
+				return nil, Token{}, false
+			}
+			elems = append(elems, elem)
+		default:
+			val, ok := p.parseValue()
+			if !ok {
+				return nil, Token{}, false
+			}
+			elems = append(elems, val)
+		}
+	}
+}
+
 func (p *Parser) parseForeach(startTok Token) (Definition, bool) {
 	// #foreach Value in Array
 	// #foreach Key Value in Map
@@ -660,6 +727,15 @@ func (p *Parser) parseAtom() (Value, bool) {
 			}
 			if t.Type == TokenComma {
 				p.next()
+				continue
+			}
+			if t.Type == TokenIf {
+				ifTok := p.next()
+				elem, ok := p.parseConditionalArrayElements(ifTok)
+				if !ok {
+					return nil, false
+				}
+				arr.Elements = append(arr.Elements, elem)
 				continue
 			}
 			val, ok := p.parseValue()

@@ -963,6 +963,14 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 		for _, elem := range v.Elements {
 			pt.IndexValue(file, elem)
 		}
+	case *parser.ConditionalArrayElements:
+		pt.IndexValue(file, v.Condition)
+		for _, e := range v.Then {
+			pt.IndexValue(file, e)
+		}
+		for _, e := range v.Else {
+			pt.IndexValue(file, e)
+		}
 	}
 }
 
@@ -985,6 +993,14 @@ func (pt *ProjectTree) IndexExpressionVariables(file string, val parser.Value) {
 		pt.IndexExpressionVariables(file, v.Right)
 	case *parser.ArrayValue:
 		for _, e := range v.Elements {
+			pt.IndexExpressionVariables(file, e)
+		}
+	case *parser.ConditionalArrayElements:
+		pt.IndexExpressionVariables(file, v.Condition)
+		for _, e := range v.Then {
+			pt.IndexExpressionVariables(file, e)
+		}
+		for _, e := range v.Else {
 			pt.IndexExpressionVariables(file, e)
 		}
 	}
@@ -1324,9 +1340,20 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 			Right:    right,
 		}
 	case *parser.ArrayValue:
-		newElems := make([]parser.Value, len(v.Elements))
-		for i, e := range v.Elements {
-			newElems[i] = pt.EvaluateValue(e, ctx)
+		var newElems []parser.Value
+		for _, e := range v.Elements {
+			if cae, ok := e.(*parser.ConditionalArrayElements); ok {
+				cond := pt.EvaluateValue(cae.Condition, ctx)
+				branch := cae.Else
+				if pt.IsTrue(cond) {
+					branch = cae.Then
+				}
+				for _, be := range branch {
+					newElems = append(newElems, pt.EvaluateValue(be, ctx))
+				}
+			} else {
+				newElems = append(newElems, pt.EvaluateValue(e, ctx))
+			}
 		}
 		return &parser.ArrayValue{
 			Position:    v.Position,
@@ -1661,9 +1688,20 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 			Right:    right,
 		}
 	case *parser.ArrayValue:
-		newElems := make([]parser.Value, len(v.Elements))
-		for i, e := range v.Elements {
-			newElems[i] = pt.evaluate(e, ctx)
+		var newElems []parser.Value
+		for _, e := range v.Elements {
+			if cae, ok := e.(*parser.ConditionalArrayElements); ok {
+				cond := pt.evaluate(cae.Condition, ctx)
+				branch := cae.Else
+				if pt.IsTrue(cond) {
+					branch = cae.Then
+				}
+				for _, be := range branch {
+					newElems = append(newElems, pt.evaluate(be, ctx))
+				}
+			} else {
+				newElems = append(newElems, pt.evaluate(e, ctx))
+			}
 		}
 		return &parser.ArrayValue{
 			Position:    v.Position,
@@ -2147,6 +2185,16 @@ func (pt *ProjectTree) valueToString(val parser.Value) string {
 			elements = append(elements, pt.valueToString(e))
 		}
 		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
+	case *parser.ConditionalArrayElements:
+		// Without an evaluation context, show elements from both branches.
+		var parts []string
+		for _, e := range v.Then {
+			parts = append(parts, pt.valueToString(e))
+		}
+		for _, e := range v.Else {
+			parts = append(parts, pt.valueToString(e))
+		}
+		return strings.Join(parts, " ")
 	default:
 		return ""
 	}

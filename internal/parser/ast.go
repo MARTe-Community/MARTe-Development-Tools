@@ -132,6 +132,21 @@ func (v *ArrayValue) Pos() Position { return v.Position }
 func (v *ArrayValue) End() Position { return v.EndPosition }
 func (v *ArrayValue) isValue()      {}
 
+// ConditionalArrayElements represents a #if/#else/#end block inside an array.
+// It implements Value so it can appear as an element of ArrayValue.Elements.
+// When the containing array is evaluated the active branch is flattened inline.
+type ConditionalArrayElements struct {
+	Position    Position
+	EndPosition Position
+	Condition   Value
+	Then        []Value
+	Else        []Value
+}
+
+func (c *ConditionalArrayElements) Pos() Position { return c.Position }
+func (c *ConditionalArrayElements) End() Position { return c.EndPosition }
+func (c *ConditionalArrayElements) isValue()      {}
+
 type Package struct {
 	Position Position
 	URI      string

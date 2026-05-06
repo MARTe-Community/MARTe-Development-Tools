@@ -236,18 +236,25 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		return v.Position.Line
 	case *parser.ArrayValue:
 		return f.formatArray(v, indent)
+	case *parser.ConditionalArrayElements:
+		return f.formatConditionalArrayElement(v, indent)
 	default:
 		return 0
 	}
 }
 
 func (f *Formatter) formatArray(v *parser.ArrayValue, indent int) int {
-	// Heuristic: if array spans multiple lines in source, preserve multiline structure
-	// Or if formatted inline length > 120 chars
-	multiline := false
-	if v.EndPosition.Line > v.Position.Line {
-		multiline = true
+	// Force multiline when any element is a conditional block, or when the
+	// source already spans multiple lines, or when inline would exceed 120 chars.
+	hasConditional := false
+	for _, e := range v.Elements {
+		if _, ok := e.(*parser.ConditionalArrayElements); ok {
+			hasConditional = true
+			break
+		}
 	}
+
+	multiline := hasConditional || v.EndPosition.Line > v.Position.Line
 
 	if !multiline {
 		// Try formatting inline to check length
@@ -265,28 +272,52 @@ func (f *Formatter) formatArray(v *parser.ArrayValue, indent int) int {
 		}
 	}
 
-	if multiline {
-		fmt.Fprintln(f.writer, "{")
-		indentStr := strings.Repeat("  ", indent+1)
-		for i, e := range v.Elements {
+	fmt.Fprintln(f.writer, "{")
+	innerIndent := indent + 1
+	indentStr := strings.Repeat("  ", innerIndent)
+	lastLine := v.Position.Line
+	for i, e := range v.Elements {
+		if cae, ok := e.(*parser.ConditionalArrayElements); ok {
+			lastLine = f.formatConditionalArrayElement(cae, innerIndent)
+		} else {
 			fmt.Fprint(f.writer, indentStr)
-			f.formatValue(e, indent+1)
+			lastLine = f.formatValue(e, innerIndent)
+			// Add comma after non-conditional elements that are not last,
+			// unless the next element is also a plain value (commas optional).
 			if i < len(v.Elements)-1 {
 				fmt.Fprint(f.writer, ",")
 			}
 			fmt.Fprintln(f.writer)
 		}
-		fmt.Fprintf(f.writer, "%s}", strings.Repeat("  ", indent))
-		if v.EndPosition.Line > 0 {
-			return v.EndPosition.Line
-		}
-		if len(v.Elements) > 0 {
-			return v.Elements[len(v.Elements)-1].Pos().Line
-		}
-		return v.Position.Line
 	}
+	fmt.Fprintf(f.writer, "%s}", strings.Repeat("  ", indent))
+	if v.EndPosition.Line > 0 {
+		return v.EndPosition.Line
+	}
+	return lastLine
+}
 
-	return v.Position.Line
+func (f *Formatter) formatConditionalArrayElement(v *parser.ConditionalArrayElements, indent int) int {
+	indentStr := strings.Repeat("  ", indent)
+	innerStr := strings.Repeat("  ", indent+1)
+	fmt.Fprintf(f.writer, "%s#if ", indentStr)
+	f.formatValue(v.Condition, indent)
+	fmt.Fprintln(f.writer)
+	for _, e := range v.Then {
+		fmt.Fprint(f.writer, innerStr)
+		f.formatValue(e, indent+1)
+		fmt.Fprintln(f.writer)
+	}
+	if len(v.Else) > 0 {
+		fmt.Fprintf(f.writer, "%s#else\n", indentStr)
+		for _, e := range v.Else {
+			fmt.Fprint(f.writer, innerStr)
+			f.formatValue(e, indent+1)
+			fmt.Fprintln(f.writer)
+		}
+	}
+	fmt.Fprintf(f.writer, "%s#end\n", indentStr)
+	return v.EndPosition.Line
 }
 
 func (f *Formatter) formatArrayInline(v *parser.ArrayValue, indent int) {
