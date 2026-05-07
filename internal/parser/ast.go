@@ -286,3 +286,29 @@ type TemplateArgument struct {
 func (t *TemplateInstantiation) Pos() Position { return t.Position }
 func (t *TemplateInstantiation) End() Position { return t.EndPosition }
 func (t *TemplateInstantiation) isDefinition() {}
+
+// SignalShorthand is syntactic sugar for a signal entry inside
+// InputSignals or OutputSignals blocks:
+//
+//	DataSource::SignalName
+//	DataSource::SignalName: Type
+//	DataSource::SignalName: Type[NumElements]
+//	DataSource::SignalName: Type[NumElements] = { Field = Val … }
+//
+// DataSource and SignalName are mandatory. Type, NumElements and ExtraFields
+// are all optional.
+type SignalShorthand struct {
+	Position       Position
+	EndPosition    Position
+	DataSource     string  // left of "::"
+	SignalName     string  // right of "::"
+	Type           string  // empty when absent
+	NumElements    Value   // nil when absent
+	AliasName      string  // non-empty when "as <NAME>" was specified; becomes the node name; SignalName becomes the Alias field
+	ExtraFields    Subnode // body of the optional "= { … }" block
+	HasExtraFields bool    // true when "= { … }" was present
+}
+
+func (s *SignalShorthand) Pos() Position { return s.Position }
+func (s *SignalShorthand) End() Position { return s.EndPosition }
+func (s *SignalShorthand) isDefinition() {}

@@ -18,29 +18,174 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
 
+const helpGeneral = `mdt — MARTe2 Developer Tools
+
+Usage:
+  mdt <command> [flags] [arguments]
+
+Commands:
+  lsp     Start the Language Server Protocol server
+  build   Parse, validate, and merge .marte files into a single output
+  check   Validate .marte files and report diagnostics
+  fmt     Format .marte files in-place
+  init    Create a new MARTe2 project scaffold
+  graph   Launch the interactive signal-flow graph viewer
+
+Run 'mdt <command> --help' for per-command usage.
+`
+
+const helpLSP = `Usage: mdt lsp [flags]
+
+Start the LSP server (communicates via stdin/stdout).
+
+Flags:
+  --graph              Enable the interactive graph web server alongside LSP
+  --graph-port=PORT    Port for the graph web server (default: random free port)
+  -h, --help           Show this help message
+`
+
+const helpBuild = `Usage: mdt build [flags] [files...]
+
+Parse, validate, and merge .marte files into a single output file.
+
+Flags:
+  -P <folder>      Scan folder recursively for .marte files
+  -p <project>     Only process files belonging to this project (package prefix)
+  -o <output>      Write merged output to file (default: stdout)
+  -vVAR=VAL        Override a #var variable value
+  -h, --help       Show this help message
+`
+
+const helpCheck = `Usage: mdt check [flags] [files...]
+
+Validate .marte files and report diagnostics (errors and warnings).
+
+Flags:
+  -P <folder>      Scan folder recursively for .marte files
+  -p <project>     Only process files belonging to this project (package prefix)
+  -vVAR=VAL        Override a #var variable value
+  -h, --help       Show this help message
+`
+
+const helpFmt = `Usage: mdt fmt <files...>
+
+Format .marte files in-place.
+
+Arguments:
+  files    One or more .marte files to format
+
+Flags:
+  -h, --help    Show this help message
+`
+
+const helpInit = `Usage: mdt init <project_name>
+
+Create a new MARTe2 project scaffold in a new directory.
+
+Arguments:
+  project_name    Name of the project (also used as directory name)
+
+Flags:
+  -h, --help    Show this help message
+`
+
+const helpGraph = `Usage: mdt graph [flags] [files...]
+
+Launch the interactive signal-flow graph viewer, or write a static graph file.
+
+Flags:
+  -P <folder>          Scan folder recursively for .marte files
+  -p <project>         Only process files belonging to this project
+  -port <PORT>         Port for the interactive web server (default: random)
+  -vVAR=VAL            Override a #var variable value
+  -o <OUTPUT>          Write static graph to file (.dot, .svg, .html, .md)
+  --state=STATE        Filter graph to a specific state (for static output)
+  --state=STATE:THREAD Filter graph to a specific state and thread
+  --follow=NAME        Show only the subgraph reachable from node NAME
+  --simplified         Level 1: bypass IOGAM/GAMDataSource, keep signal display
+  --simplified=2       Level 2: bypass + collapse signal labels to plain boxes
+  -h, --help           Show this help message
+`
+
+func printHelp(cmd string) {
+	switch cmd {
+	case "lsp":
+		fmt.Print(helpLSP)
+	case "build":
+		fmt.Print(helpBuild)
+	case "check":
+		fmt.Print(helpCheck)
+	case "fmt":
+		fmt.Print(helpFmt)
+	case "init":
+		fmt.Print(helpInit)
+	case "graph":
+		fmt.Print(helpGraph)
+	default:
+		fmt.Print(helpGeneral)
+	}
+}
+
+func hasHelpFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		logger.Println("Usage: mdt <command> [arguments]")
-		logger.Println("Commands: lsp, build, check, fmt, init, graph")
-		os.Exit(1)
+	if len(os.Args) < 2 || os.Args[1] == "--help" || os.Args[1] == "-h" {
+		if len(os.Args) < 2 {
+			fmt.Print(helpGeneral)
+			os.Exit(1)
+		}
+		fmt.Print(helpGeneral)
+		os.Exit(0)
 	}
 
 	command := os.Args[1]
 	switch command {
 	case "lsp":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("lsp")
+			os.Exit(0)
+		}
 		runLSP()
 	case "build":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("build")
+			os.Exit(0)
+		}
 		runBuild(os.Args[2:])
 	case "check":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("check")
+			os.Exit(0)
+		}
 		runCheck(os.Args[2:])
 	case "fmt":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("fmt")
+			os.Exit(0)
+		}
 		runFmt(os.Args[2:])
 	case "init":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("init")
+			os.Exit(0)
+		}
 		runInit(os.Args[2:])
 	case "graph":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("graph")
+			os.Exit(0)
+		}
 		runGraph(os.Args[2:])
 	default:
 		logger.Printf("Unknown command: %s\n", command)
+		fmt.Print(helpGeneral)
 		os.Exit(1)
 	}
 }

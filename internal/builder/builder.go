@@ -52,10 +52,27 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode) {
 		for _, ed := range evaluated {
 			switch d := ed.Def.(type) {
+			case *parser.SignalShorthand:
+				nodeName := d.SignalName
+				if d.AliasName != "" {
+					nodeName = d.AliasName
+				}
+				norm := index.NormalizeName(nodeName)
+				child, ok := node.Children[norm]
+				if ok && !written[norm] {
+					for _, f := range child.Fragments {
+						if f.Source == parser.Definition(d) {
+							b.activeFragments[f] = true
+							break
+						}
+					}
+					b.collectActiveNodes(child, ed.Ctx)
+					written[norm] = true
+				}
 			case *parser.ObjectNode:
 				objName := b.tree.ValueToString(b.tree.EvaluateValue(d.Name, ed.Ctx))
 				norm := index.NormalizeName(objName)
-				
+
 				// Find or create the child node
 				child, ok := node.Children[norm]
 				if !ok {
@@ -72,11 +89,11 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					node.Children[norm] = child
 					b.tree.AddToNodeMap(child)
 				}
-				
+
 				// Ensure this fragment is present and active
 				found := false
 				for _, f := range child.Fragments {
-					if f.Source == d {
+					if f.Source == parser.Definition(d) {
 						b.activeFragments[f] = true
 						found = true
 						break
@@ -420,12 +437,16 @@ func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.Evalua
 	var fields []EvaluatedDefinition
 	var objects []EvaluatedDefinition
 	
+	var shorthands []EvaluatedDefinition
 	for _, ed := range evaluated {
 		switch d := ed.Def.(type) {
 		case *parser.Field:
 			fields = append(fields, EvaluatedDefinition{Def: d, Ctx: ed.Ctx, File: ed.File})
 		case *parser.ObjectNode:
 			objects = append(objects, EvaluatedDefinition{Def: d, Ctx: ed.Ctx, File: ed.File})
+		case *parser.SignalShorthand:
+			_ = d
+			shorthands = append(shorthands, EvaluatedDefinition{Def: ed.Def, Ctx: ed.Ctx, File: ed.File})
 		}
 	}
 
@@ -468,6 +489,49 @@ func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.Evalua
 		}
 
 		b.writeEvaluatedObject(f, objectNode, obj.Ctx, indent, obj.File)
+	}
+
+	// Emit SignalShorthand entries as standard MARTe signal blocks.
+	indentStr := strings.Repeat("  ", indent)
+	for _, sh := range shorthands {
+		d := sh.Def.(*parser.SignalShorthand)
+		nodeName := d.SignalName
+		if d.AliasName != "" {
+			nodeName = d.AliasName
+		}
+		norm := index.NormalizeName(nodeName)
+
+		// Use the indexed child node when available (handles merging).
+		if parentNode != nil {
+			if child, ok := parentNode.Children[norm]; ok {
+				if !writtenChildren[norm] {
+					b.writeNodeContent(f, child, indent, sh.Ctx)
+					writtenChildren[norm] = true
+				}
+				continue
+			}
+		}
+
+		// Fallback: write directly from shorthand fields.
+		fmt.Fprintf(f, "%s%s = {\n", indentStr, nodeName)
+		fmt.Fprintf(f, "%s  DataSource = %s\n", indentStr, d.DataSource)
+		if d.AliasName != "" {
+			fmt.Fprintf(f, "%s  Alias = %s\n", indentStr, d.SignalName)
+		}
+		if d.Type != "" {
+			fmt.Fprintf(f, "%s  Type = %s\n", indentStr, d.Type)
+		}
+		if d.NumElements != nil {
+			fmt.Fprintf(f, "%s  NumberOfElements = %s\n", indentStr, b.formatValueWithCtx(d.NumElements, sh.Ctx))
+		}
+		if d.HasExtraFields {
+			for _, def := range d.ExtraFields.Definitions {
+				if fld, ok := def.(*parser.Field); ok {
+					b.writeField(f, fld, sh.Ctx, indent+1)
+				}
+			}
+		}
+		fmt.Fprintf(f, "%s}\n", indentStr)
 	}
 }
 

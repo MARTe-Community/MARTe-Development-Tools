@@ -70,6 +70,9 @@ type Result struct {
 	// Node lookup maps (graphviz ID → ProjectNode) for subset generation.
 	GAMNodes map[string]*index.ProjectNode
 	DSNodes  map[string]*index.ProjectNode
+	// GenOpts stores the options that produced this Result so that
+	// GenerateSubset can regenerate a subset at the same simplification level.
+	GenOpts genOpts
 }
 
 // edge describes one signal connection.
@@ -88,12 +91,41 @@ type dsSplitEntry struct {
 	earlyReadPorts map[string]bool // DS port IDs (s_+canon) that must go to the read clone
 }
 
+// GenerateOptions controls public Generate entry points for static output.
+type GenerateOptions struct {
+	StateFilter  string   // restrict to GAMs in this state
+	ThreadFilter string   // restrict further to one thread within StateFilter
+	FollowNodes  []string // node names to focus on (subset); empty = all
+	// Simplified controls the simplification level:
+	//   0 = full graph (HTML-table nodes, all signals, all nodes)
+	//   1 = bypass IOGAM and pass-through DS nodes; keep HTML-table signal display
+	//   2 = bypass IOGAM and pass-through DS nodes; collapse to plain box nodes
+	Simplified int
+}
+
 // genOpts controls behaviour of the internal generate function.
 type genOpts struct {
-	stateFilter string
+	stateFilter  string
+	threadFilter string // single thread within stateFilter; only used when stateFilter != ""
+	bypassLevel  int    // 0=off, 1=bypass+HTML signals, 2=bypass+plain nodes (→generateSimplified)
 	// subsetNodes, if non-nil, restricts the graph to this set of ProjectNodes.
 	// IDs remain consistent because the full tree.Walk is still done for ID assignment.
 	subsetNodes map[*index.ProjectNode]bool
+}
+
+// activeThreadsMap returns the threads map to use for state-based filtering.
+// When threadFilter is set, only that thread is included.
+func activeThreadsMap(si *StateInfo, threadFilter string) map[string][]string {
+	if si == nil {
+		return nil
+	}
+	if threadFilter == "" {
+		return si.Threads
+	}
+	if ids, ok := si.Threads[threadFilter]; ok {
+		return map[string][]string{threadFilter: ids}
+	}
+	return nil
 }
 
 // Generate produces a Graphviz DOT graph.
@@ -106,6 +138,7 @@ func Generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 // specified nodes (identified by their graphviz IDs from a prior Generate call)
 // plus their connecting edges, with a re-optimised layout for that subset.
 // Graphviz node IDs are preserved so they match /api/meta keys.
+// The simplification level from the original Result is preserved.
 func GenerateSubset(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, nodeIDs []string, existing Result) Result {
 	subset := make(map[*index.ProjectNode]bool)
 	var subsetGAMs []*index.ProjectNode
@@ -138,7 +171,13 @@ func GenerateSubset(tree *index.ProjectTree, diags map[*index.ProjectNode][]Node
 			}
 		}
 	}
-	return generate(tree, diags, genOpts{subsetNodes: subset})
+	// Preserve the simplification level from the original result.
+	opts := existing.GenOpts
+	opts.subsetNodes = subset
+	if opts.bypassLevel >= 2 {
+		return generateSimplified(tree, diags, opts)
+	}
+	return generate(tree, diags, opts)
 }
 
 func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, opts genOpts) Result {
@@ -192,12 +231,13 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	gams := allGAMs
 	if opts.stateFilter != "" {
 		if si, ok := states[opts.stateFilter]; ok {
+			threads := activeThreadsMap(si, opts.threadFilter)
 			gamByID := make(map[string]*index.ProjectNode)
 			for _, g := range allGAMs {
 				gamByID[gamIDMap[g]] = g
 			}
 			activeSet := make(map[*index.ProjectNode]bool)
-			for _, ids := range si.Threads {
+			for _, ids := range threads {
 				for _, id := range ids {
 					if g, ok := gamByID[id]; ok {
 						activeSet[g] = true
@@ -296,6 +336,156 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		dss = filtered
 	}
 
+	// ── Level-1 bypass: remove IOGAM + pass-through DS, add bypass edges ─
+	// bypassEntry: a bypass edge that replaces one or more IOGAM/DS hops.
+	// When fromPort/toPort are non-empty the edge uses port-based routing
+	// (e.g. writerGAM:outPort → readerGAM:inPort for pass-through DS bypass).
+	// When they are empty the edge connects at node level (IOGAM bypass).
+	type bypassEntry struct {
+		fromID, fromPort string
+		toID, toPort     string
+		color, style     string
+	}
+	var bypassEntries []bypassEntry
+
+	if opts.bypassLevel >= 1 {
+		// Identify IOGAM GAMs.
+		ioGAMIDSet := make(map[string]bool)
+		for _, g := range gams {
+			if isIOGAM(g.Metadata["Class"]) {
+				ioGAMIDSet[gamIDMap[g]] = true
+			}
+		}
+		// Identify pass-through DS (GAMDataSource / AsynchThreadDataSource with writers).
+		passThroughDSIDSet := make(map[string]bool)
+		for _, ds := range dss {
+			if !passThroughClasses[ds.Metadata["Class"]] {
+				continue
+			}
+			for _, e := range edges {
+				if e.isWrite && e.toID == dsIDMap[ds] {
+					passThroughDSIDSet[dsIDMap[ds]] = true
+					break
+				}
+			}
+		}
+
+		// Pass-through DS bypass: writerGAM:outPort → readerGAM:inPort
+		// Both GAMs already have the signal in their HTML-table; we draw a direct
+		// dashed edge between the matching output port and input port.
+		type sigPortKey struct{ dsID, dsPort string }
+		writerPortEdge := make(map[sigPortKey]edge)
+		readerPortEdges := make(map[sigPortKey][]edge)
+		for _, e := range edges {
+			if passThroughDSIDSet[e.toID] && e.isWrite {
+				k := sigPortKey{e.toID, e.toPort}
+				if _, exists := writerPortEdge[k]; !exists {
+					writerPortEdge[k] = e
+				}
+			}
+			if passThroughDSIDSet[e.fromID] && !e.isWrite {
+				k := sigPortKey{e.fromID, e.fromPort}
+				readerPortEdges[k] = append(readerPortEdges[k], e)
+			}
+		}
+		seen3 := make(map[[4]string]bool)
+		for k, we := range writerPortEdge {
+			for _, re := range readerPortEdges[k] {
+				if we.fromID == re.toID {
+					continue // skip self-loop
+				}
+				bk := [4]string{we.fromID, we.fromPort, re.toID, re.toPort}
+				if seen3[bk] {
+					continue
+				}
+				seen3[bk] = true
+				bypassEntries = append(bypassEntries, bypassEntry{
+					fromID: we.fromID, fromPort: we.fromPort,
+					toID:   re.toID, toPort: re.toPort,
+					color: "#40a060", style: "dashed",
+				})
+			}
+		}
+
+		// IOGAM bypass: srcDS → dstDS (node-level dashed edge).
+		// If srcDS is itself a pass-through DS, chain one level to its writers.
+		seen2 := make(map[[2]string]bool)
+		for iogamID := range ioGAMIDSet {
+			srcIDs2 := make(map[string]bool)
+			dstIDs2 := make(map[string]bool)
+			for _, e := range edges {
+				if !e.isWrite && e.toID == iogamID { // IOGAM reads from DS
+					if passThroughDSIDSet[e.fromID] {
+						// One-level chain: use writers of that pass-through DS.
+						for _, we := range edges {
+							if we.isWrite && we.toID == e.fromID && !ioGAMIDSet[we.fromID] {
+								srcIDs2[we.fromID] = true
+							}
+						}
+					} else {
+						srcIDs2[e.fromID] = true
+					}
+				}
+				if e.isWrite && e.fromID == iogamID { // IOGAM writes to DS
+					dstIDs2[e.toID] = true
+				}
+			}
+			for srcID := range srcIDs2 {
+				for dstID := range dstIDs2 {
+					bk := [2]string{srcID, dstID}
+					if seen2[bk] {
+						continue
+					}
+					seen2[bk] = true
+					bypassEntries = append(bypassEntries, bypassEntry{
+						fromID: srcID, toID: dstID,
+						color: "#9060c0", style: "dashed",
+					})
+				}
+			}
+		}
+
+		// Filter edges, gams, dss to remove bypassed nodes.
+		var filteredEdges []edge
+		for _, e := range edges {
+			if ioGAMIDSet[e.fromID] || ioGAMIDSet[e.toID] {
+				continue
+			}
+			if passThroughDSIDSet[e.fromID] || passThroughDSIDSet[e.toID] {
+				continue
+			}
+			filteredEdges = append(filteredEdges, e)
+		}
+		edges = filteredEdges
+
+		var filteredGAMs []*index.ProjectNode
+		for _, g := range gams {
+			if !ioGAMIDSet[gamIDMap[g]] {
+				filteredGAMs = append(filteredGAMs, g)
+			}
+		}
+		gams = filteredGAMs
+
+		var filteredDSS []*index.ProjectNode
+		for _, ds := range dss {
+			if !passThroughDSIDSet[dsIDMap[ds]] {
+				filteredDSS = append(filteredDSS, ds)
+			}
+		}
+		dss = filteredDSS
+
+		// Also remove pass-through DS entries from dsReadSigs/dsWriteSigs so
+		// the DS signal tables are not built for bypassed nodes.
+		for id := range passThroughDSIDSet {
+			for ds, mapID := range dsIDMap {
+				if mapID == id {
+					delete(dsReadSigs, ds)
+					delete(dsWriteSigs, ds)
+				}
+			}
+		}
+	}
+
 	// ── Minimal-split algorithm ──────────────────────────────────────────
 	// Goal: only split a DS into read-clone (_r) + main when a GAM reads
 	// from it *before* any GAM has written to it in the same cycle.
@@ -338,7 +528,7 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	if opts.stateFilter != "" {
 		// Filtered view: use positions from this state's threads only.
 		if si, ok := states[opts.stateFilter]; ok {
-			for _, ids := range si.Threads {
+			for _, ids := range activeThreadsMap(si, opts.threadFilter) {
 				for pos, id := range ids {
 					if cur := gamThreadPos[id]; pos > cur {
 						gamThreadPos[id] = pos
@@ -784,8 +974,9 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 
 	if opts.stateFilter != "" {
 		si := states[opts.stateFilter]
+		threads := activeThreadsMap(si, opts.threadFilter)
 		var threadNames []string
-		for t := range si.Threads {
+		for t := range threads {
 			threadNames = append(threadNames, t)
 		}
 		sort.Strings(threadNames)
@@ -795,7 +986,7 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		}
 
 		for _, threadName := range threadNames {
-			ids := si.Threads[threadName]
+			ids := threads[threadName]
 			fmt.Fprintf(&sb, "  subgraph cluster_%s {\n", sanitize(threadName))
 			fmt.Fprintf(&sb, "    label=<%s>;\n", he(threadName))
 			sb.WriteString("    color=\"#30363d\"; penwidth=1.5;\n")
@@ -824,6 +1015,17 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		attrs := fmt.Sprintf("color=%q, penwidth=1.2", e.color)
 		fmt.Fprintf(&sb, "  %s:%s:e -> %s:%s:w [%s];\n",
 			e.fromID, e.fromPort, e.toID, e.toPort, attrs)
+	}
+
+	// Level-1 bypass edges (dashed, drawn after regular edges).
+	for _, be := range bypassEntries {
+		if be.fromPort != "" {
+			fmt.Fprintf(&sb, "  %s:%s:e -> %s:%s:w [color=%q, style=%s, penwidth=1.0];\n",
+				be.fromID, be.fromPort, be.toID, be.toPort, be.color, be.style)
+		} else {
+			fmt.Fprintf(&sb, "  %s -> %s [color=%q, style=%s, penwidth=1.0];\n",
+				be.fromID, be.toID, be.color, be.style)
+		}
 	}
 
 	// ── Rank constraints ──────────────────────────────────────────────────
@@ -912,7 +1114,7 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 		}
 	}
 
-	return Result{DOT: sb.String(), Meta: meta, States: states, AllGAMIDs: allGAMIDs, GAMNodes: gamNodes, DSNodes: dsNodes}
+	return Result{DOT: sb.String(), Meta: meta, States: states, AllGAMIDs: allGAMIDs, GAMNodes: gamNodes, DSNodes: dsNodes, GenOpts: opts}
 }
 
 // buildDSSigs builds the full signal list for a DS (explicit + implicit).
@@ -1598,4 +1800,664 @@ func he(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+// ── Public static-output entry point ──────────────────────────────────────────
+
+// GenerateWithOptions generates a graph applying state/thread filtering,
+// optional simplification, and optional node-follow subsetting.
+// Use this for static output (mdt graph -o ...) and live mode.
+func GenerateWithOptions(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, opts GenerateOptions) Result {
+	gopts := genOpts{stateFilter: opts.StateFilter, threadFilter: opts.ThreadFilter, bypassLevel: opts.Simplified}
+	var res Result
+	if opts.Simplified >= 2 {
+		res = generateSimplified(tree, diags, gopts)
+	} else {
+		// Level 0 (full) and level 1 (bypass+signals) both go through generate;
+		// bypassLevel in gopts controls whether bypass logic is applied.
+		res = generate(tree, diags, gopts)
+	}
+	if len(opts.FollowNodes) > 0 {
+		res = applyFollowFilter(tree, diags, opts.FollowNodes, res)
+	}
+	return res
+}
+
+// applyFollowFilter restricts the graph to the nodes whose name matches any
+// entry in names, plus the DataSources they connect to.
+func applyFollowFilter(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, names []string, res Result) Result {
+	// Build a case-insensitive name→IDs index.
+	nameToIDs := make(map[string][]string)
+	add := func(id string, n *index.ProjectNode) {
+		key := strings.ToLower(realName(n))
+		nameToIDs[key] = append(nameToIDs[key], id)
+	}
+	for id, n := range res.GAMNodes {
+		add(id, n)
+	}
+	for id, n := range res.DSNodes {
+		add(id, n)
+	}
+
+	var nodeIDs []string
+	seen := make(map[string]bool)
+	for _, name := range names {
+		for _, id := range nameToIDs[strings.ToLower(name)] {
+			if !seen[id] {
+				seen[id] = true
+				nodeIDs = append(nodeIDs, id)
+			}
+		}
+	}
+	if len(nodeIDs) == 0 {
+		return res // nothing matched — return full graph
+	}
+	return GenerateSubset(tree, diags, nodeIDs, res)
+}
+
+// ── Simplified graph generator ────────────────────────────────────────────────
+
+// passThroughClasses are DataSource classes used as pure in-memory buffers
+// between GAMs, eligible for bypass in simplified mode.
+var passThroughClasses = map[string]bool{
+	"GAMDataSource":          true,
+	"AsynchThreadDataSource": true,
+}
+
+// sigConnEntry records one signal connection between a GAM and a DataSource.
+type sigConnEntry struct {
+	gam    *index.ProjectNode
+	ds     *index.ProjectNode
+	canon  string // canonical signal name inside the DS
+	isRead bool   // true = GAM reads from DS; false = GAM writes to DS
+}
+
+// generateSimplified produces a simplified DOT graph that bypasses IOGAM nodes
+// and pass-through DataSources (GAMDataSource, AsynchThreadDataSource).
+//
+// IOGAM bypass: for each IOGAM the edges DS_in → DS_out replace the two-hop
+// path DS_in→IOGAM→DS_out. When DS_in is itself a pass-through DS the bypass
+// is extended one level: writerGAM→DS_out.
+//
+// Pass-through DS bypass: for each qualifying DS a direct writerGAM→readerGAM
+// edge (labelled with the signal name) replaces the two-hop path.
+//
+// The resulting DOT uses simple plain-text node labels rather than HTML-table
+// port labels, making it suitable for SVG/HTML/MD static output.
+func generateSimplified(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, opts genOpts) Result {
+	if diags == nil {
+		diags = make(map[*index.ProjectNode][]NodeDiag)
+	}
+
+	// ── ID assignment (same as generate) ─────────────────────────────────────
+	dsIDMap := make(map[*index.ProjectNode]string)
+	gamIDMap := make(map[*index.ProjectNode]string)
+	usedDS := make(map[string]bool)
+	usedGAM := make(map[string]bool)
+	var allDSS, allGAMs []*index.ProjectNode
+
+	tree.Walk(func(n *index.ProjectNode) {
+		if tree.IsDataSource(n) {
+			dsIDMap[n] = makeID("ds", n.Name, usedDS)
+			allDSS = append(allDSS, n)
+		} else if tree.IsGAM(n) {
+			gamIDMap[n] = makeID("fn", n.Name, usedGAM)
+			allGAMs = append(allGAMs, n)
+		}
+	})
+	sort.Slice(allDSS, func(i, j int) bool { return dsIDMap[allDSS[i]] < dsIDMap[allDSS[j]] })
+	sort.Slice(allGAMs, func(i, j int) bool { return gamIDMap[allGAMs[i]] < gamIDMap[allGAMs[j]] })
+
+	states := extractStates(tree, gamIDMap)
+
+	// ── State/thread filter ───────────────────────────────────────────────────
+	gams := allGAMs
+	if opts.stateFilter != "" {
+		if si, ok := states[opts.stateFilter]; ok {
+			threads := activeThreadsMap(si, opts.threadFilter)
+			gamByID := make(map[string]*index.ProjectNode)
+			for _, g := range allGAMs {
+				gamByID[gamIDMap[g]] = g
+			}
+			activeSet := make(map[*index.ProjectNode]bool)
+			for _, ids := range threads {
+				for _, id := range ids {
+					if g, ok := gamByID[id]; ok {
+						activeSet[g] = true
+					}
+				}
+			}
+			var filtered []*index.ProjectNode
+			for _, g := range allGAMs {
+				if activeSet[g] {
+					filtered = append(filtered, g)
+				}
+			}
+			gams = filtered
+		}
+	}
+
+	// ── Subset filter (for GenerateSubset in simplified mode) ─────────────────
+	if opts.subsetNodes != nil {
+		var fg []*index.ProjectNode
+		for _, g := range gams {
+			if opts.subsetNodes[g] {
+				fg = append(fg, g)
+			}
+		}
+		gams = fg
+	}
+
+	// ── Collect all signal connections ────────────────────────────────────────
+	var conns []sigConnEntry
+	for _, g := range gams {
+		for _, dir := range []struct {
+			name   string
+			isRead bool
+		}{{"InputSignals", true}, {"OutputSignals", false}} {
+			c, ok := g.Children[dir.name]
+			if !ok {
+				continue
+			}
+			for _, sig := range c.Children {
+				ds, canon := resolveSignal(tree, sig, g)
+				if ds == nil {
+					continue
+				}
+				conns = append(conns, sigConnEntry{g, ds, canon, dir.isRead})
+			}
+		}
+	}
+
+	// Per-DS writer and reader sets (non-deduplicated, for signal-level lookup).
+	dsWriters := make(map[*index.ProjectNode]map[*index.ProjectNode]bool)
+	dsReaders := make(map[*index.ProjectNode]map[*index.ProjectNode]bool)
+	// Per-signal writers/readers for bypass edge construction.
+	type sigKey struct {
+		ds    *index.ProjectNode
+		canon string
+	}
+	sigWriters := make(map[sigKey]*index.ProjectNode)  // one writer per signal
+	sigReaders := make(map[sigKey][]*index.ProjectNode) // many readers per signal
+	for _, c := range conns {
+		if c.isRead {
+			if dsReaders[c.ds] == nil {
+				dsReaders[c.ds] = make(map[*index.ProjectNode]bool)
+			}
+			dsReaders[c.ds][c.gam] = true
+			k := sigKey{c.ds, c.canon}
+			sigReaders[k] = append(sigReaders[k], c.gam)
+		} else {
+			if dsWriters[c.ds] == nil {
+				dsWriters[c.ds] = make(map[*index.ProjectNode]bool)
+			}
+			dsWriters[c.ds][c.gam] = true
+			k := sigKey{c.ds, c.canon}
+			if sigWriters[k] == nil {
+				sigWriters[k] = c.gam
+			}
+		}
+	}
+
+	// ── Identify bypass candidates ────────────────────────────────────────────
+	ioGAMSet := make(map[*index.ProjectNode]bool)
+	for _, g := range gams {
+		if isIOGAM(g.Metadata["Class"]) {
+			ioGAMSet[g] = true
+		}
+	}
+
+	passThroughDSSet := make(map[*index.ProjectNode]bool)
+	for _, ds := range allDSS {
+		if !passThroughClasses[ds.Metadata["Class"]] {
+			continue
+		}
+		// Only bypass if at least one writer GAM exists.
+		if len(dsWriters[ds]) > 0 {
+			passThroughDSSet[ds] = true
+		}
+	}
+
+	// ── Build bypass edges ────────────────────────────────────────────────────
+	type bypassEdge struct {
+		fromID string
+		toID   string
+		label  string
+		style  string // "iogam" | "dsbypass"
+	}
+	var bypassEdges []bypassEdge
+	seenBypass := make(map[[3]string]bool)
+	addBypass := func(fromID, toID, label, style string) {
+		k := [3]string{fromID, toID, label}
+		if !seenBypass[k] {
+			seenBypass[k] = true
+			bypassEdges = append(bypassEdges, bypassEdge{fromID, toID, label, style})
+		}
+	}
+
+	// IOGAM bypass: DS_in → DS_out  (or writerGAM → DS_out if DS_in is pass-through).
+	for iogam := range ioGAMSet {
+		gamName := realName(iogam)
+		// Collect source IDs (what feeds this IOGAM).
+		sourceIDs := make(map[string]bool)
+		for _, c := range conns {
+			if c.gam != iogam || !c.isRead {
+				continue
+			}
+			if passThroughDSSet[c.ds] {
+				// One-level chain: look through pass-through DS to its writers.
+				for writerGAM := range dsWriters[c.ds] {
+					if !ioGAMSet[writerGAM] {
+						if id, ok := gamIDMap[writerGAM]; ok {
+							sourceIDs[id] = true
+						}
+					}
+				}
+			} else {
+				if id, ok := dsIDMap[c.ds]; ok {
+					sourceIDs[id] = true
+				}
+			}
+		}
+		// Collect destination IDs (where this IOGAM writes).
+		destIDs := make(map[string]bool)
+		for _, c := range conns {
+			if c.gam != iogam || c.isRead {
+				continue
+			}
+			if id, ok := dsIDMap[c.ds]; ok {
+				destIDs[id] = true
+			}
+		}
+		for srcID := range sourceIDs {
+			for dstID := range destIDs {
+				addBypass(srcID, dstID, gamName, "iogam")
+			}
+		}
+	}
+
+	// Pass-through DS bypass: writerGAM → readerGAM per signal.
+	for ds := range passThroughDSSet {
+		dsName := realName(ds)
+		if cont, ok := ds.Children["Signals"]; ok {
+			for _, sig := range cont.Children {
+				canon := realName(sig)
+				k := sigKey{ds, canon}
+				writer := sigWriters[k]
+				readers := sigReaders[k]
+				if writer == nil || ioGAMSet[writer] || len(readers) == 0 {
+					continue
+				}
+				wID, okW := gamIDMap[writer]
+				if !okW {
+					continue
+				}
+				for _, reader := range readers {
+					if ioGAMSet[reader] {
+						continue
+					}
+					rID, okR := gamIDMap[reader]
+					if !okR {
+						continue
+					}
+					label := dsName + "." + canon
+					addBypass(wID, rID, label, "dsbypass")
+				}
+			}
+		} else {
+			// No explicit Signals node — use connection list directly.
+			type wrPair struct{ w, r *index.ProjectNode }
+			seen := make(map[wrPair]bool)
+			for _, c := range conns {
+				if c.ds != ds || c.isRead {
+					continue
+				}
+				if ioGAMSet[c.gam] {
+					continue
+				}
+				k2 := sigKey{ds, c.canon}
+				for _, reader := range sigReaders[k2] {
+					if ioGAMSet[reader] {
+						continue
+					}
+					p := wrPair{c.gam, reader}
+					if seen[p] {
+						continue
+					}
+					seen[p] = true
+					wID, okW := gamIDMap[c.gam]
+					rID, okR := gamIDMap[reader]
+					if !okW || !okR {
+						continue
+					}
+					addBypass(wID, rID, realName(ds)+"."+c.canon, "dsbypass")
+				}
+			}
+		}
+	}
+
+	// ── Build regular edges (skip bypassed nodes) ─────────────────────────────
+	type regularEdge struct {
+		fromID  string
+		toID    string
+		label   string
+		isWrite bool
+	}
+	var regularEdges []regularEdge
+	seenReg := make(map[[3]string]bool)
+	for _, c := range conns {
+		if ioGAMSet[c.gam] || passThroughDSSet[c.ds] {
+			continue
+		}
+		dsID, okD := dsIDMap[c.ds]
+		gamID, okG := gamIDMap[c.gam]
+		if !okD || !okG {
+			continue
+		}
+		fromID, toID := dsID, gamID
+		if !c.isRead {
+			fromID, toID = gamID, dsID
+		}
+		k := [3]string{fromID, toID, c.canon}
+		if !seenReg[k] {
+			seenReg[k] = true
+			regularEdges = append(regularEdges, regularEdge{fromID, toID, c.canon, !c.isRead})
+		}
+	}
+
+	// ── Build display node lists ──────────────────────────────────────────────
+	var displayGAMs []*index.ProjectNode
+	for _, g := range gams {
+		if !ioGAMSet[g] {
+			displayGAMs = append(displayGAMs, g)
+		}
+	}
+
+	// DSes to show: not bypassed, and (if state filter) connected to remaining nodes.
+	displayDSSet := make(map[*index.ProjectNode]bool)
+	for _, ds := range allDSS {
+		if passThroughDSSet[ds] {
+			continue
+		}
+		displayDSSet[ds] = true
+	}
+	if opts.stateFilter != "" {
+		// Keep only DSes that appear in regular or bypass edges.
+		referencedIDs := make(map[string]bool)
+		for _, e := range regularEdges {
+			referencedIDs[e.fromID] = true
+			referencedIDs[e.toID] = true
+		}
+		for _, e := range bypassEdges {
+			referencedIDs[e.fromID] = true
+			referencedIDs[e.toID] = true
+		}
+		for _, g := range displayGAMs {
+			referencedIDs[gamIDMap[g]] = true
+		}
+		for ds := range displayDSSet {
+			if !referencedIDs[dsIDMap[ds]] {
+				delete(displayDSSet, ds)
+			}
+		}
+	}
+	var displayDSS []*index.ProjectNode
+	for _, ds := range allDSS {
+		if displayDSSet[ds] {
+			displayDSS = append(displayDSS, ds)
+		}
+	}
+
+	// ── GAM rank computation (same Bellman-Ford as generate) ──────────────────
+	gamThreadPos := make(map[string]int)
+	for _, g := range allGAMs {
+		gamThreadPos[gamIDMap[g]] = 0
+	}
+	if opts.stateFilter != "" {
+		if si, ok := states[opts.stateFilter]; ok {
+			for _, ids := range activeThreadsMap(si, opts.threadFilter) {
+				for pos, id := range ids {
+					if cur := gamThreadPos[id]; pos > cur {
+						gamThreadPos[id] = pos
+					}
+				}
+			}
+		}
+	} else {
+		type orderEdge struct{ from, to string }
+		var orderEdges []orderEdge
+		for _, si := range states {
+			for _, ids := range si.Threads {
+				for i := 1; i < len(ids); i++ {
+					orderEdges = append(orderEdges, orderEdge{ids[i-1], ids[i]})
+				}
+			}
+		}
+		for range orderEdges {
+			changed := false
+			for _, e := range orderEdges {
+				r := gamThreadPos[e.from]
+				if cur := gamThreadPos[e.to]; cur < r+1 {
+					gamThreadPos[e.to] = r + 1
+					changed = true
+				}
+			}
+			if !changed {
+				break
+			}
+		}
+	}
+
+	// ── Emit DOT ──────────────────────────────────────────────────────────────
+	var sb strings.Builder
+	sb.WriteString("digraph MARTe {\n")
+	sb.WriteString("  bgcolor=\"transparent\";\n")
+	sb.WriteString("  layout=dot;\n")
+	sb.WriteString("  rankdir=LR;\n")
+	sb.WriteString("  ranksep=0.7;\n")
+	sb.WriteString("  nodesep=0.35;\n")
+	sb.WriteString("  splines=spline;\n")
+	sb.WriteString("  node [fontname=\"Helvetica\", fontsize=10, margin=\"0.15,0.08\"];\n")
+	sb.WriteString("  edge [fontname=\"Helvetica\", fontsize=8, arrowsize=0.6, arrowhead=open];\n\n")
+
+	simplNode := func(id, label, fillColor, borderColor, fontColor string, penwidth int) {
+		fmt.Fprintf(&sb, "  %s [shape=box, style=\"filled,rounded\", fillcolor=%q, color=%q, penwidth=%d, fontcolor=%q, label=%q];\n",
+			id, fillColor, borderColor, penwidth, fontColor, label)
+	}
+
+	// DS nodes
+	for _, ds := range displayDSS {
+		id := dsIDMap[ds]
+		name := realName(ds)
+		class := ds.Metadata["Class"]
+		nd := diags[ds]
+		border, pw := "#1a6a9a", 2
+		if len(nd) > 0 {
+			if worstDiag(nd) == DiagError {
+				border = "#d73a49"
+				pw = 3
+			} else {
+				border = "#e3b341"
+				pw = 2
+			}
+		}
+		cond := ""
+		if ds.IsConditional {
+			cond = "◇ "
+		}
+		simplNode(id, cond+name+"\n"+class, "#0b1e30", border, "#7ec8e3", pw)
+	}
+	sb.WriteString("\n")
+
+	// GAM nodes (non-IOGAM only in display list)
+	// With state filter: group by thread in subgraph clusters.
+	if opts.stateFilter != "" {
+		si := states[opts.stateFilter]
+		threads := activeThreadsMap(si, opts.threadFilter)
+		var threadNames []string
+		for t := range threads {
+			threadNames = append(threadNames, t)
+		}
+		sort.Strings(threadNames)
+		gamByID := make(map[string]*index.ProjectNode)
+		for _, g := range displayGAMs {
+			gamByID[gamIDMap[g]] = g
+		}
+		for _, threadName := range threadNames {
+			ids := threads[threadName]
+			fmt.Fprintf(&sb, "  subgraph cluster_%s {\n", sanitize(threadName))
+			fmt.Fprintf(&sb, "    label=<%s>;\n", he(threadName))
+			sb.WriteString("    color=\"#30363d\"; penwidth=1.5;\n")
+			sb.WriteString("    fontname=\"Helvetica\"; fontsize=10; fontcolor=\"#7a8899\";\n")
+			for _, id := range ids {
+				n, ok := gamByID[id]
+				if !ok {
+					continue
+				}
+				name := realName(n)
+				class := n.Metadata["Class"]
+				nd := diags[n]
+				border, pw := "#383850", 1
+				if len(nd) > 0 {
+					if worstDiag(nd) == DiagError {
+						border, pw = "#d73a49", 3
+					} else {
+						border, pw = "#e3b341", 2
+					}
+				}
+				cond := ""
+				if n.IsConditional {
+					cond = "◇ "
+				}
+				simplNode(id, cond+name+"\n"+class, "#181824", border, "#c8c8d8", pw)
+			}
+			sb.WriteString("  }\n\n")
+		}
+	} else {
+		for _, g := range displayGAMs {
+			id := gamIDMap[g]
+			name := realName(g)
+			class := g.Metadata["Class"]
+			nd := diags[g]
+			border, pw := "#383850", 1
+			if len(nd) > 0 {
+				if worstDiag(nd) == DiagError {
+					border, pw = "#d73a49", 3
+				} else {
+					border, pw = "#e3b341", 2
+				}
+			}
+			cond := ""
+			if g.IsConditional {
+				cond = "◇ "
+			}
+			simplNode(id, cond+name+"\n"+class, "#181824", border, "#c8c8d8", pw)
+		}
+	}
+	sb.WriteString("\n")
+
+	// Regular edges
+	for _, e := range regularEdges {
+		color := "#3d6fd6" // DS→GAM read
+		if e.isWrite {
+			color = "#c87941" // GAM→DS write
+		}
+		fmt.Fprintf(&sb, "  %s -> %s [color=%q, label=%q];\n", e.fromID, e.toID, color, e.label)
+	}
+
+	// Bypass edges
+	for _, e := range bypassEdges {
+		var color, style string
+		switch e.style {
+		case "iogam":
+			color, style = "#9060c0", "dashed"
+		default: // dsbypass
+			color, style = "#40a060", "dashed"
+		}
+		fmt.Fprintf(&sb, "  %s -> %s [style=%s, color=%q, fontcolor=%q, label=%q];\n",
+			e.fromID, e.toID, style, color, color, e.label)
+	}
+
+	// Rank constraints: GAMs in same thread at same rank.
+	sb.WriteString("\n")
+	rankGroups := make(map[int][]string)
+	for _, g := range displayGAMs {
+		id := gamIDMap[g]
+		pos := gamThreadPos[id]
+		rankGroups[pos] = append(rankGroups[pos], id)
+	}
+	var ranks []int
+	for r := range rankGroups {
+		ranks = append(ranks, r)
+	}
+	sort.Ints(ranks)
+	for _, r := range ranks {
+		ids := rankGroups[r]
+		if len(ids) <= 1 {
+			continue
+		}
+		sb.WriteString("  { rank=same;")
+		for _, id := range ids {
+			fmt.Fprintf(&sb, " %s;", id)
+		}
+		sb.WriteString(" }\n")
+	}
+
+	sb.WriteString("}\n")
+
+	// ── Build Result ──────────────────────────────────────────────────────────
+	meta := make(map[string]NodeInfo)
+	gamNodes := make(map[string]*index.ProjectNode)
+	dsNodes := make(map[string]*index.ProjectNode)
+	allGAMIDs := make(map[string]bool)
+
+	for _, g := range displayGAMs {
+		id := gamIDMap[g]
+		gamNodes[id] = g
+		allGAMIDs[id] = true
+		inS, outS := buildGAMSigs(tree, g, diags)
+		meta[id] = NodeInfo{
+			Name: realName(g), Kind: "gam", Class: g.Metadata["Class"],
+			Doc: g.Doc, Conditional: g.IsConditional,
+			Fields: collectFields(g), InSigs: inS, OutSigs: outS, Diags: diags[g],
+		}
+	}
+	for _, ds := range displayDSS {
+		id := dsIDMap[ds]
+		dsNodes[id] = ds
+		allSigs := buildDSSigs(ds, dsReadSigsOf(conns, ds), dsWriteSigsOf(conns, ds), nil, diags)
+		meta[id] = NodeInfo{
+			Name: realName(ds), Kind: "ds", Class: ds.Metadata["Class"],
+			Doc: ds.Doc, Conditional: ds.IsConditional,
+			Fields: collectFields(ds), DSSigs: allSigs, Diags: diags[ds],
+		}
+	}
+
+	return Result{
+		DOT: sb.String(), Meta: meta, States: states,
+		AllGAMIDs: allGAMIDs, GAMNodes: gamNodes, DSNodes: dsNodes, GenOpts: opts,
+	}
+}
+
+// dsReadSigsOf and dsWriteSigsOf extract the read/write signal name sets for
+// a specific DS from the flat connection list. Used by generateSimplified to
+// populate meta without re-walking the tree.
+func dsReadSigsOf(conns []sigConnEntry, ds *index.ProjectNode) map[string]bool {
+	m := make(map[string]bool)
+	for _, c := range conns {
+		if c.ds == ds && c.isRead {
+			m[c.canon] = true
+		}
+	}
+	return m
+}
+
+func dsWriteSigsOf(conns []sigConnEntry, ds *index.ProjectNode) map[string]bool {
+	m := make(map[string]bool)
+	for _, c := range conns {
+		if c.ds == ds && !c.isRead {
+			m[c.canon] = true
+		}
+	}
+	return m
 }

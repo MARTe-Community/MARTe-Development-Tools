@@ -344,6 +344,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	v.CheckSignalConsistency(ctx)
 	v.CheckVariables(ctx)
 	v.CheckUnresolvedVariables(ctx)
+	v.CheckConditionalReferences(ctx)
 }
 
 func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
@@ -2188,6 +2189,84 @@ func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
 				fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
 				ref.Position, ref.File)
 		}
+	}
+}
+
+// nodeIsEffectivelyConditional returns true when node or any ancestor is
+// IsConditional. This is needed because inner nodes of a conditional object
+// (e.g. InputSignals inside a GAM that is inside #if) are created with
+// IsConditional=false by addObjectFragment, but their GAM ancestor still
+// carries IsConditional=true. Any reference made from such a node is already
+// guarded by the ancestor's condition and must not be flagged.
+func nodeIsEffectivelyConditional(node *index.ProjectNode) bool {
+	curr := node
+	for curr != nil {
+		if curr.IsConditional {
+			return true
+		}
+		curr = curr.Parent
+	}
+	return false
+}
+
+// CheckConditionalReferences reports an error when a field in an unconditional
+// context holds a reference to a node that is only defined inside #if blocks.
+// Example: `+Obj = { Ref = Data }` is invalid if `+Data` is only defined under
+// `#if (COND) +Data = {...} #end`, because Data may not exist at runtime.
+//
+// No error is raised when the referencing node (or any of its ancestors) is
+// itself conditional, because in that case both the reference site and the
+// target are already guarded by some condition and we trust the user to use
+// matching conditions.
+func (v *Validator) CheckConditionalReferences(ctx context.Context) {
+	v.Tree.Walk(func(node *index.ProjectNode) {
+		if ctx.Err() != nil {
+			return
+		}
+		// If this node (or any ancestor) is only defined inside #if blocks,
+		// all its field references are already in a conditional context.
+		if nodeIsEffectivelyConditional(node) {
+			return
+		}
+		for _, frag := range node.Fragments {
+			if frag.IsConditional {
+				// References inside conditional fragments are the user's responsibility.
+				continue
+			}
+			for _, def := range frag.Definitions {
+				f, ok := def.(*parser.Field)
+				if !ok {
+					// IfBlock/ForeachBlock definitions inside a non-conditional fragment
+					// create their own conditional sub-fragments; skip them here.
+					continue
+				}
+				v.checkValueForConditionalRef(f.Value, node, frag.File)
+			}
+		}
+	})
+}
+
+func (v *Validator) checkValueForConditionalRef(val parser.Value, node *index.ProjectNode, file string) {
+	switch t := val.(type) {
+	case *parser.ReferenceValue:
+		// Resolve without the ActiveNodes filter so we can detect conditional targets
+		// even when their condition evaluated to false with current variable values.
+		target := v.Tree.ResolveName(node, t.Value, nil)
+		if target == nil || !target.IsConditional {
+			return
+		}
+		v.report(node, "conditional_reference", LevelError,
+			fmt.Sprintf("'%s' is only defined inside a conditional block and may not exist at runtime", t.Value),
+			t.Position, file)
+	case *parser.ArrayValue:
+		for _, elem := range t.Elements {
+			v.checkValueForConditionalRef(elem, node, file)
+		}
+	case *parser.BinaryExpression:
+		v.checkValueForConditionalRef(t.Left, node, file)
+		v.checkValueForConditionalRef(t.Right, node, file)
+	case *parser.UnaryExpression:
+		v.checkValueForConditionalRef(t.Right, node, file)
 	}
 }
 

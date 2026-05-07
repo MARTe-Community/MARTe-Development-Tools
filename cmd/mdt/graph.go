@@ -36,6 +36,12 @@ func runGraph(args []string) {
 	projectFilter := ""
 	port := 0
 	overrides := make(map[string]string)
+	// Static output flags
+	outputPath := ""
+	stateFilter := ""
+	threadFilter := ""
+	var followNodes []string
+	simplified := 0
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -49,6 +55,26 @@ func runGraph(args []string) {
 		case arg == "-port" && i+1 < len(args):
 			fmt.Sscanf(args[i+1], "%d", &port)
 			i++
+		case arg == "-o" && i+1 < len(args):
+			outputPath = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--state="):
+			val := arg[len("--state="):]
+			if idx := strings.Index(val, ":"); idx >= 0 {
+				stateFilter = val[:idx]
+				threadFilter = val[idx+1:]
+			} else {
+				stateFilter = val
+			}
+		case strings.HasPrefix(arg, "--follow="):
+			followNodes = append(followNodes, arg[len("--follow="):])
+		case arg == "--follow" && i+1 < len(args):
+			followNodes = append(followNodes, args[i+1])
+			i++
+		case arg == "--simplified":
+			simplified = 1
+		case strings.HasPrefix(arg, "--simplified="):
+			fmt.Sscanf(arg[len("--simplified="):], "%d", &simplified)
 		case strings.HasPrefix(arg, "-v"):
 			pair := arg[2:]
 			parts := strings.SplitN(pair, "=", 2)
@@ -81,7 +107,7 @@ func runGraph(args []string) {
 		return files
 	}
 
-	buildAll := func(files []string) fullResult {
+	buildTreeAndDiags := func(files []string) (*index.ProjectTree, map[*index.ProjectNode][]graph.NodeDiag) {
 		tree := index.NewProjectTree()
 		for _, file := range files {
 			content, err := os.ReadFile(file)
@@ -106,7 +132,6 @@ func runGraph(args []string) {
 			tree.AddFile(file, config)
 		}
 
-		// Run validation
 		v := validator.NewValidator(tree, projectRoot, overrides)
 		v.ValidateProject(context.Background())
 
@@ -128,8 +153,32 @@ func runGraph(args []string) {
 				Severity: sev, Message: d.Message,
 			})
 		}
+		return tree, nodeDiags
+	}
 
-		return fullResult{allResult: graph.Generate(tree, nodeDiags, ""), tree: tree, nodeDiags: nodeDiags}
+	buildAll := func(files []string) fullResult {
+		tree, nodeDiags := buildTreeAndDiags(files)
+		opts := graph.GenerateOptions{Simplified: simplified}
+		return fullResult{allResult: graph.GenerateWithOptions(tree, nodeDiags, opts), tree: tree, nodeDiags: nodeDiags}
+	}
+
+	// ── Static output mode ────────────────────────────────────────────────────
+	if outputPath != "" {
+		logger.SetOutput(os.Stdout)
+		files := collectFiles()
+		tree, nodeDiags := buildTreeAndDiags(files)
+		opts := graph.GenerateOptions{
+			StateFilter:  stateFilter,
+			ThreadFilter: threadFilter,
+			FollowNodes:  followNodes,
+			Simplified:   simplified,
+		}
+		res := graph.GenerateWithOptions(tree, nodeDiags, opts)
+		if err := writeGraphOutput(res.DOT, outputPath); err != nil {
+			logger.Fatalf("graph output: %v\n", err)
+		}
+		logger.Printf("Written: %s\n", outputPath)
+		return
 	}
 
 	latestMtime := func(files []string) time.Time {

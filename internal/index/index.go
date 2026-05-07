@@ -192,7 +192,7 @@ type Fragment struct {
 	DefinitionDocs map[parser.Definition]string
 	IsConditional  bool
 	BranchID       string
-	Source         *parser.ObjectNode
+	Source         parser.Definition
 }
 
 func NewProjectTree() *ProjectTree {
@@ -660,6 +660,10 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: subDoc}
+		case *parser.SignalShorthand:
+			frag.Definitions = append(frag.Definitions, d)
+			frag.DefinitionDocs[d] = subDoc
+			pt.addSignalShorthandChild(node, file, d, subDoc, comments, pragmas, conditional)
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
@@ -757,6 +761,111 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 	node.Fragments = append(node.Fragments, frag)
 }
 
+// addSignalShorthandChild indexes a SignalShorthand definition inside an
+// InputSignals or OutputSignals block. It creates a child ProjectNode for the
+// signal (equivalent to a standard +SignalName = { DataSource = … } block) and
+// populates its metadata and fields from the shorthand's components.
+func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d *parser.SignalShorthand, doc string, comments []parser.Comment, pragmas []parser.Pragma, conditional bool) {
+	// When "as <NAME>" is used, the node is named <NAME> and the original
+	// SignalName becomes the Alias field value.
+	nodeName := d.SignalName
+	if d.AliasName != "" {
+		nodeName = d.AliasName
+	}
+	norm := NormalizeName(nodeName)
+	realName := nodeName
+	if _, ok := node.Children[norm]; !ok {
+		node.Children[norm] = &ProjectNode{
+			Name:          norm,
+			RealName:      realName,
+			Children:      make(map[string]*ProjectNode),
+			Parent:        node,
+			Metadata:      make(map[string]string),
+			Variables:     make(map[string]VariableInfo),
+			Fields:        make(map[string][]EvaluatedField),
+			IsConditional: conditional,
+			File:          file,
+		}
+	}
+	child := node.Children[norm]
+	if child.RealName == norm {
+		child.RealName = realName
+	}
+	pt.addToNodeMap(child)
+	if doc != "" {
+		if child.Doc != "" {
+			child.Doc += "\n\n"
+		}
+		child.Doc += doc
+	}
+
+	// Build a fragment for the signal node. Source points to the SignalShorthand
+	// so that parent-fragment branch-ID lookup works correctly.
+	frag := &Fragment{
+		File:           file,
+		IsObject:       true,
+		ObjectPos:      d.Position,
+		EndPos:         d.EndPosition,
+		Doc:            doc,
+		Pragmas:        pt.findPragmas(pragmas, d.Position),
+		DefinitionDocs: make(map[parser.Definition]string),
+		IsConditional:  conditional,
+		Source:         d,
+	}
+
+	// Synthetic DataSource field — added to both frag.Definitions and child.Fields.
+	dsVal := &parser.ReferenceValue{Position: d.Position, Value: d.DataSource}
+	dsField := &parser.Field{Position: d.Position, Name: "DataSource", Value: dsVal}
+	frag.Definitions = append(frag.Definitions, dsField)
+	frag.DefinitionDocs[dsField] = ""
+	pt.extractFieldMetadata(child, dsField)
+	child.Fields["DataSource"] = append(child.Fields["DataSource"], EvaluatedField{Raw: dsField, Value: dsVal, File: file})
+
+	// When "as <NAME>" was used, inject Alias = SignalName.
+	if d.AliasName != "" {
+		aliasVal := &parser.StringValue{Position: d.Position, Value: d.SignalName, Quoted: false}
+		aliasField := &parser.Field{Position: d.Position, Name: "Alias", Value: aliasVal}
+		frag.Definitions = append(frag.Definitions, aliasField)
+		frag.DefinitionDocs[aliasField] = ""
+		pt.extractFieldMetadata(child, aliasField)
+		child.Fields["Alias"] = append(child.Fields["Alias"], EvaluatedField{Raw: aliasField, Value: aliasVal, File: file})
+	}
+
+	// Synthetic Type field (when specified).
+	if d.Type != "" {
+		typeVal := &parser.ReferenceValue{Position: d.Position, Value: d.Type}
+		typeField := &parser.Field{Position: d.Position, Name: "Type", Value: typeVal}
+		frag.Definitions = append(frag.Definitions, typeField)
+		frag.DefinitionDocs[typeField] = ""
+		pt.extractFieldMetadata(child, typeField)
+		child.Fields["Type"] = append(child.Fields["Type"], EvaluatedField{Raw: typeField, Value: typeVal, File: file})
+	}
+
+	// Synthetic NumberOfElements field (when specified).
+	if d.NumElements != nil {
+		numField := &parser.Field{Position: d.Position, Name: "NumberOfElements", Value: d.NumElements}
+		frag.Definitions = append(frag.Definitions, numField)
+		frag.DefinitionDocs[numField] = ""
+		pt.extractFieldMetadata(child, numField)
+		child.Fields["NumberOfElements"] = append(child.Fields["NumberOfElements"], EvaluatedField{Raw: numField, Value: d.NumElements, File: file})
+	}
+
+	// Extra fields from "= { … }".
+	if d.HasExtraFields {
+		for _, def := range d.ExtraFields.Definitions {
+			switch f := def.(type) {
+			case *parser.Field:
+				frag.Definitions = append(frag.Definitions, f)
+				frag.DefinitionDocs[f] = pt.findDoc(comments, f.Position)
+				pt.extractFieldMetadata(child, f)
+				child.Fields[f.Name] = append(child.Fields[f.Name], EvaluatedField{Raw: f, Value: f.Value, File: file})
+			}
+		}
+	}
+
+	child.Fragments = append(child.Fragments, frag)
+}
+
 func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, defs []parser.Definition, comments []parser.Comment, pragmas []parser.Pragma, conditional bool, branchID string) {
 	if conditional && len(defs) > 0 {
 		frag := &Fragment{
@@ -774,6 +883,8 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 		subPragmas := pt.findPragmas(pragmas, def.Pos())
 
 		switch d := def.(type) {
+		case *parser.SignalShorthand:
+			pt.addSignalShorthandChild(node, file, d, doc, comments, pragmas, conditional)
 		case *parser.Field:
 			pt.IndexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)

@@ -120,7 +120,12 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 	case TokenIdentifier:
 		p.next()
 		name := tok.Value
-		
+
+		// Signal shorthand: DS::Signal [: Type[Dim]] [= { … }]
+		if strings.Contains(name, "::") {
+			return p.parseSignalShorthand(tok, name)
+		}
+
 		// If followed by =, it's a definition
 		if p.peek().Type == TokenEqual {
 			p.next() // consume =
@@ -226,6 +231,81 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			Value:    val,
 		}, true
 	}
+}
+
+// parseSignalShorthand parses:
+//
+//	DS::Signal [: Type[Dim]] [= { … }]
+//
+// The caller has already consumed the identifier token (name = "DS::Signal").
+func (p *Parser) parseSignalShorthand(startTok Token, name string) (Definition, bool) {
+	parts := strings.SplitN(name, "::", 2)
+	sh := &SignalShorthand{
+		Position:    startTok.Position,
+		EndPosition: startTok.Position,
+		DataSource:  strings.TrimSpace(parts[0]),
+		SignalName:  strings.TrimSpace(parts[1]),
+	}
+
+	// Optional ": Type [Dim]"
+	if p.peek().Type == TokenColon {
+		p.next() // consume ':'
+		typeTok := p.peek()
+		if typeTok.Type != TokenIdentifier {
+			p.addError(typeTok.Position, "expected type name after ':'")
+			return nil, false
+		}
+		p.next()
+		sh.Type = typeTok.Value
+		sh.EndPosition = typeTok.Position
+
+		// Optional "[NumElements]"
+		if p.peek().Type == TokenLBracket {
+			p.next() // consume '['
+			dim, ok := p.parseValue()
+			if !ok {
+				return nil, false
+			}
+			sh.NumElements = dim
+			sh.EndPosition = dim.End()
+			if p.peek().Type != TokenRBracket {
+				p.addError(p.peek().Position, "expected ']'")
+				return nil, false
+			}
+			p.next() // consume ']'
+		}
+	}
+
+	// Optional "as <NAME>"
+	if p.peek().Type == TokenAs {
+		p.next() // consume 'as'
+		nameTok := p.peek()
+		if nameTok.Type != TokenIdentifier {
+			p.addError(nameTok.Position, "expected name after 'as'")
+			return nil, false
+		}
+		p.next()
+		sh.AliasName = nameTok.Value
+		sh.EndPosition = nameTok.Position
+	}
+
+	// Optional "= { … }"
+	if p.peek().Type == TokenEqual {
+		p.next() // consume '='
+		if p.peek().Type != TokenLBrace {
+			p.addError(p.peek().Position, "expected '{' after '='")
+			return nil, false
+		}
+		sub, ok := p.parseSubnode()
+		if !ok {
+			return nil, false
+		}
+		sh.ExtraFields = sub
+		sh.HasExtraFields = true
+		sh.EndPosition = sub.EndPosition
+	}
+
+	return sh, true
 }
 
 func (p *Parser) parseIf(startTok Token) (Definition, bool) {

@@ -79,6 +79,30 @@ func (f *Formatter) formatConfig(config *parser.Configuration) {
 func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 	indentStr := strings.Repeat("  ", indent)
 	switch d := def.(type) {
+	case *parser.SignalShorthand:
+		// Emit the shorthand syntax: DS::Signal [: Type[Dim]] [as Name] [= { … }]
+		fmt.Fprintf(f.writer, "%s%s::%s", indentStr, d.DataSource, d.SignalName)
+		if d.Type != "" {
+			fmt.Fprintf(f.writer, ": %s", d.Type)
+			if d.NumElements != nil {
+				fmt.Fprint(f.writer, "[")
+				f.formatValue(d.NumElements, indent)
+				fmt.Fprint(f.writer, "]")
+			}
+		}
+		if d.AliasName != "" {
+			fmt.Fprintf(f.writer, " as %s", d.AliasName)
+		}
+		if d.HasExtraFields {
+			fmt.Fprint(f.writer, " = {")
+			if f.hasTrailingComment(d.Position.Line) {
+				fmt.Fprintf(f.writer, " %s", f.popComment())
+			}
+			fmt.Fprintln(f.writer)
+			f.formatSubnode(d.ExtraFields, indent+1)
+			fmt.Fprintf(f.writer, "%s}", indentStr)
+		}
+		return d.EndPosition.Line
 	case *parser.Field:
 		fmt.Fprintf(f.writer, "%s%s = ", indentStr, d.Name)
 		endLine := f.formatValue(d.Value, indent)
