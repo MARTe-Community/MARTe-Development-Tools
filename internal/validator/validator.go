@@ -36,6 +36,7 @@ type Validator struct {
 	Schema          *schema.Schema
 	Overrides       map[string]parser.Value
 	Variables       map[string]parser.Value
+	RawOverrides    map[string]string
 	mu              sync.Mutex
 	ActiveNodes     map[*index.ProjectNode]bool
 	ActiveFragments map[*index.Fragment]bool
@@ -48,6 +49,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		Schema:          schema.LoadFullSchema(projectRoot),
 		Overrides:       make(map[string]parser.Value),
 		Variables:       make(map[string]parser.Value),
+		RawOverrides:    overrides,
 		ActiveNodes:     make(map[*index.ProjectNode]bool),
 		ActiveFragments: make(map[*index.Fragment]bool),
 	}
@@ -68,6 +70,19 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		for k, varInfo := range n.Variables {
 			if _, ok := v.Variables[k]; !ok || varInfo.Def.IsConst {
 				v.Variables[k] = varInfo.Def.DefaultValue
+			}
+
+			if valStr, ok := overrides[k]; ok {
+				if shouldAutoQuote(valStr, varInfo.Def.TypeExpr) {
+					p := parser.NewParser("Temp = \"" + valStr + "\"")
+					cfg, _ := p.Parse()
+					if cfg != nil && len(cfg.Definitions) > 0 {
+						if f, ok := cfg.Definitions[0].(*parser.Field); ok {
+							v.Overrides[k] = f.Value
+							v.Variables[k] = f.Value
+						}
+					}
+				}
 			}
 		}
 	})
@@ -239,6 +254,19 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 			for k, varInfo := range n.Variables {
 				if _, ok := v.Variables[k]; !ok || varInfo.Def.IsConst {
 					v.Variables[k] = varInfo.Def.DefaultValue
+				}
+
+				if valStr, ok := v.RawOverrides[k]; ok {
+					if shouldAutoQuote(valStr, varInfo.Def.TypeExpr) {
+						p := parser.NewParser("Temp = \"" + valStr + "\"")
+						cfg, _ := p.Parse()
+						if cfg != nil && len(cfg.Definitions) > 0 {
+							if f, ok := cfg.Definitions[0].(*parser.Field); ok {
+								v.Overrides[k] = f.Value
+								v.Variables[k] = f.Value
+							}
+						}
+					}
 				}
 			}
 		})
@@ -764,6 +792,22 @@ func (v *Validator) report(node *index.ProjectNode, tag string, level Diagnostic
 		Position: pos,
 		File:     file,
 	})
+}
+
+func shouldAutoQuote(valStr string, typeExpr string) bool {
+	if strings.HasPrefix(valStr, "\"") && strings.HasSuffix(valStr, "\"") {
+		return false
+	}
+	if strings.Contains(typeExpr, "string") {
+		return true
+	}
+	if strings.Contains(typeExpr, "|") && strings.Contains(typeExpr, "\"") {
+		return true
+	}
+	if strings.HasPrefix(typeExpr, "\"") && strings.HasSuffix(typeExpr, "\"") {
+		return true
+	}
+	return false
 }
 
 func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {

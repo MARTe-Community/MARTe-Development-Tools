@@ -192,3 +192,28 @@ func TestCheckWithSchema(t *testing.T) {
 
 	t.Logf("Diagnostics: %v", result.Diagnostics)
 }
+
+func TestCheckWithAutoQuote(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var NAME: string = "default"
+
++Config = {
+    Class = "Test"
+    Name = @NAME
+}
+`)
+
+	// Run check with unquoted value. 
+	// If auto-quote works, it should not report "Unknown reference John"
+	result := tf.RunCheck("-vNAME=John", "config.marte")
+
+	if len(result.Diagnostics) > 0 {
+		t.Fatalf("Expected no diagnostics, got: %v", result.Diagnostics)
+	}
+}

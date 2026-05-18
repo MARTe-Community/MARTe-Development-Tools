@@ -688,6 +688,9 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				}
 			}
 			child := node.Children[norm]
+			if child.IsConditional && !conditional {
+				child.IsConditional = false
+			}
 			if child.RealName == norm && objName != norm {
 				child.RealName = objName
 			}
@@ -704,7 +707,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				child.Pragmas = append(child.Pragmas, subPragmas...)
 			}
 
-			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas, false)
+			pt.addObjectFragment(child, file, d, subDoc, comments, pragmas, conditional)
 		case *parser.IfBlock:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.IndexValue(file, d.Condition)

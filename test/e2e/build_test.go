@@ -338,3 +338,362 @@ func TestBuildWithLoop(t *testing.T) {
 		t.Fatalf("Expected output to contain Signal3")
 	}
 }
+
+func TestBuildWithConditionalFalse(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var ENABLE_FEATURE: bool = false
+
++Config = {
+    Class = "Test"
+    #if @ENABLE_FEATURE
+    Feature = {
+        Enabled = true
+    }
+    #end
+}
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Feature") {
+		t.Fatalf("Expected output to NOT contain Feature (condition is false)")
+	}
+}
+
+func TestBuildWithConditionalElse(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var ENABLE_FEATURE: bool = false
+
++Config = {
+    Class = "Test"
+    #if @ENABLE_FEATURE
+    ThenBranch = {
+        Enabled = true
+    }
+    #else
+    ElseBranch = {
+        Enabled = true
+    }
+    #end
+}
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "ThenBranch") {
+		t.Fatalf("Expected output to NOT contain ThenBranch (condition is false)")
+	}
+	if !strings.Contains(result.Output, "ElseBranch") {
+		t.Fatalf("Expected output to contain ElseBranch")
+	}
+}
+
+func TestBuildWithConditionalMultiFile(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("base.marte", `
+#package test
+//! allow(unknown_class)
+#var ENABLE: bool = false
++Root = {
+    Class = "RootClass"
+}
+`)
+
+	tf.CreateFile("conditional.marte", `
+#package test
+//! allow(unknown_class)
++Root = {
+    #if @ENABLE
+    +Feature = { 
+        Class = "FeatureClass" 
+    }
+    #end
+}
+`)
+
+	result := tf.RunBuild("base.marte", "conditional.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Feature") {
+		t.Fatalf("Expected output to NOT contain Feature (condition is false)")
+	}
+}
+
+func TestBuildWithTopLevelConditional(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+#package test
+//! allow(unknown_class)
+#var ENABLE: bool = false
+
+#if @ENABLE
++ConditionalRoot = {
+    Class = "RootClass"
+}
+#end
+
++AlwaysRoot = {
+    Class = "AlwaysClass"
+}
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "ConditionalRoot") {
+		t.Fatalf("Expected output to NOT contain ConditionalRoot (condition is false)")
+	}
+	if !strings.Contains(result.Output, "AlwaysRoot") {
+		t.Fatalf("Expected output to contain AlwaysRoot")
+	}
+}
+
+func TestBuildWithComplexConditional(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+#package test
+//! allow(unknown_class)
+#var X: int = 1
+#var Y: int = 2
+
++Root = {
+    Class = "RootClass"
+    #if (@X + @Y > 5)
+    +Object = { Class = "ObjectClass" }
+    #end
+}
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Object") {
+		t.Fatalf("Expected output to NOT contain Object (1 + 2 > 5 is false)")
+	}
+}
+
+func TestBuildWithIntConditional(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+#package test
+//! allow(unknown_class)
+#var ENABLE: int = 0
+
++Root = {
+    Class = "RootClass"
+    #if @ENABLE
+    +Object = { Class = "ObjectClass" }
+    #end
+}
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Object") {
+		t.Fatalf("Expected output to NOT contain Object (@ENABLE is 0)")
+	}
+}
+
+func TestBuildWithNestedConditionalActiveParent(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+#package test
+//! allow(unknown_class)
+#var ENABLE: bool = false
+
++Parent = {
+    Class = "ParentClass"
+}
+
+#if @ENABLE
++Parent = {
+    +Child = {
+        Class = "ChildClass"
+    }
+}
+#end
+`)
+
+	result := tf.RunBuild("config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Child") {
+		t.Fatalf("Expected output to NOT contain Child (condition is false)")
+	}
+}
+
+func TestBuildWithVariableAutoQuote(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var NAME: string = "default"
+
++Config = {
+    Class = "Test"
+    Name = @NAME
+}
+`)
+
+	// Override with unquoted value
+	result := tf.RunBuild("-vNAME=John", "config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if !strings.Contains(result.Output, "Name = \"John\"") {
+		t.Fatalf("Expected output to contain Name = \"John\", got:\n%s", result.Output)
+	}
+}
+
+func TestBuildWithEnumAutoQuote(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var STATE: "IDLE" | "RUNNING" = "IDLE"
+
++Config = {
+    Class = "Test"
+    State = @STATE
+}
+`)
+
+	// Override with unquoted value
+	result := tf.RunBuild("-vSTATE=RUNNING", "config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if !strings.Contains(result.Output, "State = \"RUNNING\"") {
+		t.Fatalf("Expected output to contain State = \"RUNNING\", got:\n%s", result.Output)
+	}
+}
+
+func TestBuildWithVariableNoAutoQuote(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var COUNT: int = 5
+#var ENABLED: bool = true
+
++Config = {
+    Class = "Test"
+    Count = @COUNT
+    Enabled = @ENABLED
+}
+`)
+
+	// Override with values that shouldn't be quoted
+	result := tf.RunBuild("-vCOUNT=99", "-vENABLED=false", "config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if !strings.Contains(result.Output, "Count = 99") {
+		t.Fatalf("Expected output to contain Count = 99, got:\n%s", result.Output)
+	}
+	if !strings.Contains(result.Output, "Enabled = false") {
+		t.Fatalf("Expected output to contain Enabled = false, got:\n%s", result.Output)
+	}
+}
+
+func TestBuildWithExplicitQuoteNoDoubleQuote(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	tf.CreateFile("config.marte", `
+//! allow(unknown_class)
+#var NAME: string = "default"
+
++Config = {
+    Class = "Test"
+    Name = @NAME
+}
+`)
+
+	// Override with already quoted value
+	result := tf.RunBuild("-vNAME=\"John\"", "config.marte")
+
+	if result.ExitCode != 0 {
+		t.Fatalf("Build failed: %s", result.Stderr)
+	}
+
+	if strings.Contains(result.Output, "Name = \"\"John\"\"") {
+		t.Fatalf("Expected output to NOT contain double quotes, got:\n%s", result.Output)
+	}
+	if !strings.Contains(result.Output, "Name = \"John\"") {
+		t.Fatalf("Expected output to contain Name = \"John\", got:\n%s", result.Output)
+	}
+}

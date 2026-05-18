@@ -120,6 +120,8 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range node.Fragments {
 						if f.IsConditional && f.BranchID == id+":then" {
 							b.activeFragments[f] = true
+						} else {
+							b.activeFragments[f] = false
 						}
 					}
 					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
@@ -225,7 +227,7 @@ func (b *Builder) Build(f *os.File) error {
 		for k, v := range b.variables {
 			evalCtx.Variables[k] = v
 		}
-		
+
 		// Refresh variables from tree (might have new ones from newly activated fragments)
 		tree.Walk(func(n *index.ProjectNode) {
 			for k, varInfo := range n.Variables {
@@ -366,6 +368,9 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if valStr, ok := b.Overrides[vdef.Name]; ok {
 						if !vdef.IsConst {
+							if shouldAutoQuote(valStr, vdef.TypeExpr) {
+								valStr = "\"" + valStr + "\""
+							}
 							p := parser.NewParser("Temp = " + valStr)
 							cfg, _ := p.Parse()
 							if len(cfg.Definitions) > 0 {
@@ -386,6 +391,22 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 		}
 	}
 	tree.Walk(processNode)
+}
+
+func shouldAutoQuote(valStr string, typeExpr string) bool {
+	if strings.HasPrefix(valStr, "\"") && strings.HasSuffix(valStr, "\"") {
+		return false
+	}
+	if strings.Contains(typeExpr, "string") {
+		return true
+	}
+	if strings.Contains(typeExpr, "|") && strings.Contains(typeExpr, "\"") {
+		return true
+	}
+	if strings.HasPrefix(typeExpr, "\"") && strings.HasSuffix(typeExpr, "\"") {
+		return true
+	}
+	return false
 }
 
 type EvaluatedDefinition struct {
@@ -436,7 +457,7 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.EvaluatedDefinition, indent int, parentNode *index.ProjectNode, writtenChildren map[string]bool, defaultCtx *index.EvaluationContext) {
 	var fields []EvaluatedDefinition
 	var objects []EvaluatedDefinition
-	
+
 	var shorthands []EvaluatedDefinition
 	for _, ed := range evaluated {
 		switch d := ed.Def.(type) {
