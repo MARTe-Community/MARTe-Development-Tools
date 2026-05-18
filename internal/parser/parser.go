@@ -632,6 +632,10 @@ func (p *Parser) isSubnodeLookahead() bool {
 	}
 
 	if t1.Type == TokenIdentifier {
+		// Signal shorthand (DS::Signal ...) is always a definition.
+		if strings.Contains(t1.Value, "::") {
+			return true
+		}
 		// Identifier inside.
 		// If followed by '=', it's a definition -> Subnode.
 		t2 := p.peekN(2)

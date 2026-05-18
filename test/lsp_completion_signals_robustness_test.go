@@ -60,7 +60,7 @@ package schema
 	found := false
 	if listIn != nil {
 		for _, item := range listIn.Items {
-			if item.Label == "DS:Sig" {
+			if item.Label == "DS::Sig" {
 				found = true
 			}
 		}
@@ -78,7 +78,7 @@ package schema
 	found = false
 	if listOut != nil {
 		for _, item := range listOut.Items {
-			if item.Label == "DS:Sig" {
+			if item.Label == "DS::Sig" {
 				found = true
 			}
 		}

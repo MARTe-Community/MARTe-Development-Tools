@@ -74,17 +74,14 @@ package schema
 	foundIn := false
 	foundOut := false
 	for _, item := range listIn.Items {
-		if item.Label == "InDS:InSig" {
+		if item.Label == "InDS::InSig" {
 			foundIn = true
-			// Normalize spaces for check
-			insert := strings.ReplaceAll(item.InsertText, " ", "")
-			expected := "InSig={DataSource=InDS}"
-			if !strings.Contains(insert, expected) && !strings.Contains(item.InsertText, "InSig = {") {
-				// Snippet might differ slightly, but should contain essentials
+			// InsertText should be shorthand format: DS::Signal or DS::Signal: Type
+			if !strings.HasPrefix(item.InsertText, "InDS::InSig") {
 				t.Errorf("InsertText mismatch: %s", item.InsertText)
 			}
 		}
-		if item.Label == "OutDS:OutSig" {
+		if item.Label == "OutDS::OutSig" {
 			foundOut = true
 		}
 	}
@@ -110,10 +107,10 @@ package schema
 	foundIn = false
 	foundOut = false
 	for _, item := range listOut.Items {
-		if item.Label == "InDS:InSig" {
+		if item.Label == "InDS::InSig" {
 			foundIn = true
 		}
-		if item.Label == "OutDS:OutSig" {
+		if item.Label == "OutDS::OutSig" {
 			foundOut = true
 		}
 	}

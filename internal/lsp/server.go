@@ -1166,6 +1166,16 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 		return nil
 	}
 
+	// DS:: shorthand completion: triggered when user types "DSName::" or "DSName::partial"
+	shorthandRe := regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9_]*)::([a-zA-Z0-9_]*)$`)
+	if matches := shorthandRe.FindStringSubmatch(prefix); matches != nil {
+		dsName := matches[1]
+		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		if result := suggestSignalsForDS(tree, dsName, container); result != nil {
+			return result
+		}
+	}
+
 	// Case 2: Typing a key inside an object
 	container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
 	if container != nil {
@@ -1237,15 +1247,18 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 			dsName := node.Name
 			sigName := sig.Name
 
-			label := fmt.Sprintf("%s:%s", dsName, sigName)
-			insertText := fmt.Sprintf("%s = {\n DataSource = %s \n}", sigName, dsName)
+			label := fmt.Sprintf("%s::%s", dsName, sigName)
+			insertText := label
+			if ts := signalTypeString(sig); ts != "" {
+				insertText = fmt.Sprintf("%s: %s", label, ts)
+			}
 
 			items = append(items, CompletionItem{
 				Label:            label,
 				Kind:             6, // Variable
-				Detail:           "Signal from " + dsName,
+				Detail:           fmt.Sprintf("Signal from %s", dsName),
 				InsertText:       insertText,
-				InsertTextFormat: 2, // Snippet
+				InsertTextFormat: 1,
 			})
 		}
 	}
@@ -1262,6 +1275,77 @@ func suggestGAMSignals(container *index.ProjectNode, direction string) *Completi
 		return &CompletionList{Items: items}
 	}
 	return nil
+}
+
+// signalTypeString returns "Type" or "Type[N]" (N > 1) for a signal node,
+// suitable for use in shorthand insertText.
+func signalTypeString(sig *index.ProjectNode) string {
+	typ := sig.Metadata["Type"]
+	if typ == "" {
+		return ""
+	}
+	n, _ := strconv.ParseInt(sig.Metadata["NumberOfElements"], 10, 64)
+	if n > 1 {
+		return fmt.Sprintf("%s[%d]", typ, n)
+	}
+	return typ
+}
+
+// suggestSignalsForDS returns shorthand completion items for all signals defined
+// in the DataSource named dsName. It is triggered when the user types "DSName::".
+func suggestSignalsForDS(tree *index.ProjectTree, dsName string, context *index.ProjectNode) *CompletionList {
+	isDS := func(n *index.ProjectNode) bool { return tree.IsDataSource(n) }
+
+	var dsNode *index.ProjectNode
+	if context != nil {
+		dsNode = tree.ResolveName(context, dsName, isDS)
+	}
+	if dsNode == nil {
+		// Fall back to a global walk.
+		norm := index.NormalizeName(dsName)
+		tree.Walk(func(n *index.ProjectNode) {
+			if dsNode == nil && n.Name == norm && tree.IsDataSource(n) {
+				dsNode = n
+			}
+		})
+	}
+	if dsNode == nil {
+		return nil
+	}
+
+	signalsContainer := dsNode.Children["Signals"]
+	if signalsContainer == nil {
+		return nil
+	}
+
+	var items []CompletionItem
+	for _, sig := range signalsContainer.Children {
+		sigName := sig.Name
+
+		label := fmt.Sprintf("%s::%s", dsName, sigName)
+		insertText := label
+		if ts := signalTypeString(sig); ts != "" {
+			insertText = fmt.Sprintf("%s: %s", label, ts)
+		}
+
+		detail := signalTypeString(sig)
+		if detail == "" {
+			detail = "Signal"
+		}
+
+		items = append(items, CompletionItem{
+			Label:            label,
+			Kind:             5, // Field
+			Detail:           detail,
+			InsertText:       insertText,
+			InsertTextFormat: 1,
+		})
+	}
+
+	if len(items) == 0 {
+		return nil
+	}
+	return &CompletionList{Items: items}
 }
 
 func suggestClasses() *CompletionList {
@@ -2999,30 +3083,71 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 
 			// Signal Name Hint (::TYPE[SIZE])
 			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
-				typ := getEvaluatedMetadata(tree, node, "Type", nil)
-
-				if typ == "" && node.Target != nil {
-					typ = getEvaluatedMetadata(tree, node.Target, "Type", nil)
-				}
-
-				if typ != "" {
-					elems, _, _ := calculateSignalElements(tree, node)
-					label := fmt.Sprintf("::%s[%d]", typ, elems)
-
+				if sh, ok := frag.Source.(*parser.SignalShorthand); ok {
+					// Shorthand hint: single end-of-line hint combining DS class and
+					// resolved type (shown only when type is absent from the shorthand).
 					pos := frag.ObjectPos
-					addHint(InlayHint{
-						Position: Position{Line: pos.Line - 1, Character: pos.Column - 1 + len(node.RealName)},
-						Label:    label,
-						Kind:     2, // Type
-					})
+
+					var cls string
+					dsNode := tree.ResolveName(node, sh.DataSource, isDataSource)
+					if dsNode != nil {
+						cls = getEvaluatedMetadata(tree, dsNode, "Class", node)
+						if idx := strings.LastIndex(cls, "::"); idx != -1 {
+							cls = cls[idx+2:]
+						}
+					}
+
+					var typeLabel string
+					if sh.Type == "" {
+						typ := getEvaluatedMetadata(tree, node, "Type", nil)
+						if typ == "" && node.Target != nil {
+							typ = getEvaluatedMetadata(tree, node.Target, "Type", nil)
+						}
+						if typ != "" {
+							elems, _, _ := calculateSignalElements(tree, node)
+							typeLabel = fmt.Sprintf(": %s[%d]", typ, elems)
+						}
+					}
+
+					label := cls + typeLabel
+					if label != "" {
+						// 9999 anchors the hint to the end of the line in all LSP clients.
+						addHint(InlayHint{
+							Position:    Position{Line: pos.Line - 1, Character: 9999},
+							Label:       "  // " + label,
+							Kind:        1,
+							PaddingLeft: true,
+						})
+					}
+				} else {
+					typ := getEvaluatedMetadata(tree, node, "Type", nil)
+
+					if typ == "" && node.Target != nil {
+						typ = getEvaluatedMetadata(tree, node.Target, "Type", nil)
+					}
+
+					if typ != "" {
+						elems, _, _ := calculateSignalElements(tree, node)
+						label := fmt.Sprintf("::%s[%d]", typ, elems)
+
+						pos := frag.ObjectPos
+						addHint(InlayHint{
+							Position: Position{Line: pos.Line - 1, Character: pos.Column - 1 + len(node.RealName)},
+							Label:    label,
+							Kind:     2, // Type
+						})
+					}
 				}
 			}
 
 			// Field-based hints (DataSource class and Expression evaluation)
 			for _, def := range frag.Definitions {
 				if f, ok := def.(*parser.Field); ok {
-					// DataSource Class Hint
+					// DataSource Class Hint — skip for shorthand nodes (handled above)
 					if f.Name == "DataSource" && (node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals")) {
+						if _, isShorthand := frag.Source.(*parser.SignalShorthand); isShorthand {
+							continue
+						}
 						var dsName string
 						switch v := f.Value.(type) {
 						case *parser.StringValue:

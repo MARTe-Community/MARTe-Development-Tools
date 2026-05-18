@@ -801,16 +801,23 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 
 	// Build a fragment for the signal node. Source points to the SignalShorthand
 	// so that parent-fragment branch-ID lookup works correctly.
+	fragPragmas := pt.findPragmas(pragmas, d.Position)
 	frag := &Fragment{
 		File:           file,
 		IsObject:       true,
 		ObjectPos:      d.Position,
 		EndPos:         d.EndPosition,
 		Doc:            doc,
-		Pragmas:        pt.findPragmas(pragmas, d.Position),
+		Pragmas:        fragPragmas,
 		DefinitionDocs: make(map[parser.Definition]string),
 		IsConditional:  conditional,
 		Source:         d,
+	}
+	// Propagate pragmas directly to the node (mirrors the ObjectNode child path in
+	// populateNode/addObjectFragment). ResolveFields only evaluates field values;
+	// node.Pragmas is populated here during initial indexing.
+	if len(fragPragmas) > 0 {
+		child.Pragmas = append(child.Pragmas, fragPragmas...)
 	}
 
 	// Synthetic DataSource field — added to both frag.Definitions and child.Fields.
