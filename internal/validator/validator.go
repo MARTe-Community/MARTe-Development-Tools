@@ -61,7 +61,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
 				v.Overrides[name] = f.Value
 				v.Variables[name] = f.Value
-			}
+							}
 		}
 	}
 
@@ -73,7 +73,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 			}
 
 			if valStr, ok := overrides[k]; ok {
-				if shouldAutoQuote(valStr, varInfo.Def.TypeExpr) {
+				if shouldAutoQuoteWithDef(valStr, varInfo.Def) {
 					p := parser.NewParser("Temp = \"" + valStr + "\"")
 					cfg, _ := p.Parse()
 					if cfg != nil && len(cfg.Definitions) > 0 {
@@ -257,7 +257,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 				}
 
 				if valStr, ok := v.RawOverrides[k]; ok {
-					if shouldAutoQuote(valStr, varInfo.Def.TypeExpr) {
+					if shouldAutoQuoteWithDef(valStr, varInfo.Def) {
 						p := parser.NewParser("Temp = \"" + valStr + "\"")
 						cfg, _ := p.Parse()
 						if cfg != nil && len(cfg.Definitions) > 0 {
@@ -794,11 +794,12 @@ func (v *Validator) report(node *index.ProjectNode, tag string, level Diagnostic
 	})
 }
 
-func shouldAutoQuote(valStr string, typeExpr string) bool {
+func shouldAutoQuoteWithDef(valStr string, def *parser.VariableDefinition) bool {
 	if strings.HasPrefix(valStr, "\"") && strings.HasSuffix(valStr, "\"") {
 		return false
 	}
-	if strings.Contains(typeExpr, "string") {
+	typeExpr := def.TypeExpr
+	if strings.Contains(typeExpr, "string") || strings.Contains(typeExpr, "char8") {
 		return true
 	}
 	if strings.Contains(typeExpr, "|") && strings.Contains(typeExpr, "\"") {
@@ -806,6 +807,12 @@ func shouldAutoQuote(valStr string, typeExpr string) bool {
 	}
 	if strings.HasPrefix(typeExpr, "\"") && strings.HasSuffix(typeExpr, "\"") {
 		return true
+	}
+	// Check default value
+	if def.DefaultValue != nil {
+		if _, ok := def.DefaultValue.(*parser.StringValue); ok {
+			return true
+		}
 	}
 	return false
 }
@@ -1252,18 +1259,46 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			}
 		}
 
-		// Property checks
-		v.checkSignalProperty(signalNode, targetNode, "Type")
-		
-		// If Ranges or Samples are present, NumberOfElements/Dimensions might differ legitimately (local override/modification)
-		hasModifiers := false
-		if r, ok := fields["Ranges"]; ok && len(r) > 0 { hasModifiers = true }
-		if s, ok := fields["Samples"]; ok && len(s) > 0 { hasModifiers = true }
+	// Property checks
+	v.checkSignalProperty(signalNode, targetNode, "Type")
 
-		if !hasModifiers {
-			v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
-			v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+	// Validate Ranges
+	if rangeFields, ok := fields["Ranges"]; ok && len(rangeFields) > 0 {
+		val := rangeFields[0].Value
+		if arr, ok := val.(*parser.ArrayValue); ok {
+			for _, elem := range arr.Elements {
+				if inner, ok := elem.(*parser.ArrayValue); ok {
+					if len(inner.Elements) != 2 {
+						v.report(signalNode, "invalid_ranges_format", LevelError,
+							fmt.Sprintf("Ranges element must be a 2D vector [start, end], found %d elements", len(inner.Elements)),
+							inner.Position, rangeFields[0].File)
+					}
+				} else {
+					v.report(signalNode, "invalid_ranges_format", LevelError,
+						"Ranges property must be a 2D vector (array of arrays), e.g. {{0, 0}}",
+						elem.Pos(), rangeFields[0].File)
+				}
+			}
+		} else {
+			v.report(signalNode, "invalid_ranges_format", LevelError,
+				"Ranges property must be an array, e.g. {{0, 0}}",
+				val.Pos(), rangeFields[0].File)
 		}
+	}
+	
+	// If Ranges or Samples are present, NumberOfElements/Dimensions might differ legitimately (local override/modification)
+	hasModifiers := false
+	if r, ok := fields["Ranges"]; ok && len(r) > 0 {
+		hasModifiers = true
+	}
+	if s, ok := fields["Samples"]; ok && len(s) > 0 {
+		hasModifiers = true
+	}
+
+	if !hasModifiers {
+		v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
+		v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+	}
 
 		// Check Type validity if present
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {

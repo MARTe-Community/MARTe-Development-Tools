@@ -18,6 +18,12 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
 
+var (
+	Version = "v0.1.0"
+	Commit  = "none"
+	Date    = "unknown"
+)
+
 const helpGeneral = `mdt — MARTe2 Developer Tools
 
 Usage:
@@ -30,8 +36,14 @@ Commands:
   fmt     Format .marte files in-place
   init    Create a new MARTe2 project scaffold
   graph   Launch the interactive signal-flow graph viewer
+  version Show mdt version and build information
 
 Run 'mdt <command> --help' for per-command usage.
+`
+
+const helpVersion = `Usage: mdt version
+
+Show mdt version, commit hash, and build date.
 `
 
 const helpLSP = `Usage: mdt lsp [flags]
@@ -121,6 +133,8 @@ func printHelp(cmd string) {
 		fmt.Print(helpInit)
 	case "graph":
 		fmt.Print(helpGraph)
+	case "version":
+		fmt.Print(helpVersion)
 	default:
 		fmt.Print(helpGeneral)
 	}
@@ -183,6 +197,8 @@ func main() {
 			os.Exit(0)
 		}
 		runGraph(os.Args[2:])
+	case "version":
+		runVersion()
 	default:
 		logger.Printf("Unknown command: %s\n", command)
 		fmt.Print(helpGeneral)
@@ -549,4 +565,10 @@ fmt:
 	}
 
 	logger.Printf("Project '%s' initialized successfully.\n", projectName)
+}
+
+func runVersion() {
+	fmt.Printf("mdt %s\n", Version)
+	fmt.Printf("commit: %s\n", Commit)
+	fmt.Printf("build date: %s\n", Date)
 }

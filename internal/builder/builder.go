@@ -368,7 +368,9 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if valStr, ok := b.Overrides[vdef.Name]; ok {
 						if !vdef.IsConst {
-							if shouldAutoQuote(valStr, vdef.TypeExpr) {
+							// fmt.Printf("[DEBUG-BUILDER] Checking %s, type=%s, val=%s\n", vdef.Name, vdef.TypeExpr, valStr)
+							if shouldAutoQuoteWithDef(valStr, vdef) {
+								// fmt.Printf("[DEBUG-BUILDER] Auto-quoting %s\n", vdef.Name)
 								valStr = "\"" + valStr + "\""
 							}
 							p := parser.NewParser("Temp = " + valStr)
@@ -393,11 +395,12 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 	tree.Walk(processNode)
 }
 
-func shouldAutoQuote(valStr string, typeExpr string) bool {
+func shouldAutoQuoteWithDef(valStr string, def *parser.VariableDefinition) bool {
 	if strings.HasPrefix(valStr, "\"") && strings.HasSuffix(valStr, "\"") {
 		return false
 	}
-	if strings.Contains(typeExpr, "string") {
+	typeExpr := def.TypeExpr
+	if strings.Contains(typeExpr, "string") || strings.Contains(typeExpr, "char8") {
 		return true
 	}
 	if strings.Contains(typeExpr, "|") && strings.Contains(typeExpr, "\"") {
@@ -405,6 +408,12 @@ func shouldAutoQuote(valStr string, typeExpr string) bool {
 	}
 	if strings.HasPrefix(typeExpr, "\"") && strings.HasSuffix(typeExpr, "\"") {
 		return true
+	}
+	// Check default value
+	if def.DefaultValue != nil {
+		if _, ok := def.DefaultValue.(*parser.StringValue); ok {
+			return true
+		}
 	}
 	return false
 }

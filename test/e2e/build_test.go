@@ -585,6 +585,7 @@ func TestBuildWithVariableAutoQuote(t *testing.T) {
 	tf := framework.WrapT(t, ctx)
 
 	tf.CreateFile("config.marte", `
+#package test
 //! allow(unknown_class)
 #var NAME: string = "default"
 

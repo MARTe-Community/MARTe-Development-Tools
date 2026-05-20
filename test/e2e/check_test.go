@@ -213,7 +213,88 @@ func TestCheckWithAutoQuote(t *testing.T) {
 	// If auto-quote works, it should not report "Unknown reference John"
 	result := tf.RunCheck("-vNAME=John", "config.marte")
 
+	t.Logf("STDOUT: %s", result.Stdout)
+
 	if len(result.Diagnostics) > 0 {
 		t.Fatalf("Expected no diagnostics, got: %v", result.Diagnostics)
 	}
+}
+
+func TestCheckRangesFormat(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+
+	tf := framework.WrapT(t, ctx)
+
+	// Case 1: Valid Ranges {{0, 0}}
+	tf.CreateFile("valid_ranges.marte", `
+//! allow(unknown_class)
+//! allow(unused_gam)
++DS = {
+    Class = "DS"
+    Signals = {
+        Sig1 = { Type = uint32 }
+    }
+}
++GAM = {
+    Class = "GAM"
+    InputSignals = {
+        Sig1 = {
+            DataSource = DS
+            Ranges = {{0, 0}}
+        }
+    }
+}
+`)
+
+	result := tf.RunCheck("valid_ranges.marte")
+	framework.AssertNoErrors(tf, result)
+
+	// Case 2: Invalid Ranges {0, 0}
+	tf.CreateFile("invalid_ranges_1d.marte", `
+//! allow(unknown_class)
+//! allow(unused_gam)
++DS = {
+    Class = "DS"
+    Signals = {
+        Sig1 = { Type = uint32 }
+    }
+}
++GAM = {
+    Class = "GAM"
+    InputSignals = {
+        Sig1 = {
+            DataSource = DS
+            Ranges = {0, 0}
+        }
+    }
+}
+`)
+
+	result = tf.RunCheck("invalid_ranges_1d.marte")
+	framework.AssertErrors(tf, result, "Ranges")
+
+	// Case 3: Invalid Ranges {{0}} (not 2 elements)
+	tf.CreateFile("invalid_ranges_inner.marte", `
+//! allow(unknown_class)
+//! allow(unused_gam)
++DS = {
+    Class = "DS"
+    Signals = {
+        Sig1 = { Type = uint32 }
+    }
+}
++GAM = {
+    Class = "GAM"
+    InputSignals = {
+        Sig1 = {
+            DataSource = DS
+            Ranges = {{0}}
+        }
+    }
+}
+`)
+
+	result = tf.RunCheck("invalid_ranges_inner.marte")
+	framework.AssertErrors(tf, result, "Ranges")
 }
