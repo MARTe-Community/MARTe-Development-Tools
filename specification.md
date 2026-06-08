@@ -70,22 +70,22 @@ The LSP server should provide the following capabilities:
 
 - **File Extension**: `.marte`
 - **Project Structure**: Files can be distributed across sub-folders.
-- **Namespaces**: The `#package` macro defines the namespace for the file.
-  - **Single File Context**: If no `#package` is defined in a file, the LSP, build tool, and validator must consider **only** that file (no project-wide merging or referencing).
-  - **Semantic**: `#package PROJECT_NAME.SUB_URI` implies that:
+- **Namespaces**: The `package` macro (with optional `#` prefix: `#package`) defines the namespace for the file.
+  - **Single File Context**: If no `package` is defined in a file, the LSP, build tool, and validator must consider **only** that file (no project-wide merging or referencing).
+  - **Semantic**: `package PROJECT_NAME.SUB_URI` implies that:
     - `PROJECT_NAME` is a namespace identifier used to group files from the same project. It does **not** create a node in the configuration tree.
     - `SUB_URI` defines the path of nodes where the file's definitions are placed. All definitions within the file are treated as children/fields of the node defined by `SUB_URI`.
-  - **URI Symbols**: The symbols `+` and `$` used for object nodes are **not** written in the URI of the `#package` macro (e.g., use `PROJECT.NODE` even if the node is defined as `+NODE`).
+  - **URI Symbols**: The symbols `+` and `$` used for object nodes are **not** written in the URI of the `package` macro (e.g., use `PROJECT.NODE` even if the node is defined as `+NODE`).
 - **Build Process**:
   - The build tool merges all files sharing the same base namespace into a **single output configuration**.
-  - **Namespace Consistency**: The build tool must verify that all input files belong to the same project namespace (the first segment of the `#package` URI). If multiple project namespaces are detected, the build must fail with an error.
+  - **Namespace Consistency**: The build tool must verify that all input files belong to the same project namespace (the first segment of the `package` URI). If multiple project namespaces are detected, the build must fail with an error.
   - **Target**: The build output is written to standard output (`stdout`) by default. It can be written to a target file if the `-o` (or `--output`) argument is provided via CLI.
   - **Multi-File Definitions**: Nodes and objects can be defined across multiple files. The build tool, validator, and LSP must merge these definitions (including all fields and sub-nodes) from the entire project to create a unified view before processing or validating.
   - **Global References**: References to nodes, signals, or objects can point to definitions located in any file within the project. Support for dot-separated paths (e.g., `Node.SubNode`) is required.
   - **Merging Order**: For objects defined across multiple files, definitions are merged. The build tool must preserve the relative order of fields and sub-nodes as they appear in the source files, interleaving them correctly in the final output.
   - **Field Order**: Within a single file (and across merged files), the relative order of defined fields must be maintained in the output.
   - The LSP indexes only files belonging to the same project/namespace scope.
-- **Output**: The output format is the same as the input configuration but without the `#package` macro.
+- **Output**: The output format is the same as the input configuration but without the `package` macro.
 
 ## MARTe Configuration Language
 
@@ -114,13 +114,13 @@ The LSP server should provide the following capabilities:
 
 #### Extended grammar
 
-- `package` : `#package URI`
-- `variable`: `#var NAME: TYPE [= expression]`
-- `constant`: `#let NAME: TYPE = expression`
-- `if_block`: `#if expression configuration [#else configuration] #end`
-- `foreach_block`: `#foreach NAME in expression configuration #end`
-- `template_def`: `#template NAME "(" [param_list] ")" configuration #end`
-- `template_use`: `#use TEMPLATE_NAME INSTANCE_NAME "(" [arg_list] ")"`
+- `package` : `["#"] "package" URI`
+- `variable`: `["#"] "var" NAME ":" TYPE ["=" expression]`
+- `constant`: `["#"] "let" NAME ":" TYPE "=" expression`
+- `if_block`: `["#"] "if" expression configuration {"else" ["if" expression] configuration} ["else" configuration] ["#"] "end"`
+- `foreach_block`: `["#"] "foreach" NAME "in" expression configuration ["#"] "end"`
+- `template_def`: `["#"] "template" NAME "(" [param_list] ")" configuration ["#"] "end"`
+- `template_use`: `["#"] "use" TEMPLATE_NAME INSTANCE_NAME "(" [arg_list] ")"`
 - `param_list`: `param ["," param_list]`
 - `param`: `NAME ":" TYPE ["=" expression]`
 - `arg_list`: `arg ["," arg_list]`
@@ -135,12 +135,12 @@ The LSP server should provide the following capabilities:
 - **Nodes (`+` / `$`)**: The prefixes `+` and `$` indicate that the node represents an object.
   - **Constraint**: These nodes _must_ contain a field named `Class` within their subnode definition (across all files where the node is defined).
 - **Signals**: Signals are considered nodes but **not** objects. They do not require a `Class` field.
-- **Variables (`#var`)**: Define overrideable parameters. Can be overridden via CLI (`-vVAR=VAL`).
-- **Constants (`#let`)**: Define fixed parameters. **Cannot** be overridden externally. Must have an initial value.
-- **Conditional Blocks (`#if`)**: Code within the `#if` or `#else` blocks is conditionally processed during build and indexed by the LSP.
-- **Loops (`#foreach`)**: Iterates over an array value. The loop variable is locally scoped within the block.
-- **Templates (`#template`)**: Define reusable configuration blocks with parameters.
-- **Template Instantiation (`#use`)**: Instantiates a template with specific arguments. The `INSTANCE_NAME` is used as a local namespace for the template's output.
+- **Variables (`var`)**: Define overrideable parameters. Can be overridden via CLI (`-vVAR=VAL`). The optional `#` prefix (`#var`) is also supported.
+- **Constants (`let`)**: Define fixed parameters. **Cannot** be overridden externally. Must have an initial value. The optional `#` prefix (`#let`) is also supported.
+- **Conditional Blocks (`if`)**: Code within the `if`, `else if`, or `else` blocks is conditionally processed during build and indexed by the LSP. Supports chained `else if <condition>` branches. The optional `#` prefix (`#if`, `#else`, `#end`) is also supported.
+- **Loops (`foreach`)**: Iterates over an array value. The loop variable is locally scoped within the block. The optional `#` prefix (`#foreach`, `#end`) is also supported.
+- **Templates (`template`)**: Define reusable configuration blocks with parameters. The optional `#` prefix (`#template`, `#end`) is also supported.
+- **Template Instantiation (`use`)**: Instantiates a template with specific arguments. The `INSTANCE_NAME` is used as a local namespace for the template's output. The optional `#` prefix (`#use`) is also supported.
 - **Expressions**: Evaluated during build and displayed evaluated in LSP hover documentation. Supports dynamic node names via string concatenation and evaluation.
 - **Docstrings (`//#`)**: Associated with the following definition (Node, Field, Variable, Constant, or Template).
 - **Pragmas (`//!`)**: Used to suppress specific diagnostics. The developer can use these to explain why a rule is being ignored. Supported pragmas:
@@ -150,6 +150,7 @@ The LSP server should provide the following capabilities:
   - `//!cast(DEF_TYPE, CUR_TYPE): REASON` - Suppress "Type Inconsistency" errors if types match.
 - **Structure**: A configuration is composed by one or more definitions or macros.
 - **Strictness**: Any content that is not a valid comment (or pragma/docstring) or a valid definition/macro is **not allowed** and must generate a parsing error.
+- **Backward Compatibility**: The `#` prefix on directives (`#package`, `#var`, `#let`, `#if`, `#else`, `#end`, `#foreach`, `#template`, `#use`) remains fully supported. Both `var` and `#var` produce identical behavior.
 
 ### Core MARTe Classes
 

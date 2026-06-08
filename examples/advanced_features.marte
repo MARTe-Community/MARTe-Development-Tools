@@ -1,20 +1,20 @@
-#package EXAMPLES.ADVANCED
+package EXAMPLES.ADVANCED
 
 // Global configuration variables
-#var NumChannels: int = 4
-#var EnableExtraDiagnostics: bool = true
-#var SamplingFrequency: float = 1000.0
+var NumChannels: int = 4
+var EnableExtraDiagnostics: bool = true
+var SamplingFrequency: float = 1000.0
 
 // 1. Template Definition
 // Defines a reusable DAQ Channel with parameters
-#template DAQChannel(ID: int, Gain: float = 1.0)
+template DAQChannel(ID: int, Gain: float = 1.0)
   ("+Channel_" .. @ID) = {
     Class = "AnalogInput"
     Gain = @Gain
     Offset = 0.0
     Trigger = "Internal"
   }
-#end
+end
 
 // 2. Conditional and Loop usage
 +System = {
@@ -103,17 +103,17 @@
 }
 
 // 5. Direct Template usage outside a container
-#use DAQChannel MasterClock(ID = 0, Gain = 1.0)
-#var x: bool = true
+use DAQChannel MasterClock(ID = 0, Gain = 1.0)
+var x: bool = true
 
-#if @x
+if @x
   +T = {
     Class = Demo
   }
-#else
+else
   +T = {
     Class = Object
   }
-#end
+end
 
 Assign = T

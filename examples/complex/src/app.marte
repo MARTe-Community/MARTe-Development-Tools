@@ -1,4 +1,4 @@
-#package complex_ex
+package complex_ex
 
 +App = {
   Class = RealTimeApplication

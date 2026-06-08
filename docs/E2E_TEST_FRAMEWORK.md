@@ -143,7 +143,7 @@ func TestBuildCommand(t *testing.T) {
     // Multi-file (order matters for references)
     tf.CreateFile("base.marte", `+Base = { Class = "Type" }`)
     tf.CreateFile("derived.marte", `
-#package derived
+package derived
 +Derived = {
     Class = "Type"
     Base = base.Base
@@ -469,10 +469,10 @@ The E2E tests use real MARTe configuration syntax:
 
 ```marte
 # Package declaration (namespace)
-#package myproject.App
+package myproject.App
 
 # Constants/variables
-#let MY_VALUE = 123
+let MY_VALUE = 123
 
 +ObjectName = {
     Class = "GAM"           # Required - the class type
@@ -502,13 +502,13 @@ The E2E tests use real MARTe configuration syntax:
 
 **Testing conditionals:**
 ```marte
-#let ENABLE_FEATURE = true
+let ENABLE_FEATURE = true
 
 +Config = {
     Class = "Test"
-    #if ENABLE_FEATURE
+    if ENABLE_FEATURE
     Feature = { Enabled = true }
-    #endif
+    end
 }
 ```
 
@@ -516,9 +516,9 @@ The E2E tests use real MARTe configuration syntax:
 ```marte
 +Config = {
     Signals = {
-        #foreach $name in ["Signal1", "Signal2", "Signal3"]
+        foreach $name in ["Signal1", "Signal2", "Signal3"]
         $name = { Type = "uint32" }
-        #endforeach
+        end
     }
 }
 ```

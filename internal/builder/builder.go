@@ -114,18 +114,34 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					written[norm] = true
 				}
 			case *parser.IfBlock:
-				cond := b.tree.EvaluateValue(d.Condition, ed.Ctx)
-				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
-				if b.tree.IsTrue(cond) {
-					for _, f := range node.Fragments {
-						if f.IsConditional && f.BranchID == id+":then" {
-							b.activeFragments[f] = true
-						} else {
-							b.activeFragments[f] = false
-						}
+			cond := b.tree.EvaluateValue(d.Condition, ed.Ctx)
+			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+			if b.tree.IsTrue(cond) {
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":then" {
+						b.activeFragments[f] = true
+					} else {
+						b.activeFragments[f] = false
 					}
-					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
-				} else if len(d.Else) > 0 {
+				}
+				processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
+			} else {
+				matched := false
+				for i, ei := range d.ElseIf {
+					elseifCond := b.tree.EvaluateValue(ei.Condition, ed.Ctx)
+					if b.tree.IsTrue(elseifCond) {
+						branchID := fmt.Sprintf("%s:elseif%d", id, i)
+						for _, f := range node.Fragments {
+							if f.IsConditional && f.BranchID == branchID {
+								b.activeFragments[f] = true
+							}
+						}
+						processEval(b.tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+						matched = true
+						break
+					}
+				}
+				if !matched && len(d.Else) > 0 {
 					for _, f := range node.Fragments {
 						if f.IsConditional && f.BranchID == id+":else" {
 							b.activeFragments[f] = true
@@ -133,6 +149,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					}
 					processEval(b.tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
 				}
+			}
 			case *parser.ForeachBlock:
 				iterable := b.tree.EvaluateValue(d.Iterable, ed.Ctx)
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
@@ -607,12 +624,25 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
 	case *parser.ConditionalArrayElements:
 		cond := b.tree.EvaluateValue(v.Condition, ctx)
-		branch := v.Else
 		if b.tree.IsTrue(cond) {
-			branch = v.Then
+			parts := []string{}
+			for _, e := range v.Then {
+				parts = append(parts, b.formatValueWithCtx(e, ctx))
+			}
+			return strings.Join(parts, " ")
+		}
+		for _, ei := range v.ElseIf {
+			elseifCond := b.tree.EvaluateValue(ei.Condition, ctx)
+			if b.tree.IsTrue(elseifCond) {
+				parts := []string{}
+				for _, e := range ei.Body {
+					parts = append(parts, b.formatValueWithCtx(e, ctx))
+				}
+				return strings.Join(parts, " ")
+			}
 		}
 		parts := []string{}
-		for _, e := range branch {
+		for _, e := range v.Else {
 			parts = append(parts, b.formatValueWithCtx(e, ctx))
 		}
 		return strings.Join(parts, " ")

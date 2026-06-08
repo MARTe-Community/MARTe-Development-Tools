@@ -25,12 +25,12 @@ This command creates a standard project structure:
 
 ## Step 2: Define Components
 
-Open `src/components.marte`. This file uses the `#package MyControlApp.App.Data` namespace, meaning all definitions here will be children of `App.Data`.
+Open `src/components.marte`. This file uses the `package MyControlApp.App.Data` namespace, meaning all definitions here will be children of `App.Data`.
 
 Let's define a **Timer** (input source) and a **Logger** (output destination).
 
 ```marte
-#package MyControlApp.App.Data
+package MyControlApp.App.Data
 
 +DDB = {
     Class = GAMDataSource
@@ -69,7 +69,7 @@ We will add a GAM that takes the time from the Timer, converts it, and logs it.
 Add the GAM definition inside the `+Main` object (or as a separate object if you prefer modularity). Let's modify `src/app.marte`:
 
 ```marte
-#package MyControlApp
+package MyControlApp
 +App = {
     Class = RealTimeApplication
     +Functions = {
@@ -164,10 +164,10 @@ You can parameterize your application using variables. Let's define a constant f
 Modify `src/app.marte`:
 
 ```marte
-#package MyContollApp
+package MyContollApp
 
 //# Sampling frequency in Hz
-#let SamplingFreq: uint32 = 100
+let SamplingFreq: uint32 = 100
 
 +App = {
     // ...
@@ -191,7 +191,7 @@ Modify `src/app.marte`:
 You can also use expressions for calculations:
 
 ```marte
-#let CycleTime: float64 = 1.0 / $SamplingFreq
+let CycleTime: float64 = 1.0 / $SamplingFreq
 ```
 
 LSP will show you the evaluated values directly in the code via **Inlay Hints** (e.g., `CycleTime: 0.01`) and in the hover documentation.

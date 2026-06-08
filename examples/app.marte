@@ -1,5 +1,5 @@
-#var Value: > 0 & < 10 = 1
-#var strins: "asda" | "test" = "asda"
+var Value: > 0 & < 10 = 1
+var strins: "asda" | "test" = "asda"
 +App = {
   Class = RealTimeApplication
   +Data = {
@@ -22,10 +22,8 @@
     Class = ReferenceContainer
     +A = {
       Class = IOGAM
-      InputSignals = {
-        P = {
-          DataSource = DDB
-          Type = uint32
+      InputSignals = { 
+        DDB::P : uint32 ={
           Value = @Value
         }
       }

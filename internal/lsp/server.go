@@ -3383,6 +3383,9 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 					},
 					Children: getFromDefs(v.Then),
 				}
+				for _, ei := range v.ElseIf {
+					s.Children = append(s.Children, getFromDefs(ei.Body)...)
+				}
 				if len(v.Else) > 0 {
 					s.Children = append(s.Children, getFromDefs(v.Else)...)
 				}

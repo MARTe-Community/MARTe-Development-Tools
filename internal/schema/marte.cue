@@ -68,6 +68,15 @@ import "list"
 		#meta: MetaType: "scheduler"
 		...
 	}
+	FastScheduler: {
+		TimingDataSource: string // type: reference
+		#meta: MetaType: "scheduler"
+		NoWait?: *0 | 1
+		ErrorMessage?: {
+			Class: "Message"
+			...
+		}
+	}
 	TimingDataSource: {
 		#meta: multithreaded: bool | *false
 		#meta: direction:     "IN"

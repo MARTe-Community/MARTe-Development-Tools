@@ -573,6 +573,10 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.IndexValue(file, d.Condition)
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			pt.indexNestedDefinitions(node, file, d.Then, config.Comments, config.Pragmas, true, id+":then")
+			for i, ei := range d.ElseIf {
+				pt.IndexValue(file, ei.Condition)
+				pt.indexNestedDefinitions(node, file, ei.Body, config.Comments, config.Pragmas, true, fmt.Sprintf("%s:elseif%d", id, i))
+			}
 			pt.indexNestedDefinitions(node, file, d.Else, config.Comments, config.Pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
@@ -713,6 +717,10 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.IndexValue(file, d.Condition)
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas, true, id+":then")
+			for i, ei := range d.ElseIf {
+				pt.IndexValue(file, ei.Condition)
+				pt.indexNestedDefinitions(node, file, ei.Body, comments, pragmas, true, fmt.Sprintf("%s:elseif%d", id, i))
+			}
 			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			frag.Definitions = append(frag.Definitions, d)
@@ -948,6 +956,10 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			pt.IndexValue(file, d.Condition)
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			pt.indexNestedDefinitions(node, file, d.Then, comments, pragmas, true, id+":then")
+			for i, ei := range d.ElseIf {
+				pt.IndexValue(file, ei.Condition)
+				pt.indexNestedDefinitions(node, file, ei.Body, comments, pragmas, true, fmt.Sprintf("%s:elseif%d", id, i))
+			}
 			pt.indexNestedDefinitions(node, file, d.Else, comments, pragmas, true, id+":else")
 		case *parser.ForeachBlock:
 			pt.IndexValue(file, d.Iterable)

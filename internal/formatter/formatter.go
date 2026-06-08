@@ -140,6 +140,12 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		}
 		fmt.Fprintln(f.writer)
 		f.formatBlock(d.Then, indent+1)
+		for _, ei := range d.ElseIf {
+			fmt.Fprintf(f.writer, "%s#else if ", indentStr)
+			f.formatValue(ei.Condition, indent)
+			fmt.Fprintln(f.writer)
+			f.formatBlock(ei.Body, indent+1)
+		}
 		if len(d.Else) > 0 {
 			fmt.Fprintf(f.writer, "%s#else\n", indentStr)
 			f.formatBlock(d.Else, indent+1)

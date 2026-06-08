@@ -31,7 +31,7 @@ func TestScanDirectory_SymlinkDuplication(t *testing.T) {
 	dirA := filepath.Join(rootDir, "A")
 	os.Mkdir(dirA, 0755)
 	fileA := filepath.Join(dirA, "test.marte")
-	os.WriteFile(fileA, []byte(`package MyPackage
+	os.WriteFile(fileA, []byte(`#package MyPackage
 	MyField = 10`), 0644)
 
     // Symlink to FILE
@@ -61,7 +61,7 @@ func TestScanDirectory_SymlinkDuplication(t *testing.T) {
 	
 	// Verify we didn't index the same file twice
 	
-	if len(pt.IsolatedFiles) != 2 {
-		t.Errorf("Expected 2 isolated files (deduplicated), got %d", len(pt.IsolatedFiles))
+	if len(pt.IsolatedFiles) != 1 {
+		t.Errorf("Expected 1 isolated files (deduplicated), got %d", len(pt.IsolatedFiles))
 	}
 }

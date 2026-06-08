@@ -140,7 +140,13 @@ type ConditionalArrayElements struct {
 	EndPosition Position
 	Condition   Value
 	Then        []Value
+	ElseIf      []ConditionalElseIfBranch
 	Else        []Value
+}
+
+type ConditionalElseIfBranch struct {
+	Condition Value
+	Body      []Value
 }
 
 func (c *ConditionalArrayElements) Pos() Position { return c.Position }
@@ -232,7 +238,13 @@ type IfBlock struct {
 	EndPosition Position
 	Condition   Value
 	Then        []Definition
+	ElseIf      []ElseIfBranch
 	Else        []Definition
+}
+
+type ElseIfBranch struct {
+	Condition Value
+	Body      []Definition
 }
 
 func (i *IfBlock) Pos() Position { return i.Position }

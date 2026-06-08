@@ -179,7 +179,25 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 					v.muActive.Unlock()
 					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
-				} else if len(d.Else) > 0 {
+			} else {
+				matched := false
+				for i, ei := range d.ElseIf {
+					elseifCond := v.Tree.EvaluateValue(ei.Condition, ed.Ctx)
+					if v.Tree.IsTrue(elseifCond) {
+						branchID := fmt.Sprintf("%s:elseif%d", id, i)
+						v.muActive.Lock()
+						for _, f := range node.Fragments {
+							if f.IsConditional && f.BranchID == branchID {
+								v.ActiveFragments[f] = true
+							}
+						}
+						v.muActive.Unlock()
+						processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+						matched = true
+						break
+					}
+				}
+				if !matched && len(d.Else) > 0 {
 					v.muActive.Lock()
 					for _, f := range node.Fragments {
 						if f.IsConditional && f.BranchID == id+":else" {
@@ -189,6 +207,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					v.muActive.Unlock()
 					processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
 				}
+			}
 			case *parser.ForeachBlock:
 				iterable := v.Tree.EvaluateValue(d.Iterable, ed.Ctx)
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)

@@ -1,4 +1,4 @@
-#package complex_ex.App.Data
+package complex_ex.App.Data
 
 +References = {
   Class = GAMDataSource

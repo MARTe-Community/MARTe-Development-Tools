@@ -1,0 +1,217 @@
+(* ============================================================================
+   MARTe Extended Configuration Language — Grammar Specification
+   ============================================================================
+
+   This document describes the complete grammar of the MARTe Extended
+   Configuration Language (.marte files). It covers:
+
+     • Core configuration structure (definitions, fields, objects, subnodes)
+     • Extended macros (package, var, let, if/else/else if/end,
+       foreach/end, template/end, use)
+     • Expression system (arithmetic, comparison, logical, string concat)
+     • Signal shorthand syntax
+     • Comments, docstrings, pragmas
+     • Virtual definitions (SignalShorthand, ConditionalArrayElements)
+
+   Notation:  Extended BNF.
+     "…"       literal token
+     /         alternation
+     [ … ]     optional (zero or one)
+     { … }     repetition (zero or more)
+     ( … )     grouping
+     (* … *)   comment
+
+   Lexical tokens are described in the LEXER section at the end.
+
+   ============================================================================ *)
+
+(* ── TOP LEVEL ───────────────────────────────────────────────────────────── *)
+
+File            = { Comment | Pragma | Docstring }
+                  [ PackageDecl ]
+                  { Comment | Pragma | Docstring }
+                  { Definition | Directive }
+                  ;
+
+Definition      = FieldDef | ObjectDef | SignalShorthand ;
+
+Directive       = VarDecl
+                | LetDecl
+                | IfBlock
+                | ForeachBlock
+                | TemplateDef
+                | TemplateUse
+                ;
+
+
+(* ── CORE DEFINITIONS ─────────────────────────────────────────────────────── *)
+
+FieldDef        = Identifier "=" Value ;
+
+ObjectDef       = ObjectKey "=" Subnode ;
+
+ObjectKey       = ("+" | "$") Identifier          (* named object node *)
+                | Expression ;                     (* dynamic name *)
+
+Subnode         = "{" { Definition | Directive } "}" ;
+
+
+(* ── SIGNAL SHORTHAND ────────────────────────────────────────────────────── *)
+
+SignalShorthand = Identifier "::" Identifier       (* DS::Signal *)
+                  [ ":" TypeExpr [ ArrayDim ] ]    (* :  Type[Dim]   *)
+                  [ "as" Identifier ]               (* as  AliasName *)
+                  [ "=" Subnode ]                   (* =  { … }      *)
+                  ;
+
+
+(* ── DIRECTIVES ──────────────────────────────────────────────────────────── *)
+
+(* Directives may be written with or without the leading "#".
+   Both "#var" and "var" are equivalent. *)
+
+OptionalHash    = [ "#" ] ;
+
+PackageDecl     = OptionalHash "package" PackageURI ;
+
+VarDecl         = OptionalHash "var" Identifier ":" TypeExpr [ "=" Value ] ;
+
+LetDecl         = OptionalHash "let" Identifier ":" TypeExpr "=" Value ;
+
+IfBlock         = OptionalHash "if" Value ConfigurationBlock
+                  { "else" "if" Value ConfigurationBlock }
+                  [ "else" ConfigurationBlock ]
+                  OptionalHash "end" ;
+
+ForeachBlock    = OptionalHash "foreach" [ Identifier "," ] Identifier
+                  "in" Value ConfigurationBlock
+                  OptionalHash "end" ;
+
+TemplateDef     = OptionalHash "template" Identifier "("
+                  [ ParamList ] ")" ConfigurationBlock
+                  OptionalHash "end" ;
+
+TemplateUse     = OptionalHash "use" TemplateName InstanceName
+                  "(" [ ArgList ] ")" ;
+
+ConfigurationBlock
+                = [ "{" ] { Definition | Directive | "}" } [ "}" ] ;
+
+ParamList       = Param { "," Param } ;
+
+Param           = Identifier ":" TypeExpr [ "=" Value ] ;
+
+ArgList         = Arg { "," Arg } ;
+
+Arg             = Identifier "=" Value ;
+
+
+(* ── VALUES AND EXPRESSIONS ──────────────────────────────────────────────── *)
+
+Value           = Expression ;
+
+(* Precedence levels, lowest to highest *)
+Expression      = OrExpr ;
+
+OrExpr          = AndExpr { "||" AndExpr } ;
+AndExpr         = CmpExpr { "&&" CmpExpr } ;
+CmpExpr         = CatExpr { ("<" | ">" | "<=" | ">=" | "==" | "!=") CatExpr } ;
+CatExpr         = AddExpr { ".." AddExpr } ;                   (* string concat *)
+AddExpr         = MultExpr { ("+" | "-") MultExpr } ;
+MultExpr        = UnaryExpr { ("*" | "/" | "%") UnaryExpr } ;
+UnaryExpr       = [ "-" | "!" ] BitExpr ;
+BitExpr         = PostfixExpr { ("&" | "|" | "^") PostfixExpr } ;
+
+PostfixExpr     = ArrayAccess { IndexAccess } ;                 (* not yet in lang *)
+ArrayAccess     = Atom ;
+
+Atom            = IntLiteral
+                | FloatLiteral
+                | BoolLiteral
+                | StringLiteral
+                | VariableRef
+                | Identifier
+                | ArrayLiteral
+                | "(" Expression ")"
+                ;
+
+IndexAccess     = "[" Expression "]" ;                          (* reserved *)
+
+(* ── LITERALS ────────────────────────────────────────────────────────────── *)
+
+IntLiteral      = DecimalInt | HexInt | BinaryInt ;
+DecimalInt      = "-"? Digit { Digit } ;
+HexInt          = "0x" HexDigit { HexDigit } ;
+BinaryInt       = "0b" ("0" | "1") { "0" | "1" } ;
+
+FloatLiteral    = "-"? Digit { Digit } "." Digit { Digit }
+                | "-"? Digit { Digit } ("." Digit { Digit })? ("e" | "E") ["+" | "-"] Digit { Digit }
+                ;
+
+BoolLiteral     = "true" | "false" ;
+StringLiteral   = "\"" { any_char_except_quote_or_backslash | "\\\"" | "\\\\" } "\"" ;
+
+ArrayLiteral    = "{" { Value | "," } "}" ;                    (* commas optional *)
+
+VariableRef     = "@" Identifier ;
+Identifier      = Letter { Letter | Digit | "_" | "-" | "." } ;
+
+(* Compound identifiers for namespace-qualified references *)
+QualifiedID     = Identifier { "::" Identifier } ;
+
+(* ── PACKAGE URI ─────────────────────────────────────────────────────────── *)
+
+PackageURI      = Identifier { "." Identifier } ;
+TypeExpr        = Identifier { "|" Identifier } ;               (* union types *)
+TypeExpr       |= "string" | "int" | "uint" | "float" | "bool" | "array" ;
+ArrayDim        = "[" Expression "]" ;
+
+(* ── TEMPLATE NAMES ──────────────────────────────────────────────────────── *)
+
+TemplateName    = Identifier ;
+InstanceName    = Identifier ;
+
+
+(* ── COMMENTS, DOCSTRINGS, PRAGMAS ───────────────────────────────────────── *)
+
+Comment         = "//" ( ! ( "#" | "!" ) ) { any_char } newline ;
+Docstring       = "//#" { any_char } newline ;
+Pragma          = "//!" PragmaType [ "(" PragmaArg ")" ] [ ":" Reason ] newline ;
+PragmaType      = "unused" | "implicit" | "not_consumed" | "not_produced"
+                | "cast" | "ignore" | "allow" ;
+PragmaArg       = Identifier ;
+Reason          = { any_char_except_newline } ;
+
+
+(* ============================================================================
+   LEXICAL TOKENS
+   ============================================================================
+
+   Whitespace:    spaces, tabs, newlines → ignored between tokens.
+
+   keywords:      "package" "var" "let" "if" "else" "end" "foreach" "in"
+                  "template" "use" "as" "true" "false"
+
+   operators:     "+"  "-"  "*"  "/"  "%"  "^"  "&"  "|"
+                  ".." "<"  ">"  "<=" ">=" "==" "!=" "!"
+                  "="  ":"  "("  ")"  "{"  "}"  "["  "]"
+                  ","  "::"
+
+   identifiers:   [a-zA-Z_] [a-zA-Z0-9_\-\.]*
+                  Cannot be a keyword when appearing at directive position.
+                  Can be a keyword when used as a field name.
+
+   numbers:       decimal:   [0-9]+
+                  hex:       0[xX][0-9a-fA-F]+
+                  binary:    0[bB][01]+
+                  float:     [0-9]+\.[0-9]+ ([eE][+-]?[0-9]+)?
+
+   strings:       "…"  — double-quoted, supports \" and \\ escapes.
+
+   variables:     @identifier
+
+   comments:      // …        — line comment
+                  //# …       — docstring (attached to next definition)
+                  //! …       — pragma directive
+
+   ============================================================================ *)

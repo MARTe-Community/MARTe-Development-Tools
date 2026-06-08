@@ -73,7 +73,7 @@ Use `#package` to define where the file's content fits in the hierarchy.
 
 **file1.marte**
 ```marte
-#package MyApp.Controller
+package MyApp.Controller
 +MyController = { ... }
 ```
 
@@ -95,7 +95,7 @@ Variables can be defined at any level and can be overridden externally (e.g., vi
 
 ```marte
 //# Default timeout
-#var Timeout: uint32 = 100
+var Timeout: uint32 = 100
 
 +MyObject = {
     Class = Timer
@@ -108,7 +108,7 @@ Constants are like variables but **cannot** be overridden externally. They are i
 
 ```marte
 //# Sampling period
-#let Ts: float64 = 0.001
+let Ts: float64 = 0.001
 
 +Clock = {
     Class = HighResClock

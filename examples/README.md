@@ -32,7 +32,7 @@ make build
 
 Demonstrates advanced features:
 - **Multi-file Structure**: `src/app.marte` (Logic) and `src/components.marte` (Data).
-- **Namespaces**: Use of `#package` to organize nodes.
+- **Namespaces**: Use of `package` to organize nodes.
 - **Custom Schema**: `.marte_schema.cue` defines a custom class (`CustomController`) with specific metadata (`#meta.multithreaded`).
 - **Validation**: Enforces strict typing and custom rules.
 
@@ -48,9 +48,9 @@ make build
 The `advanced_features.marte` file demonstrates the use of conditional blocks, loops, and reusable templates to create dynamic configurations.
 
 Key features shown:
-- `#template` and `#use` for component reuse.
-- `#if` / `#else` for conditional logic.
-- `#foreach` for bulk instantiation of objects.
+- `template` and `use` for component reuse.
+- `if` / `else` / `else if` for conditional logic.
+- `foreach` for bulk instantiation of objects.
 - Expression-based dynamic node names.
 
 **Try it:**
@@ -68,37 +68,37 @@ The tool supports dynamic configuration generation:
 
 **Templates:**
 ```marte
-#template MyDevice(ID: int, Type: string = "Default")
+template MyDevice(ID: int, Type: string = "Default")
     "+Device_" .. @ID = {
         Class = "MyDriver"
         Type = @Type
         Address = 0x100 + @ID
     }
-#end
+end
 
 +Hardware = {
     Class = ReferenceContainer
-    #use MyDevice Dev1 (ID = 1)
-    #use MyDevice Dev2 (ID = 2, Type = "Special")
+    use MyDevice Dev1 (ID = 1)
+    use MyDevice Dev2 (ID = 2, Type = "Special")
 }
 ```
 
 **Loops & Conditionals:**
 ```marte
-#var Channels: array = { 1 2 3 }
-#var EnableLog: bool = true
+var Channels: array = { 1 2 3 }
+var EnableLog: bool = true
 
 +DAQ = {
     Class = ReferenceContainer
-    #foreach Ch in $Channels
+    foreach Ch in $Channels
         "+Channel_" .. @Ch = {
             Class = ADCChannel
             Index = @Ch
         }
-    #end
+    end
     
-    #if $EnableLog
+    if $EnableLog
         Logger = { Class = FileLogger }
-    #end
+    end
 }
 ```

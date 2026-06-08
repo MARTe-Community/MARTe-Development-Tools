@@ -323,19 +323,42 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 		return nil, false
 	}
 
+	var elseIfBranches []ElseIfBranch
 	var elseBody []Definition
-	if endTok.Type == TokenElse {
-		if p.peek().Type == TokenLBrace {
-			p.next() // consume {
-		}
-		elseBody, endTok, ok = p.parseBlock()
-		if !ok {
-			return nil, false
+
+	for endTok.Type == TokenElse {
+		if p.peek().Type == TokenIf {
+			p.next() // consume if
+			elseifCond, ok2 := p.parseValue()
+			if !ok2 {
+				return nil, false
+			}
+			if p.peek().Type == TokenLBrace {
+				p.next()
+			}
+			elseifBody, endTok2, ok3 := p.parseBlock()
+			if !ok3 {
+				return nil, false
+			}
+			elseIfBranches = append(elseIfBranches, ElseIfBranch{
+				Condition: elseifCond,
+				Body:      elseifBody,
+			})
+			endTok = endTok2
+		} else {
+			if p.peek().Type == TokenLBrace {
+				p.next()
+			}
+			elseBody, endTok, ok = p.parseBlock()
+			if !ok {
+				return nil, false
+			}
+			break
 		}
 	}
 
 	if endTok.Type != TokenEnd {
-		p.addError(endTok.Position, "expected #end")
+		p.addError(endTok.Position, "expected end")
 	}
 
 	return &IfBlock{
@@ -343,6 +366,7 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 		EndPosition: endTok.Position,
 		Condition:   cond,
 		Then:        thenBody,
+		ElseIf:      elseIfBranches,
 		Else:        elseBody,
 	}, true
 }
@@ -364,24 +388,47 @@ func (p *Parser) parseConditionalArrayElements(startTok Token) (Value, bool) {
 	if !ok {
 		return nil, false
 	}
+	var elseIfBranches []ConditionalElseIfBranch
 	var elseElems []Value
-	if endTok.Type == TokenElse {
-		if p.peek().Type == TokenLBrace {
+	for endTok.Type == TokenElse {
+		if p.peek().Type == TokenIf {
 			p.next()
-		}
-		elseElems, endTok, ok = p.parseArrayValueBlock()
-		if !ok {
-			return nil, false
+			elseifCond, ok2 := p.parseValue()
+			if !ok2 {
+				return nil, false
+			}
+			if p.peek().Type == TokenLBrace {
+				p.next()
+			}
+			elseifElems, endTok2, ok3 := p.parseArrayValueBlock()
+			if !ok3 {
+				return nil, false
+			}
+			elseIfBranches = append(elseIfBranches, ConditionalElseIfBranch{
+				Condition: elseifCond,
+				Body:      elseifElems,
+			})
+			endTok = endTok2
+		} else {
+			if p.peek().Type == TokenLBrace {
+				p.next()
+			}
+			elseElems, endTok, ok = p.parseArrayValueBlock()
+			if !ok {
+				return nil, false
+			}
+			break
 		}
 	}
 	if endTok.Type != TokenEnd {
-		p.addError(endTok.Position, "expected #end")
+		p.addError(endTok.Position, "expected end")
 	}
 	return &ConditionalArrayElements{
 		Position:    startTok.Position,
 		EndPosition: endTok.Position,
 		Condition:   cond,
 		Then:        thenElems,
+		ElseIf:      elseIfBranches,
 		Else:        elseElems,
 	}, true
 }

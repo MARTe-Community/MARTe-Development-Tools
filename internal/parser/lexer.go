@@ -260,6 +260,33 @@ func (l *Lexer) lexIdentifier() Token {
 		if val == "in" {
 			return l.emit(TokenIn)
 		}
+		if val == "if" {
+			return l.emit(TokenIf)
+		}
+		if val == "else" {
+			return l.emit(TokenElse)
+		}
+		if val == "end" {
+			return l.emit(TokenEnd)
+		}
+		if val == "var" {
+			return l.emit(TokenVar)
+		}
+		if val == "let" {
+			return l.emit(TokenLet)
+		}
+		if val == "foreach" {
+			return l.emit(TokenForeach)
+		}
+		if val == "template" {
+			return l.emit(TokenTemplate)
+		}
+		if val == "use" {
+			return l.emit(TokenUse)
+		}
+		if val == "package" {
+			return l.lexUntilNewline(TokenPackage)
+		}
 		return l.emit(TokenIdentifier)
 	}
 }
