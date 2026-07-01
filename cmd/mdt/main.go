@@ -324,9 +324,9 @@ func runBuild(args []string) {
 
 	hasErrors := false
 	for _, diag := range v.Diagnostics {
-		level := "ERROR"
+		level := logger.Colorize("ERROR", logger.ColorRed)
 		if diag.Level == validator.LevelWarning {
-			level = "WARNING"
+			level = logger.Colorize("WARNING", logger.ColorYellow)
 		} else {
 			hasErrors = true
 		}
@@ -453,9 +453,9 @@ func runCheck(args []string) {
 	v.ValidateProject(context.Background())
 
 	for _, diag := range v.Diagnostics {
-		level := "ERROR"
+		level := logger.Colorize("ERROR", logger.ColorRed)
 		if diag.Level == validator.LevelWarning {
-			level = "WARNING"
+			level = logger.Colorize("WARNING", logger.ColorYellow)
 		}
 		logger.Printf("%s:%d:%d: %s: %s\n", diag.File, diag.Position.Line, diag.Position.Column, level, diag.Message)
 	}

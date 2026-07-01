@@ -124,3 +124,219 @@ func TestLetMacroFull(t *testing.T) {
 		t.Error("Expected duplicate variable definition error")
 	}
 }
+
+func TestLetReferences(t *testing.T) {
+	content := `
++GAM1 = {
+    Class = "ConstantGAM"
+}
++GAM2 = {
+    Class = "ConstantGAM"
+}
++GAM3 = {
+    Class = "ConstantGAM"
+}
+
+#let functions: [&GAM] = { GAM1, GAM2, GAM3 }
+#let my_ref: &GAM = GAM1
+
++Obj = {
+    Class = "ReferenceContainer"
+    Funcs = @functions
+    Ref = @my_ref
+}
+`
+	tmpFile, err := os.CreateTemp("", "let_ref_*.marte")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	if err := os.WriteFile(tmpFile.Name(), []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write temp file: %v", err)
+	}
+
+	// 1. Test parsing and indexing
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	tree := index.NewProjectTree()
+	tree.AddFile(tmpFile.Name(), cfg)
+
+	// 2. Validate
+	v := validator.NewValidator(tree, ".", nil)
+	v.ValidateProject(context.Background())
+	for _, diag := range v.Diagnostics {
+		t.Errorf("Validation error: %v", diag.Message)
+	}
+
+	// 3. Build
+	out, err := os.CreateTemp("", "let_ref_out.cfg")
+	if err != nil {
+		t.Fatalf("Failed to create temp output file: %v", err)
+	}
+	defer os.Remove(out.Name())
+
+	b := builder.NewBuilder([]string{tmpFile.Name()}, nil)
+	if err := b.Build(out); err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	outContent, err := os.ReadFile(out.Name())
+	if err != nil {
+		t.Fatalf("Failed to read output: %v", err)
+	}
+	outStr := string(outContent)
+	if !strings.Contains(outStr, "Funcs = { GAM1 GAM2 GAM3 }") {
+		t.Errorf("Expected Funcs = { GAM1 GAM2 GAM3 }, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Ref = GAM1") {
+		t.Errorf("Expected Ref = GAM1, got:\n%s", outStr)
+	}
+}
+
+// TestLetReferenceMarksGAMsUsed ensures that GAMs listed only inside a
+// #let value (e.g. `#let funcs: [&GAM] = { GAM1, GAM2, GAM3 }`) and then
+// wired up via `Functions = @funcs` are recognised as "used" by the
+// unused-GAM check, instead of being flagged as unused.
+func TestLetReferenceMarksGAMsUsed(t *testing.T) {
+	content := `
+#package App
+
++App = {
+    Class = RealTimeApplication
+    +Functions = {
+        +GAM1 = {
+            Class = "ConstantGAM"
+            OutputSignals = {
+                Sig1 = { DataSource = DDB1 Type = uint32 }
+            }
+        }
+        +GAM2 = {
+            Class = "ConstantGAM"
+            OutputSignals = {
+                Sig2 = { DataSource = DDB1 Type = uint32 }
+            }
+        }
+        +GAM3 = {
+            Class = "ConstantGAM"
+            OutputSignals = {
+                Sig3 = { DataSource = DDB1 Type = uint32 }
+            }
+        }
+    }
+    +States = {
+        +State1 = {
+            Class = RealTimeState
+            +Threads = {
+                +Thread1 = {
+                    Class = RealTimeThread
+                    Functions = @funcs
+                }
+            }
+        }
+    }
+}
+
+#let funcs: [&GAM] = { GAM1, GAM2, GAM3 }
+`
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	tree := index.NewProjectTree()
+	tree.AddFile("test.marte", cfg)
+	tree.ResolveReferences(nil)
+
+	v := validator.NewValidator(tree, ".", nil)
+	v.ValidateProject(context.Background())
+	for _, diag := range v.Diagnostics {
+		if strings.Contains(diag.Message, "Unused GAM") {
+			t.Errorf("Unexpected unused_gam diagnostic: %v", diag.Message)
+		}
+	}
+}
+
+// TestLetReferenceUnaffectedByUnrelatedTopLevelConditional is a regression
+// test for a bug where a GAM referenced only through a top-level `#let`
+// (e.g. `Functions = @funcs`) was incorrectly flagged as "Unused GAM" as soon
+// as the same file also contained an unrelated top-level `#if ... #end`
+// block (regardless of whether that block appeared before or after the
+// `#let`).
+//
+// Root cause: Validator.isPositionActive determined whether a package-level
+// reference's position was "active" by returning the active-state of
+// whichever non-object Fragment happened to be first in the node's Fragment
+// list for that file, instead of checking whether the reference's position
+// actually fell inside that fragment. Top-level conditional fragments (from
+// `#if`/`#foreach`/`#template` blocks) are appended to the node's Fragment
+// list *before* the main unconditional fragment (see populateNode), so any
+// package-level reference -- including the elements of a `#let` list -- could
+// spuriously inherit the (false) active-state of an unrelated conditional
+// block, making every GAM only reachable through that `#let` appear unused.
+func TestLetReferenceUnaffectedByUnrelatedTopLevelConditional(t *testing.T) {
+	content := `
+#package App
+
++App = {
+    Class = RealTimeApplication
+    +Functions = {
+        +GAM1 = {
+            Class = "ConstantGAM"
+            OutputSignals = {
+                Sig1 = { DataSource = DDB1 Type = uint32 }
+            }
+        }
+        +GAM2 = {
+            Class = "ConstantGAM"
+            OutputSignals = {
+                Sig2 = { DataSource = DDB1 Type = uint32 }
+            }
+        }
+    }
+    +States = {
+        +State1 = {
+            Class = RealTimeState
+            +Threads = {
+                +Thread1 = {
+                    Class = RealTimeThread
+                    Functions = @funcs
+                }
+            }
+        }
+    }
+}
+
+#var sdn_enabled: bool = false
+
+#let funcs: [&GAM] = { GAM1, GAM2 }
+
+// Unrelated top-level conditional block. Its mere presence in the file used
+// to be enough to make the "#let funcs" reference above resolve as
+// "inactive", regardless of the condition's actual value.
+#if @sdn_enabled
++Unrelated = {
+    Class = ReferenceContainer
+}
+#end
+`
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	tree := index.NewProjectTree()
+	tree.AddFile("test.marte", cfg)
+	tree.ResolveReferences(nil)
+
+	v := validator.NewValidator(tree, ".", nil)
+	v.ValidateProject(context.Background())
+	for _, diag := range v.Diagnostics {
+		if strings.Contains(diag.Message, "Unused GAM") {
+			t.Errorf("Unexpected unused_gam diagnostic (GAM referenced only via #let wrongly flagged unused): %v", diag.Message)
+		}
+	}
+}

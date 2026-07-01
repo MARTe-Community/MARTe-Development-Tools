@@ -1,0 +1,26 @@
+#package DemoFunc.RTApp.States
+
+#let functions: [ & GAM ] = { GAM1, GAM2 }
+
+Run = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    Th1 = {
+      Class = RealTimeThread
+      CPUs = 0xFF
+      Functions = @functions
+    }
+  }
+}
+Stop = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    Th1 = {
+      Class = RealTimeThread
+      CPUs = 0xFF
+      Functions = @functions
+    }
+  }
+}

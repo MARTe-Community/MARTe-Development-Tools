@@ -523,6 +523,9 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
+			if d.DefaultValue != nil {
+				pt.IndexValue(file, d.DefaultValue)
+			}
 		case *parser.ObjectNode:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			fileFragment.DefinitionDocs[d] = doc
@@ -664,6 +667,9 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: subDoc}
+			if d.DefaultValue != nil {
+				pt.IndexValue(file, d.DefaultValue)
+			}
 		case *parser.SignalShorthand:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
@@ -892,6 +898,11 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			IsConditional:  true,
 			BranchID:       branchID,
 			DefinitionDocs: make(map[parser.Definition]string),
+			// Record the line span of this conditional branch so position-based
+			// active/inactive lookups (e.g. Validator.isPositionActive) can tell
+			// this fragment apart from sibling fragments of the same node/file.
+			ObjectPos: defs[0].Pos(),
+			EndPos:    defs[len(defs)-1].End(),
 		}
 		node.Fragments = append(node.Fragments, frag)
 	}
@@ -909,6 +920,9 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: file})
 		case *parser.VariableDefinition:
 			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
+			if d.DefaultValue != nil {
+				pt.IndexValue(file, d.DefaultValue)
+			}
 		case *parser.ObjectNode:
 			pt.IndexExpressionVariables(file, d.Name)
 

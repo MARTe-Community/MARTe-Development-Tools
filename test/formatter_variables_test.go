@@ -41,4 +41,35 @@ func TestFormatterVariables(t *testing.T) {
 	}
 	if !strings.Contains(output, "Field1 = @MyInt") {
 		t.Errorf("Variable reference @MyInt formatted incorrectly. Got:\n%s", output)
-	}}
+	}
+}
+
+// TestFormatterReferenceArrayType ensures reference-array type expressions
+// like "[&GAM]" are rendered compactly (no spaces around "[", "&", "]"),
+// regardless of how much whitespace the source used, instead of the
+// previous "[ & GAM ]" spacing that came from naively space-joining tokens.
+func TestFormatterReferenceArrayType(t *testing.T) {
+	content := `
+#let funcs: [&GAM] = { GAM1 }
+#var spaced: [ & GAM ] = { GAM1 }
+`
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	var buf bytes.Buffer
+	formatter.Format(cfg, &buf)
+	output := buf.String()
+
+	if !strings.Contains(output, "#let funcs: [&GAM] = { GAM1 }") {
+		t.Errorf("Expected compact '[&GAM]' type formatting for #let. Got:\n%s", output)
+	}
+	if !strings.Contains(output, "#var spaced: [&GAM] = { GAM1 }") {
+		t.Errorf("Expected #var with spaced-out source type to still format compactly as '[&GAM]'. Got:\n%s", output)
+	}
+	if strings.Contains(output, "[ & GAM ]") {
+		t.Errorf("Unexpected spaced-out '[ & GAM ]' type formatting. Got:\n%s", output)
+	}
+}

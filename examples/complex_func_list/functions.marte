@@ -1,0 +1,21 @@
+#package DemoFunc.RTApp.Functions
+
++GAM1 = {
+  Class = IOGAM
+  InputSignals = {
+    DDB1::A
+  }
+  OutputSignals = {
+    DDB1::B
+  }
+}
++GAM2 = {
+  Class = IOGAM
+  InputSignals = {
+    DDB1::C: uint32
+  }
+  OutputSignals = {
+    DDB1::D: uint32
+  }
+}
+

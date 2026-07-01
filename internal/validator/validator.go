@@ -773,30 +773,46 @@ func (v *Validator) isPositionActive(file string, pos parser.Position) bool {
 	if node == nil {
 		return false
 	}
-	// Root or package node might have multiple fragments in the same file.
-	// We need to find the one that contains the position.
+	// A node's package/file-level content can be split across several
+	// non-object Fragments: one holding the unconditional definitions, plus
+	// one per top-level conditional (#if/#foreach/#template) block. Position
+	// is only inactive if it actually falls inside one of those conditional
+	// fragments and that branch wasn't the one selected as active. We must
+	// not just take the first non-object fragment matching the file, since
+	// its conditional state has nothing to do with the position we're
+	// checking (this previously caused unrelated content earlier/later in
+	// the same file to be reported as inactive/active incorrectly).
 	for _, frag := range node.Fragments {
-		if frag.File == file {
-			if frag.IsObject {
-				start := frag.ObjectPos
-				end := frag.EndPos
-				if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
-					(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
-					v.muActive.Lock()
-					active := v.ActiveFragments[frag]
-					v.muActive.Unlock()
-					return active
-				}
-			} else {
-				// Non-object fragment (package level)
-				v.muActive.Lock()
-				active := v.ActiveFragments[frag]
-				v.muActive.Unlock()
-				return active
+		if frag.File != file || frag.IsObject || !frag.IsConditional {
+			continue
+		}
+		if pos.Line >= frag.ObjectPos.Line && pos.Line <= frag.EndPos.Line {
+			v.muActive.Lock()
+			active := v.ActiveFragments[frag]
+			v.muActive.Unlock()
+			if !active {
+				return false
 			}
 		}
 	}
-	return false
+	// Now check whether the position falls within an object fragment, and if
+	// so, defer to that fragment's own active state (this covers the case
+	// where the whole object is itself conditionally defined).
+	for _, frag := range node.Fragments {
+		if frag.File != file || !frag.IsObject {
+			continue
+		}
+		start := frag.ObjectPos
+		end := frag.EndPos
+		if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
+			(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
+			v.muActive.Lock()
+			active := v.ActiveFragments[frag]
+			v.muActive.Unlock()
+			return active
+		}
+	}
+	return true
 }
 
 func (v *Validator) report(node *index.ProjectNode, tag string, level DiagnosticLevel, msg string, pos parser.Position, file string) {
@@ -2247,10 +2263,11 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 					}
 
 					// Compile Type
-					typeVal := ctx_cue.CompileString(vdef.TypeExpr)
+					typeCUE := translateTypeToCUE(vdef.TypeExpr)
+					typeVal := ctx_cue.CompileString(typeCUE)
 					if typeVal.Err() != nil {
 						v.report(node, "invalid_variable_type", LevelError,
-							fmt.Sprintf("Invalid type expression for variable '%s': %v", vdef.Name, typeVal.Err()),
+							fmt.Sprintf("Invalid type expression for variable '%s': %v (CUE type: %s)", vdef.Name, typeVal.Err(), typeCUE),
 							vdef.Position, frag.File)
 						continue
 					}
@@ -2404,4 +2421,42 @@ func (v *Validator) checkTemplateUse(inst *parser.TemplateInstantiation, file st
 				inst.Position, file)
 		}
 	}
+}
+
+func translateTypeToCUE(typeExpr string) string {
+	clean := strings.ReplaceAll(typeExpr, " ", "")
+	if clean == "" {
+		return "any"
+	}
+
+	// If it doesn't contain reference indicator "&", preserve the original typeExpr
+	// to avoid modifying existing CUE types and validations.
+	if !strings.Contains(clean, "&") {
+		return typeExpr
+	}
+
+	// Helper to translate a single base type to CUE
+	translateBase := func(t string) string {
+		if strings.HasPrefix(t, "&") {
+			return "string"
+		}
+		return t
+	}
+
+	// Check if it's an array type, e.g. [&GAM]
+	if strings.HasPrefix(clean, "[") && strings.HasSuffix(clean, "]") {
+		inner := clean[1 : len(clean)-1]
+		return "[..." + translateBase(inner) + "]"
+	}
+
+	// Handle union types like &GAM|&DataSource
+	if strings.Contains(clean, "|") {
+		parts := strings.Split(clean, "|")
+		for i, p := range parts {
+			parts[i] = translateBase(p)
+		}
+		return strings.Join(parts, " | ")
+	}
+
+	return translateBase(clean)
 }

@@ -538,15 +538,15 @@ func (p *Parser) parseTemplate(startTok Token) (Definition, bool) {
 				return nil, false
 			}
 			// Parse type expression (simplified until =)
-			typeExpr := ""
+			var typeTokens []Token
 			for {
 				t := p.peek()
 				if t.Type == TokenEOF || t.Type == TokenEqual || t.Type == TokenComma || (t.Type == TokenSymbol && t.Value == ")") {
 					break
 				}
-				tok := p.next()
-				typeExpr += tok.Value + " "
+				typeTokens = append(typeTokens, p.next())
 			}
+			typeExpr := joinTypeTokens(typeTokens)
 			var defVal Value
 			if p.peek().Type == TokenEqual {
 				p.next() // consume =
@@ -914,10 +914,7 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 		typeTokens = append(typeTokens, p.next())
 	}
 
-	typeExpr := ""
-	for _, t := range typeTokens {
-		typeExpr += t.Value + " "
-	}
+	typeExpr := joinTypeTokens(typeTokens)
 
 	var defVal Value
 	if p.peek().Type == TokenEqual {
@@ -936,6 +933,40 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 		TypeExpr:     strings.TrimSpace(typeExpr),
 		DefaultValue: defVal,
 	}, true
+}
+
+// joinTypeTokens renders a sequence of type-expression tokens into a compact
+// string, e.g. "[&GAM]" rather than "[ & GAM ]". Tokens are space-separated by
+// default, except around bracket/paren/comma delimiters and after a leading
+// "&" reference marker, which are kept tight against their neighbour.
+func joinTypeTokens(tokens []Token) string {
+	var b strings.Builder
+	for i, t := range tokens {
+		if i > 0 && !noSpaceBetween(tokens[i-1], t) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(t.Value)
+	}
+	return b.String()
+}
+
+func noSpaceBetween(prev, next Token) bool {
+	switch {
+	case prev.Type == TokenLBracket:
+		return true
+	case next.Type == TokenRBracket:
+		return true
+	case next.Type == TokenComma:
+		return true
+	case prev.Type == TokenAmpersand:
+		return true
+	case prev.Type == TokenSymbol && prev.Value == "(":
+		return true
+	case next.Type == TokenSymbol && next.Value == ")":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseLet(startTok Token) (Definition, bool) {
@@ -964,10 +995,7 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 		typeTokens = append(typeTokens, p.next())
 	}
 
-	typeExpr := ""
-	for _, t := range typeTokens {
-		typeExpr += t.Value + " "
-	}
+	typeExpr := joinTypeTokens(typeTokens)
 
 	var defVal Value
 	if p.next().Type != TokenEqual {

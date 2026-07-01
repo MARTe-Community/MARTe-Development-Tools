@@ -1,0 +1,35 @@
+#package DemoFunc
+
+$RtApp = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+    +DDB1 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      Signals = {
+        A = {
+          Type = uint32
+        }
+        B = {
+          Type = uint32
+        }
+      }
+    }
+    +TDS = {
+      Class = TimingDataSource
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+  }
+
+  +States = {
+    Class = ReferenceContainer
+  }
+  Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = TDS
+  }
+}

@@ -1,0 +1,63 @@
+$RtApp = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+    +DDB1 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      Signals = {
+        A = {
+          Type = uint32
+        }
+        B = {
+          Type = uint32
+        }
+      }
+    }
+    +TDS = {
+      Class = TimingDataSource
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +GAM1 = {
+      Class = IOGAM
+      InputSignals = {
+        DDB1::A
+      }
+      OutputSignals = {
+        DDB1::B
+      }
+    }
+    +GAM2 = {
+      Class = IOGAM
+      InputSignals = {
+        DDB1::C: uint32
+      }
+      OutputSignals = {
+        DDB1::D: uint32
+      }
+    }
+  }
+  #let functions: [ & GAM ] = { GAM1, GAM2 }
+
+  +States = {
+    Class = ReferenceContainer
+    Run = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        Th1 = {
+          Class = RealTimeThread
+          CPUs = 0xFF
+          Functions = @functions
+        }
+      }
+    }
+  }
+  Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = TDS
+  }
+}
