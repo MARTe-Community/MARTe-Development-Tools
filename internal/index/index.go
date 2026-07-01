@@ -822,7 +822,7 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 	frag := &Fragment{
 		File:           file,
 		IsObject:       true,
-		ObjectPos:      d.Position,
+		ObjectPos:      d.SignalNamePosition,
 		EndPos:         d.EndPosition,
 		Doc:            doc,
 		Pragmas:        fragPragmas,
@@ -838,12 +838,19 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 	}
 
 	// Synthetic DataSource field — added to both frag.Definitions and child.Fields.
+	// dsVal is also registered via IndexValue (like an ordinary explicit
+	// "DataSource = X" field would be) so that clicking/renaming the
+	// DataSource portion of the "DataSource::SignalName" shorthand resolves
+	// as a proper reference to the DataSource node, instead of falling
+	// through to queryNode's field-matching (which would spuriously match
+	// against this synthetic "DataSource" field's name/length instead).
 	dsVal := &parser.ReferenceValue{Position: d.Position, Value: d.DataSource}
 	dsField := &parser.Field{Position: d.Position, Name: "DataSource", Value: dsVal}
 	frag.Definitions = append(frag.Definitions, dsField)
 	frag.DefinitionDocs[dsField] = ""
 	pt.extractFieldMetadata(child, dsField)
 	child.Fields["DataSource"] = append(child.Fields["DataSource"], EvaluatedField{Raw: dsField, Value: dsVal, File: file})
+	pt.IndexValue(file, dsVal)
 
 	// When "as <NAME>" was used, inject Alias = SignalName.
 	if d.AliasName != "" {
@@ -1859,7 +1866,31 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 	return val
 }
 
+// Clone returns a deep copy of pt with all references fully re-resolved
+// against the cloned nodes, ready to read from immediately.
 func (pt *ProjectTree) Clone() *ProjectTree {
+	newPT := pt.cloneStructure()
+
+	// Re-resolve references (connect to new nodes)
+	// Note: This makes Clone() expensive. But necessary for correctness.
+	newPT.ResolveReferences(nil)
+
+	return newPT
+}
+
+// CloneUnresolved returns a deep copy of pt with the NodeMap rebuilt but
+// References left unresolved (Reference.Target/TargetVariable are nil).
+// It exists for callers that are about to mutate the clone further (e.g. via
+// AddFile) and will call ResolveReferences themselves afterwards anyway --
+// skipping the redundant resolve pass that plain Clone() would otherwise do
+// on the not-yet-mutated tree just to have it immediately discarded.
+// Do not read Reference targets from a tree returned by CloneUnresolved
+// without resolving it first.
+func (pt *ProjectTree) CloneUnresolved() *ProjectTree {
+	return pt.cloneStructure()
+}
+
+func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 
@@ -1922,10 +1953,6 @@ func (pt *ProjectTree) Clone() *ProjectTree {
 
 	// Rebuild NodeMap
 	newPT.RebuildIndex()
-
-	// Re-resolve references (connect to new nodes)
-	// Note: This makes Clone() expensive. But necessary for correctness.
-	newPT.ResolveReferences(nil)
 
 	return newPT
 }

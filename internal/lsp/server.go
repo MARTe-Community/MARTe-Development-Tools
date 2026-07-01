@@ -25,7 +25,6 @@ import (
 	"cuelang.org/go/cue"
 )
 
-
 type CompletionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
@@ -374,6 +373,16 @@ func triggerValidation(uri string) {
 	}
 
 	valTimers[uri] = time.AfterFunc(1000*time.Millisecond, func() {
+		// This closure runs on its own goroutine (time.AfterFunc), so a panic
+		// here would otherwise crash the whole LSP process -- recover() only
+		// protects the goroutine it's declared in, it is not inherited from
+		// any caller.
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Printf("[ERROR] panic in debounced validation for %s: %v", uri, r)
+			}
+		}()
+
 		valMu.Lock()
 		delete(valTimers, uri)
 
@@ -595,9 +604,12 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		view = GlobalSession.CreateView("auto", root)
 	}
 
-	// Create new snapshot
+	// Create new snapshot. We're about to mutate the tree via AddFile (or, on
+	// parse failure, resolve it ourselves below), so skip the eager resolve
+	// CloneForEdit()/CloneForEdit would otherwise do on the pre-edit tree just
+	// to have it thrown away by the resolve after AddFile.
 	oldSnap := view.Snapshot()
-	newSnap := oldSnap.Clone(context.Background())
+	newSnap := oldSnap.CloneForEdit(context.Background())
 
 	path := uriToPath(params.TextDocument.URI)
 	newSnap.Documents()[params.TextDocument.URI] = params.TextDocument.Text
@@ -621,6 +633,10 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	} else {
+		// Tree structure didn't change, but CloneForEdit left references
+		// unresolved (Reference.Target still points at the OLD tree's now
+		// stale nodes) -- resolve them against the clone before publishing it.
+		newSnap.Tree().ResolveReferences(nil)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	}
@@ -634,7 +650,7 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	}
 
 	oldSnap := view.Snapshot()
-	newSnap := oldSnap.Clone(context.Background())
+	newSnap := oldSnap.CloneForEdit(context.Background())
 
 	text, ok := newSnap.Documents()[uri]
 	if !ok {
@@ -668,6 +684,10 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
 	} else {
+		// Tree structure didn't change, but CloneForEdit left references
+		// unresolved (Reference.Target still points at the OLD tree's now
+		// stale nodes) -- resolve them against the clone before publishing it.
+		newSnap.Tree().ResolveReferences(nil)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri) // Still trigger validation to show parser errors
 	}
@@ -785,9 +805,19 @@ func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	}
 }
 
+// publishImmediateDiagnostics gives fast feedback for parser (syntax) errors
+// without waiting for the debounced semantic validation pass. It must only
+// publish when there is actually something new to report: publishing an
+// empty diagnostics list here would clear whatever semantic warnings the
+// last runValidation pass produced, causing them to visibly disappear and
+// then reappear ~1s later on every keystroke. If there are no parser errors,
+// we simply leave the currently-displayed diagnostics alone; runValidation
+// (debounced) is the single source of truth that reconciles and republishes
+// the full, correct diagnostic set -- including clearing stale parser
+// errors once they're fixed.
 func publishImmediateDiagnostics(uri string, snap *cache.Snapshot) {
 	errs, ok := snap.ParserErrors()[uri]
-	if !ok {
+	if !ok || len(errs) == 0 {
 		return
 	}
 

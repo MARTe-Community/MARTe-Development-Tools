@@ -43,12 +43,12 @@ func (s *Session) View(id string) *View {
 func (s *Session) ViewOf(uri string) *View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	path := strings.TrimPrefix(uri, "file://")
-	
+
 	var best *View
 	longest := -1
-	
+
 	for _, v := range s.views {
 		// Simple prefix match. Ideally check path separators.
 		if strings.HasPrefix(path, v.root) {
@@ -58,7 +58,7 @@ func (s *Session) ViewOf(uri string) *View {
 			}
 		}
 	}
-	
+
 	if best != nil {
 		return best
 	}
@@ -73,7 +73,7 @@ func (s *Session) ViewOf(uri string) *View {
 func (s *Session) CreateView(id, root string) *View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	v := &View{
 		id:      id,
 		root:    root,
@@ -86,7 +86,7 @@ func (s *Session) CreateView(id, root string) *View {
 		documents:    make(map[string]string),
 		parserErrors: make(map[string][]error),
 	})
-	
+
 	s.views = append(s.views, v)
 	return v
 }
@@ -102,7 +102,7 @@ func (v *View) Snapshot() *Snapshot {
 	return v.snapshot.Load().(*Snapshot)
 }
 
-// SetSnapshot sets the new snapshot. 
+// SetSnapshot sets the new snapshot.
 // Ideally this is done via "Invalidate" which produces a new snapshot from the old one.
 func (v *View) SetSnapshot(s *Snapshot) {
 	v.snapshot.Store(s)
@@ -141,13 +141,28 @@ func (s *Snapshot) Schema() *schema.Schema {
 	return s.schema
 }
 
-// Clone creates a deep copy of the snapshot (and the underlying tree).
+// Clone creates a deep copy of the snapshot (and the underlying tree), with
+// the tree's references fully resolved and ready to read immediately.
 // This is used when modifying the state.
 func (s *Snapshot) Clone(ctx context.Context) *Snapshot {
+	return s.cloneWithTree(s.tree.Clone())
+}
+
+// CloneForEdit is like Clone, but skips resolving the cloned tree's
+// references. It is for callers that are about to mutate the returned
+// snapshot's tree further (e.g. via Tree().AddFile) and will call
+// ResolveReferences themselves once that mutation is done -- resolving here
+// first would just be discarded, since the pre-mutation resolution doesn't
+// reflect the edit that's about to be applied.
+func (s *Snapshot) CloneForEdit(ctx context.Context) *Snapshot {
+	return s.cloneWithTree(s.tree.CloneUnresolved())
+}
+
+func (s *Snapshot) cloneWithTree(tree *index.ProjectTree) *Snapshot {
 	newSnap := &Snapshot{
 		view:         s.view,
-		tree:         s.tree.Clone(), // This is the heavy part
-		schema:       s.schema,       // Schema is likely static or reloaded separately
+		tree:         tree,
+		schema:       s.schema, // Schema is likely static or reloaded separately
 		documents:    make(map[string]string),
 		parserErrors: make(map[string][]error),
 	}

@@ -129,7 +129,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		// If followed by =, it's a definition
 		if p.peek().Type == TokenEqual {
 			p.next() // consume =
-			
+
 			if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
 				sub, ok := p.parseSubnode()
 				if !ok {
@@ -152,7 +152,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 				Value:    val,
 			}, true
 		}
-		
+
 		// If not followed by =, it might be an expression start?
 		// But parseDefinition expects a definition.
 		// Fallback to default if we want to support "A + B = C"
@@ -222,7 +222,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			// Let's assume field names can also be expressions if we want to be powerful.
 			// But for now, let's just use the string value if it's a constant.
 			// Actually, let's just use a placeholder or handle it in builder.
-			fieldName = "EXPR_FIELD" 
+			fieldName = "EXPR_FIELD"
 		}
 
 		return &Field{
@@ -240,11 +240,20 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 // The caller has already consumed the identifier token (name = "DS::Signal").
 func (p *Parser) parseSignalShorthand(startTok Token, name string) (Definition, bool) {
 	parts := strings.SplitN(name, "::", 2)
+	// The whole "DataSource::SignalName" run is lexed as a single identifier
+	// token starting at startTok.Position, and (per lexIdentifier) can never
+	// span multiple lines, so SignalName's own start position is simply
+	// startTok.Position shifted right past "DataSource::". Use the untrimmed
+	// parts[0] length since the lexer never includes whitespace in an
+	// identifier token (TrimSpace below is a defensive no-op).
+	signalNamePos := startTok.Position
+	signalNamePos.Column += len(parts[0]) + len("::")
 	sh := &SignalShorthand{
-		Position:    startTok.Position,
-		EndPosition: startTok.Position,
-		DataSource:  strings.TrimSpace(parts[0]),
-		SignalName:  strings.TrimSpace(parts[1]),
+		Position:           startTok.Position,
+		EndPosition:        startTok.Position,
+		SignalNamePosition: signalNamePos,
+		DataSource:         strings.TrimSpace(parts[0]),
+		SignalName:         strings.TrimSpace(parts[1]),
 	}
 
 	// Optional ": Type [Dim]"
@@ -660,7 +669,6 @@ func (p *Parser) parseBlock() ([]Definition, Token, bool) {
 		}
 	}
 }
-
 
 func (p *Parser) isSubnodeLookahead() bool {
 	// We are before '{'.

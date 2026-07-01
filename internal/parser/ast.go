@@ -310,15 +310,16 @@ func (t *TemplateInstantiation) isDefinition() {}
 // DataSource and SignalName are mandatory. Type, NumElements and ExtraFields
 // are all optional.
 type SignalShorthand struct {
-	Position       Position
-	EndPosition    Position
-	DataSource     string  // left of "::"
-	SignalName     string  // right of "::"
-	Type           string  // empty when absent
-	NumElements    Value   // nil when absent
-	AliasName      string  // non-empty when "as <NAME>" was specified; becomes the node name; SignalName becomes the Alias field
-	ExtraFields    Subnode // body of the optional "= { … }" block
-	HasExtraFields bool    // true when "= { … }" was present
+	Position           Position
+	EndPosition        Position
+	SignalNamePosition Position // start position of SignalName alone, i.e. Position shifted past "DataSource::"
+	DataSource         string   // left of "::"
+	SignalName         string   // right of "::"
+	Type               string   // empty when absent
+	NumElements        Value    // nil when absent
+	AliasName          string   // non-empty when "as <NAME>" was specified; becomes the node name; SignalName becomes the Alias field
+	ExtraFields        Subnode  // body of the optional "= { … }" block
+	HasExtraFields     bool     // true when "= { … }" was present
 }
 
 func (s *SignalShorthand) Pos() Position { return s.Position }

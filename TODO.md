@@ -60,7 +60,7 @@ references. Check items off as they're fixed.
       reverse-lookup map (`dsIDMap`) already existing elsewhere in the same file — should
       use it instead.
 
-- [ ] **#7 LSP `Snapshot.Clone()` cost on every edit** — MEDIUM-HIGH severity
+- [x] **#7 LSP `Snapshot.Clone()` cost on every edit** — MEDIUM-HIGH severity, fixed (see #19)
       `internal/lsp/server.go` (Session → View → Snapshot pattern)
       Every edit triggers a full immutable clone of the View's index. For large projects
       this could be a real hot path; worth profiling before optimizing (e.g. structural
@@ -137,6 +137,146 @@ graph` usage section.
   active otherwise. Regression test:
   `TestLetReferenceUnaffectedByUnrelatedTopLevelConditional` in
   `test/let_macro_test.go` (verified to fail pre-fix, pass post-fix).
+
+- [x] **#16 LSP diagnostics flicker: active semantic warnings briefly vanish on every keystroke** — HIGH severity, fixed
+  Root cause: `publishImmediateDiagnostics` (`internal/lsp/server.go`) is called
+  synchronously on every `didOpen`/`didChange` to give fast feedback for parser
+  (syntax) errors, ahead of the debounced semantic validation pass. It read
+  `snap.ParserErrors()[uri]` and unconditionally published that list — including
+  when the file currently has *no* parser errors, in which case it published an
+  *empty* diagnostics list. This overwrote whatever semantic diagnostics (e.g.
+  "Unused GAM") were currently displayed for that file. The subsequent debounced
+  `runValidation` pass then recomputed the exact same semantic diagnostics as
+  before the edit and, because of its hash-based dedup (`lastPublished`), correctly
+  skipped re-publishing them — so the bogus empty publish from
+  `publishImmediateDiagnostics` was never overwritten, leaving the client's
+  diagnostics pane empty for up to the full debounce window even though the
+  warning was still valid, on every single keystroke.
+  Fix: `publishImmediateDiagnostics`'s guard changed from `if !ok { return }` to
+  `if !ok || len(errs) == 0 { return }` — it now only publishes when there are
+  actual parser errors to report, leaving currently-displayed diagnostics alone
+  otherwise (the debounced `runValidation` pass remains the single source of
+  truth that reconciles and republishes the full, correct diagnostic set,
+  including clearing stale parser errors once fixed). Regression test:
+  `TestNoFlickerOnEditWithoutParserErrors` in `test/lsp_server_test.go` (verified
+  to fail pre-fix, pass post-fix).
+
+- [x] **#17 Unhandled panics in LSP background goroutines crash the whole `mdt lsp` process** — HIGH severity, fixed
+  Root cause: two goroutine sites had no `recover()`, so any panic inside them —
+  e.g. a nil-pointer dereference triggered by an unusual/malformed project
+  structure during validation — would take down the entire LSP server process,
+  losing all editor state and requiring a manual restart: (1) the debounced
+  validation closure spawned via `time.AfterFunc` in `triggerValidation`
+  (`internal/lsp/server.go`), and (2) each worker goroutine's task-processing
+  loop in `Validator.ValidateProject`'s worker pool (`internal/validator/validator.go`),
+  where a `recover()` around the whole `for` loop would only have protected the
+  worker from *its first* panic, silently killing that worker permanently
+  afterward (since `recover()` must be re-armed per invocation, not just per
+  goroutine).
+  Fix: added `defer func() { if r := recover(); r != nil { log...} }()` at the top
+  of the `time.AfterFunc` closure in `triggerValidation`, and wrapped *each
+  individual task* (not the whole worker loop) inside the worker goroutine in
+  `ValidateProject` with its own recover, so a panic on one node fails just that
+  one validation task (logged) instead of killing the worker or the process.
+  No dedicated regression test (impractical without test-only fault-injection
+  hooks); verified via full build/vet/test pass.
+
+- [x] **#18 CUE schema reloaded and re-unified from scratch on every single LSP validation pass** — MEDIUM-HIGH severity, fixed
+  Root cause: `schema.LoadFullSchema(projectRoot)` re-parsed the embedded base
+  schema plus system/home/project `.marte_schema.cue` override files and
+  re-unified them via CUE on *every* call — and it's called from
+  `validator.NewValidator` on every validation pass, i.e. on every LSP
+  keystroke (after debounce). This is pure, expensive, entirely avoidable
+  repeated work for schema files that essentially never change mid-session.
+  Fix: `LoadFullSchema` now caches its result per `projectRoot`, keyed and
+  invalidated by the mtimes of the underlying schema files (system, home,
+  and project `.marte_schema.cue`), via a package-level
+  `map[string]*fullSchemaCacheEntry` guarded by a mutex; a cache hit returns
+  the same `*Schema` pointer, a miss (no entry, or any tracked file's mtime
+  changed) recompiles via the extracted `loadFullSchemaUncached`. Regression
+  test: `TestLoadFullSchemaCachesUntilFileChanges` in `test/schema_cache_test.go`
+  (verifies repeated calls return the identical pointer when nothing changed,
+  and a new pointer with updated content once a project schema file's mtime/content
+  changes; verified to fail pre-fix, pass post-fix). Confirmed real-world impact:
+  the full `go test ./test/...` suite's runtime dropped from ~7.5s to ~3.5s after
+  this fix.
+
+- [x] **#19 LSP `Snapshot.Clone()` redundantly resolves references twice on every edit** — MEDIUM-HIGH severity, fixed (closes #7)
+  Root cause: `HandleDidOpen`/`HandleDidChange` (`internal/lsp/server.go`) called
+  `Snapshot.Clone()` (`internal/lsp/cache/cache.go`), which deep-clones the
+  `ProjectTree` *and* fully re-resolves all cross-references
+  (`ProjectTree.Clone()` → `ResolveReferences(nil)`, `internal/index/index.go`) —
+  before the handler then called `Tree().AddFile(...)` to apply the actual edit
+  and re-resolved references *again* afterward. The first resolve pass, done on
+  the pre-edit tree, was thrown away immediately once `AddFile` mutated the
+  cloned tree — pure wasted work on every keystroke, and for large projects with
+  many cross-references this doubled the cost of the single most frequent
+  operation in the LSP.
+  Fix: split `ProjectTree.Clone()` into `Clone()` (unchanged behavior: clone +
+  resolve, for callers that need to read the tree immediately) and a new
+  `CloneUnresolved()` (clone only, `Reference.Target` left nil, for callers about
+  to mutate + resolve themselves right after) sharing a common
+  `cloneStructure()` helper. Mirrored this in `cache.Snapshot` with `Clone()`
+  (unchanged) and a new `CloneForEdit()`. `HandleDidOpen`/`HandleDidChange` now
+  call `CloneForEdit()` instead of `Clone()`, with an explicit
+  `newSnap.Tree().ResolveReferences(nil)` added to their (in-practice
+  unreachable, since `parser.Parse()` never returns a nil config) parse-failure
+  branches for defensive correctness. Regression test:
+  `TestCrossFileReferencesResolveAfterEditsViaCloneForEdit` in
+  `test/lsp_server_test.go`, exercising the full open → edit → cross-file
+  "go to definition" flow through the lighter clone path (this is a pure
+  performance refactor, not a bug fix, so this test guards against future
+  regressions rather than failing pre-fix). Also verified via `make test-e2e`
+  against the real compiled binary and a real `mdt lsp` subprocess.
+
+- [x] **#20 "Go to definition"/rename on `DataSource::SignalName` shorthand syntax resolves to the wrong thing or produces an incorrect edit** — HIGH severity, fixed
+  Root cause, across three layers, for the signal shorthand syntax (`internal/parser/ast.go`'s
+  `SignalShorthand`, e.g. `MyDS::Signal1: float32`):
+  1. The lexer (`internal/parser/lexer.go`'s `lexIdentifier`) scans the whole
+     `DataSource::SignalName` run as a single identifier token, so `SignalName`'s
+     own start position was never tracked separately from the token's overall
+     start (i.e. `DataSource`'s position).
+  2. `index.ProjectTree.addSignalShorthandChild` (`internal/index/index.go`) used
+     that same (wrong) shared position — `d.Position` — as the synthesized signal
+     child node's `Fragment.ObjectPos`, so clicking on the actual `SignalName` text
+     in the editor didn't line up with where the node's match range was computed
+     from. Worse, the synthetic `DataSource` field's `ReferenceValue` (`dsVal`)
+     was constructed but never passed to `pt.IndexValue`, so — unlike an ordinary
+     explicit `DataSource = X` field — it was never registered as a resolvable
+     `Reference` at all.
+  3. `ProjectTree.queryNode`'s field-matching used the synthetic field's literal
+     name length (`len("DataSource")` = 10 chars) to compute its clickable range,
+     which doesn't correspond to any real source text (the source text there is
+     the actual `DataSource` identifier, e.g. `MyDS`, which is usually a different
+     length) — so without a properly resolved `Reference` taking priority
+     (`ProjectTree.Query` checks `FileReferences` before falling back to
+     `queryNode`), clicking on the `DataSource` portion of the shorthand could
+     spuriously match this synthetic field instead. That in turn made
+     `lsp.HandleRename`'s `targetField` branch (`internal/lsp/server.go`) rename
+     *every* field literally named `"DataSource"` in the enclosing container —
+     an incorrect, overly broad edit — instead of performing a correct, targeted
+     rename of just that one DataSource node's definition and references.
+  Fix: (1) `parser.SignalShorthand` gained a `SignalNamePosition` field, computed
+  in `parseSignalShorthand` by shifting the token's start position right past
+  `"DataSource::"` (safe because this token can never span multiple lines).
+  (2) `addSignalShorthandChild` now uses `d.SignalNamePosition` for the signal
+  node's `Fragment.ObjectPos` (so `SignalName` clicks resolve to the right node,
+  at the right range), and calls `pt.IndexValue(file, dsVal)` so the `DataSource`
+  portion is registered as a proper `Reference`, exactly like an explicit
+  `DataSource = X` field — which `Query()` checks *before* falling through to
+  `queryNode`'s field-matching, so clicking the `DataSource` text now correctly
+  resolves as a reference to that DataSource node, making
+  `HandleRename` take the correct `targetNode`/`res.Reference` path (rename just
+  that node's definition + all its references) instead of the overly broad
+  `targetField` path. Regression tests in `test/signal_shorthand_test.go`:
+  `TestSignalShorthandDataSourceAndSignalNameQueryResolveSeparately` (verifies
+  `Query()` returns a `Reference` resolving to the right DataSource node for
+  clicks on the DataSource portion, and a `Node` result for the SignalName
+  portion) and `TestSignalShorthandRenameDataSourceOnlyAffectsThatDataSource`
+  (verifies `HandleRename` on the DataSource portion produces exactly 2 edits —
+  the DataSource's own definition and this shorthand's reference — leaving an
+  unrelated second DataSource and both signal names untouched); both verified to
+  fail pre-fix, pass post-fix.
 
 ## Ruled-out (false positives — do NOT re-investigate without new evidence)
 

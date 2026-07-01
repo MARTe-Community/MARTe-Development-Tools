@@ -3,6 +3,7 @@ package validator
 import (
 	"context"
 	"fmt"
+	"log"
 	"runtime"
 	"strconv"
 	"strings"
@@ -330,8 +331,15 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 					if !ok {
 						return
 					}
-					v.validateNode(ctx, node, evalCtx)
-					wg.Done()
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								log.Printf("[ERROR] panic while validating node %q: %v", node.RealName, r)
+							}
+							wg.Done()
+						}()
+						v.validateNode(ctx, node, evalCtx)
+					}()
 				}
 			}
 		}()

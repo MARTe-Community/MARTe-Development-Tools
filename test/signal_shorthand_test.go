@@ -7,6 +7,8 @@ import (
 
 	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
@@ -289,4 +291,149 @@ func TestSignalShorthandBuilder(t *testing.T) {
 	if !strings.Contains(res, "Alias = RealSignal") {
 		t.Error("expected Alias = RealSignal in output")
 	}
+}
+
+// TestSignalShorthandDataSourceAndSignalNameQueryResolveSeparately is a
+// regression test for a bug where clicking the "DataSource" portion of a
+// "DataSource::SignalName" shorthand did not resolve as a reference to the
+// DataSource node at all (since it was never registered via IndexValue), and
+// clicking the "SignalName" portion used the wrong position (the shorthand's
+// overall start, i.e. the DataSource text) to match the synthesized signal
+// node, causing queries on the signal name to spuriously fall through to
+// unrelated matches. See addSignalShorthandChild in internal/index/index.go.
+func TestSignalShorthandDataSourceAndSignalNameQueryResolveSeparately(t *testing.T) {
+	content := `
++DS1 = {
+    Class = SomeDS
+}
++DS2 = {
+    Class = SomeDS
+}
++MyGAM = {
+    Class = GAM1
+    InputSignals = {
+        DS1::Signal1: float32
+    }
+}
+`
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	idx := index.NewProjectTree()
+	file := "shorthand_query.marte"
+	idx.AddFile(file, cfg)
+	idx.ResolveReferences(nil)
+
+	line, dsCol, sigCol := findShorthandColumns(t, content, "DS1::Signal1", "DS1", "Signal1")
+
+	// Clicking in the middle of "DS1" must resolve as a Reference to the
+	// +DS1 node.
+	dsRes := idx.Query(file, line, dsCol+1)
+	if dsRes == nil || dsRes.Reference == nil {
+		t.Fatalf("expected a Reference result when querying the DataSource portion, got %+v", dsRes)
+	}
+	if dsRes.Reference.Target == nil || dsRes.Reference.Target.RealName != "+DS1" {
+		t.Fatalf("expected DataSource reference to resolve to +DS1, got %+v", dsRes.Reference.Target)
+	}
+
+	// Clicking in the middle of "Signal1" must resolve to the synthesized
+	// Signal1 child node.
+	sigRes := idx.Query(file, line, sigCol+1)
+	if sigRes == nil || sigRes.Node == nil {
+		t.Fatalf("expected a Node result when querying the SignalName portion, got %+v", sigRes)
+	}
+	if sigRes.Node.RealName != "Signal1" {
+		t.Fatalf("expected SignalName to resolve to Signal1 node, got %q", sigRes.Node.RealName)
+	}
+}
+
+// TestSignalShorthandRenameDataSourceOnlyAffectsThatDataSource is a
+// regression test for a bug where renaming the DataSource portion of a
+// "DataSource::SignalName" shorthand (e.g. clicking "DS1" in "DS1::Signal1")
+// would not resolve as a reference to the +DS1 node, and would instead fall
+// back to a same-named-field rename that renamed every field literally named
+// "DataSource" in the enclosing container -- an incorrect, overly broad edit.
+// With DataSource properly registered as a Reference, renaming it should
+// only touch the +DS1 definition and this shorthand's DataSource text,
+// leaving DS2's definition and both signal names untouched.
+func TestSignalShorthandRenameDataSourceOnlyAffectsThatDataSource(t *testing.T) {
+	lsp.ResetTestServer()
+
+	content := `
++DS1 = {
+    Class = SomeDS
+}
++DS2 = {
+    Class = SomeDS
+}
++MyGAM = {
+    Class = GAM1
+    InputSignals = {
+        DS1::Signal1: float32
+        DS2::Signal2: float32
+    }
+}
+`
+	path := "/shorthand_rename.marte"
+	p := parser.NewParser(content)
+	cfg, err := p.Parse()
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	lsp.GetTestTree().AddFile(path, cfg)
+	lsp.GetTestTree().ResolveReferences(nil)
+
+	line, dsCol, _ := findShorthandColumns(t, content, "DS1::Signal1", "DS1", "Signal1")
+
+	params := lsp.RenameParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: "file://" + path},
+		Position:     lsp.Position{Line: line - 1, Character: dsCol}, // 0-indexed, mid "DS1"
+		NewName:      "RenamedDS",
+	}
+
+	edit := lsp.HandleRename(params)
+	if edit == nil {
+		t.Fatal("HandleRename returned nil")
+	}
+
+	fileEdits := edit.Changes["file://"+path]
+	if len(fileEdits) != 2 {
+		t.Fatalf("expected exactly 2 edits (DS1 definition + DS1 shorthand reference), got %d: %+v", len(fileEdits), fileEdits)
+	}
+	// One edit renames the "+DS1" definition (keeping the "+" prefix), the
+	// other renames the bare "DS1" reference inside the shorthand text.
+	wantTexts := map[string]bool{"+RenamedDS": false, "RenamedDS": false}
+	for _, e := range fileEdits {
+		if _, ok := wantTexts[e.NewText]; !ok {
+			t.Errorf("unexpected NewText %q in edit %+v", e.NewText, e)
+			continue
+		}
+		wantTexts[e.NewText] = true
+	}
+	for text, seen := range wantTexts {
+		if !seen {
+			t.Errorf("expected an edit with NewText %q, got edits: %+v", text, fileEdits)
+		}
+	}
+}
+
+// findShorthandColumns locates the 1-indexed line and 0-indexed columns (as
+// LSP character offsets, i.e. Position.Column-1) of dataSourceText and
+// signalNameText within the first line of content containing needle.
+func findShorthandColumns(t *testing.T, content, needle, dataSourceText, signalNameText string) (line, dsCol, sigCol int) {
+	t.Helper()
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, needle) {
+			line = i + 1
+			dsCol = strings.Index(l, dataSourceText)
+			sigCol = strings.Index(l, signalNameText)
+			return
+		}
+	}
+	t.Fatalf("could not locate line containing %q", needle)
+	return
 }

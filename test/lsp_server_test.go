@@ -1,10 +1,12 @@
 package integration
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
@@ -195,4 +197,128 @@ Field=1
 	if strings.TrimSpace(strings.ReplaceAll(newText, "\r\n", "\n")) != strings.TrimSpace(strings.ReplaceAll(expected, "\r\n", "\n")) {
 		t.Errorf("Formatting mismatch.\nExpected:\n%s\nGot:\n%s", expected, newText)
 	}
+}
+
+// TestNoFlickerOnEditWithoutParserErrors is a regression test for a bug where
+// editing a file that has no parser errors -- but does have an active
+// semantic warning (e.g. an unused GAM) -- would incorrectly clear that
+// warning from the client. publishImmediateDiagnostics unconditionally
+// published its (empty, since there are no parser errors) diagnostics list on
+// every didChange; the subsequent debounced/synchronous runValidation pass
+// then computed the exact same semantic diagnostics as before the edit and,
+// due to its hash-based dedup, correctly skipped re-publishing them -- so the
+// bogus empty publish was never overwritten, leaving the client's diagnostics
+// pane empty even though the warning was still valid. See publishImmediateDiagnostics
+// in internal/lsp/server.go.
+func TestNoFlickerOnEditWithoutParserErrors(t *testing.T) {
+	lsp.ResetTestServer()
+
+	origPublish := lsp.PublishDiagnosticsFn
+	defer func() { lsp.PublishDiagnosticsFn = origPublish }()
+
+	var mu sync.Mutex
+	lastDiags := make(map[string][]lsp.LSPDiagnostic)
+	lsp.PublishDiagnosticsFn = func(ctx context.Context, uri string, diags []lsp.LSPDiagnostic) {
+		mu.Lock()
+		defer mu.Unlock()
+		lastDiags[uri] = diags
+	}
+
+	uri := "file:///flicker_test.marte"
+	content := `#package Test.Common
++MyGAM = {
+    Class = GAM1
+    InputSignals = {
+        Sig1 = { Type = int32 }
+    }
+}
+`
+
+	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
+		TextDocument: lsp.TextDocumentItem{URI: uri, Text: content},
+	})
+
+	hasUnusedGAMWarning := func(diags []lsp.LSPDiagnostic) bool {
+		for _, d := range diags {
+			if strings.Contains(d.Message, "Unused GAM") {
+				return true
+			}
+		}
+		return false
+	}
+
+	mu.Lock()
+	openDiags := lastDiags[uri]
+	mu.Unlock()
+	if !hasUnusedGAMWarning(openDiags) {
+		t.Fatalf("Expected Unused GAM warning after open, got: %+v", openDiags)
+	}
+
+	// Trivial edit that doesn't move or otherwise affect the GAM node, so the
+	// semantic diagnostic set produced by runValidation is identical to the
+	// one already published above.
+	newContent := content + "// trivial trailing comment\n"
+	lsp.HandleDidChange(lsp.DidChangeTextDocumentParams{
+		TextDocument:   lsp.VersionedTextDocumentIdentifier{URI: uri, Version: 2},
+		ContentChanges: []lsp.TextDocumentContentChangeEvent{{Text: newContent}},
+	})
+
+	mu.Lock()
+	afterEditDiags := lastDiags[uri]
+	mu.Unlock()
+	if !hasUnusedGAMWarning(afterEditDiags) {
+		t.Fatalf("Unused GAM warning was incorrectly cleared after a no-op edit (flicker bug). Got: %+v", afterEditDiags)
+	}
+}
+
+// TestCrossFileReferencesResolveAfterEditsViaCloneForEdit exercises
+// HandleDidOpen/HandleDidChange's snapshot-cloning path end-to-end. Both
+// handlers now use Snapshot.CloneForEdit (which skips resolving references on
+// the pre-edit tree, since that resolution is immediately discarded once
+// AddFile mutates the tree and it's re-resolved for real) instead of
+// Snapshot.Clone. This is a regression test that cross-file "go to
+// definition" still works correctly across a sequence of opens and edits with
+// the lighter clone path.
+func TestCrossFileReferencesResolveAfterEditsViaCloneForEdit(t *testing.T) {
+	lsp.ResetTestServer()
+
+	defURI := "file:///def.marte"
+	refURI := "file:///ref.marte"
+
+	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
+		TextDocument: lsp.TextDocumentItem{URI: defURI, Text: "#package Test.Common\n+Target = { Class = C }"},
+	})
+	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
+		TextDocument: lsp.TextDocumentItem{URI: refURI, Text: "#package Test.Common\n+Source = { Class = C Link = Target }"},
+	})
+
+	checkResolves := func() {
+		t.Helper()
+		params := lsp.DefinitionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: refURI},
+			Position:     lsp.Position{Line: 1, Character: 29}, // "Target" in "Link = Target"
+		}
+		res := lsp.HandleDefinition(params)
+		locs, ok := res.([]lsp.Location)
+		if !ok || len(locs) == 0 {
+			t.Fatalf("Expected definition to resolve, got %#v", res)
+		}
+		if locs[0].URI != defURI {
+			t.Fatalf("Expected definition in %s, got %s", defURI, locs[0].URI)
+		}
+	}
+
+	checkResolves()
+
+	// Edit ref.marte (a successful re-parse, so HandleDidChange's AddFile +
+	// ResolveReferences path runs) and confirm the cross-file reference is
+	// still resolved against the newly cloned tree afterwards.
+	lsp.HandleDidChange(lsp.DidChangeTextDocumentParams{
+		TextDocument: lsp.VersionedTextDocumentIdentifier{URI: refURI, Version: 2},
+		ContentChanges: []lsp.TextDocumentContentChangeEvent{{
+			Text: "#package Test.Common\n+Source = { Class = C Link = Target }\n// edited\n",
+		}},
+	})
+
+	checkResolves()
 }
