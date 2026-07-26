@@ -1,0 +1,592 @@
+#package jada_gyro.RTApp.Data
+
+
++DDB1 = {
+  Signals = {
+    PXI6528_Status = {
+      Type = uint32
+    }
+    PXI6259_Status = {
+      Type = uint32
+    }
+    PXI6683_Status = {
+      Type = uint8
+    }
+    PXI6683_PtpdStatus = {
+      Type = uint8
+    }
+    GYA_APS_READY = {
+      Type = uint8
+    }
+    GYA_APS_FLT = {
+      Type = uint8
+    }
+    GYA_BPS_READY = {
+      Type = uint8
+    }
+    GYA_BPS_FLT = {
+      Type = uint8
+    }
+    MHVPS_OV = {
+      Type = uint8
+    }
+    MHVPS_OC = {
+      Type = uint8
+    }
+    MHVPS_FLT = {
+      Type = uint8
+    }
+    MHVPS_READY = {
+      Type = uint8
+    }
+    ECPC_MOD = {
+      Type = uint8
+    }
+    FAST_TRIP = {
+      Type = uint8
+    }
+    PLC_ITL = {
+      Type = uint8
+    }
+    PLC_STANDBY = {
+      Type = uint8
+    }
+    PLC_READY = {
+      Type = uint8
+    }
+    PLC_ON = {
+      Type = uint8
+    }
+    PLC_PERMIT = {
+      Type = uint8
+    }
+    PLC_OP_SELECTED = {
+      Type = uint8
+    }
+    PLC_CC_OP_SELECTED = {
+      Type = uint8
+    }
+    PLC_SYNCMODE = {
+      Type = uint8
+    }
+    TRIGGER = {
+      Type = uint8
+    }
+    APS_HVON = {
+      Type = uint8
+    }
+    APS_SWON = {
+      Type = uint8
+    }
+    BPS_HVON = {
+      Type = uint8
+    }
+    BPS_SWON = {
+      Type = uint8
+    }
+    MHVPS_HVON = {
+      Type = uint8
+    }
+    BEAM_ON_STAT = {
+      Type = uint8
+    }
+    HVARMED = {
+      Type = uint8
+    }
+    HVINJECTION = {
+      Type = uint8
+    }
+    RFON = {
+      Type = uint8
+    }
+    ELAPSED_TIME = {
+      Type = uint32
+    }
+    BEAM_ON_TIME = {
+      Type = uint32
+    }
+    SHOT_ID = {
+      Type = uint32
+    }
+    CRIO_RV1 = {
+      Type = uint8
+    }
+    CRIO_RV2 = {
+      Type = uint8
+    }
+    CRIO_RV3 = {
+      Type = uint8
+    }
+    PulseStartTime = {
+      Type = uint64
+    }
+    PulseStopTime = {
+      Type = uint64
+    }          
+    PXI6259_Status_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint32
+    }
+    PXI6528_Status_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint32
+    }
+    PXI6683_Status_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PXI6683_PtpdStatus_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    GYA_APS_READY_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    GYA_APS_FLT_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    GYA_BPS_READY_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    GYA_BPS_FLT_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    MHVPS_OV_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    MHVPS_OC_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    MHVPS_FLT_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    MHVPS_READY_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    ECPC_MOD_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    FAST_TRIP_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_ITL_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_STANDBY_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_READY_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_ON_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_PERMIT_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_OP_SELECTED_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_CC_OP_SELECTED_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PLC_SYNCMODE_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    TRIGGER_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    BEAM_ON_STAT_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    HVARMED_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    HVINJECTION_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    RFON_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    ELAPSED_TIME_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint32
+    }
+    BEAM_ON_TIME_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint32
+    }
+    SHOT_ID_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint32
+    }
+    CRIO_RV1_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    CRIO_RV2_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    CRIO_RV3_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint8
+    }
+    PulseStartTime_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint64
+    }
+    PulseStopTime_SAMPLES = {
+      NumberOfElements = @fast_slow_ratio
+      Type = uint64
+    }              
+  }
+}
++DDB3 = {
+  Signals = {
+    SHOT_ID = {
+      Type = uint32
+    }
+    //# DI.0
+    GYA_APS_READY = {
+      Type = uint8
+    }
+    //# DI.1
+    GYA_APS_FLT = {
+      Type = uint8
+    }
+    //# DI.2
+    GYA_BPS_READY = {
+      Type = uint8
+    }
+    //# DI.3
+    GYA_BPS_FLT = {
+      Type = uint8
+    }
+    //# DI.4
+    MHVPS_OV = {
+      Type = uint8
+    }
+    //# DI.5
+    MHVPS_OC = {
+      Type = uint8
+    }
+    //# DI.6
+    MHVPS_FLT = {
+      Type = uint8
+    }
+    //# DI.7
+    MHVPS_READY = {
+      Type = uint8
+    }
+    //# DI.8
+    ECPC_MOD = {
+      Type = uint8
+    }
+    //# DI.9
+    FAST_TRIP = {
+      Type = uint8
+    }
+    //# DI 11
+    CRIO_RV1 = {
+      Type = uint8
+    }
+    //# DI 12
+    CRIO_RV2 = {
+      Type = uint8
+    }
+    //# DI 13
+    CRIO_RV3 = {
+      Type = uint8
+    }
+    //# DI.14
+    PLC_ITL = {
+      Type = uint8
+    }
+    //# DI.15
+    PLC_STANDBY = {
+      Type = uint8
+    }
+    //# DI.16
+    PLC_READY = {
+      Type = uint8
+    }
+    //# DI.17
+    PLC_ON = {
+      Type = uint8
+    }
+    //# DI.18 
+    PLC_PERMIT = {
+      Type = uint8
+    }
+    //# DI.19
+    PLC_OP_SELECTED = {
+      Type = uint8
+    }
+    //# DI.20
+    PLC_CC_OP_SELECTED = {
+      Type = uint8
+    }
+    //# DI.21
+    PLC_SYNCMODE = {
+      Type = uint8
+    }
+    //# DI.22
+    TRIGGER = {
+      Type = uint8
+    }
+    //# DI.23
+    NONE_DI23 = {
+      Type = uint8
+    }
+    //# DO.0
+    APS_HVON = {
+      Type = uint8
+    }
+    //# DO.1
+    APS_SWON = {
+      Type = uint8
+    }
+    //# DO.2
+    APS_STOP = {
+      Type = uint8
+    }
+    //# DO.3
+    BPS_HVON = {
+      Type = uint8
+    }
+    //# DO.4
+    BPS_SWON = {
+      Type = uint8
+    }
+    //# DO.5
+    BPS_STOP = {
+      Type = uint8
+    }
+    //# DO.6
+    BEAM_ON_STAT = {
+      Type = uint8
+    }
+    //# DO.7 PCF -> CRIO
+    DO_REV5 = {
+      Type = uint8
+    }
+    //# DO.8 PCF -> CRIO (PROTECTION PAUSE SIGNAL)
+    FAST_PAUSE = {
+      Type = uint8
+    }
+    //# DO.9 PCF -> CRIO
+    DO_REV7 = {
+      Type = uint8
+    }
+    //# DO.10 PCF -> CRIO
+    DO_REV8 = {
+      Type = uint8
+    }
+    //# DO.11
+    MHVPS_HVON = {
+      Type = uint8
+    }
+    //# DO.12
+    MHVPS_STOP = {
+      Type = uint8
+    }
+    //# DO.13
+    MHVPS_MODSW = {
+      Type = uint8
+    }
+    //# DO.14
+    PCF_FLT = {
+      Type = uint8
+    }
+    //# DO.15
+    HVARMED = {
+      Type = uint8
+    }
+    //# DO.16
+    HVINJECTION = {
+      Type = uint8
+    }
+    //# DO.17
+    RFON = {
+      Type = uint8
+    }
+    //# DO.18
+    FHPS_RU = {
+      Type = uint8
+    }
+    //# DO.19
+    SCM_RU = {
+      Type = uint8
+    }
+    //# DO.20
+    SCM_RD = {
+      Type = uint8
+    }
+    //# DO.21
+    CCPS_IN_OPERATION = {
+      Type = uint8
+    }
+    //# DO.22
+    PXI_FLT = {
+      Type = uint8
+    }
+    //# Internal Fast Stop signal
+    FAST_STOP = {
+      Type = uint8
+    }
+    //# Computed Shot length flag
+    MODE_SHOTLEN_FLAG = {
+      Type = uint32
+    }
+    //# TODO: Document signal
+    RTSMValue = {
+      Type = uint32
+    }
+  }
+}
+//# PXI NI6528 Digital input datasource
+//# TODO: configure it
++NI6528_0_DIO = {
+  Class = NI6528
+  DeviceName = "/dev/pxi6528"
+  BoardId = 1 // TODO: check if not 1
+  Signals = {
+    //# P0.0 I.00 APS A Ready
+    //# P0.1 I.01 APS A Fault
+    //# P0.2 I.02 BPS A Ready
+    //# P0.3 I.03 BPS A Fault
+    //# P0.4 I.04 MHVPS Over volage
+    //# P0.5 I.05 MHVPS Over current
+    //# P0.6 I.06 MHVPS Trip
+    //# P0.7 I.07 MHVPS Ready
+    DI0 = {
+      Type = uint8
+      PortId = 0
+    }
+    //# P1.0 I.08 ECPC Modulation 
+    //# P1.1 I.09 Fast Protection Trip
+    //# P1.2 I.10
+    //# P1.3 I.11 CRIO RV1
+    //# P1.4 I.12 CRIO RV2
+    //# P1.5 I.13 CRIO RV3
+    //# P1.6 I.14 LV1 Alarm
+    //# P1.7 I.15 PLC STANDBY
+    DI1 = {
+      Type = uint8
+      PortId = 1
+    }
+    //# P2.0 I.16 PLC READY
+    //# P2.1 I.17 PLC ON
+    //# P2.2 I.18 PLC Gyrotron A Operation permitted
+    //# P2.3 I.19 Gyrotron A Operation Selected
+    //# P2.4 I.20 Gyrotron A Collector Coil Operation
+    //# P2.5 I.21 Sync Mode Selected
+    //# P2.6 I.22 Trigger
+    //# P2.7 I.23
+    DI2 = {
+      Type = uint8
+      PortId = 2
+    }
+    //# P3.0 O.00 APS_HVON
+    //# P3.1 O.01 APS_SWON
+    //# P3.2 O.02 APS_Shutdown
+    //# P3.3 O.03 BPS_HVON
+    //# P3.4 O.04 BPS_SWON
+    //# P3.5 O.05 BPS_Shutdown
+    //# P3.6 O.06 GY1_Beam_ON_status
+    //# P3.7 O.07 RV5 _cRIO
+    DO3 = {
+      Type = uint8
+      PortId = 3
+      InversionMask = 0xFF
+    }
+    //# P4.0 O.08 RV6 _cRIO
+    //# P4.1 O.09 RV7 _cRIO
+    //# P4.2 O.10 RV8 _cRIO
+    //# P4.3 O.11 MHVPS_HVON
+    //# P4.4 O.12 MHVPS_Shutdown
+    //# P4.5 O.13 MHVPS_MOD
+    //# P4.6 O.14 PCF_FLT
+    //# P4.7 O.15 HVArmed
+    DO4 = {
+      Type = uint8
+      PortId = 4
+      InversionMask = 0xFF
+    }
+    //# P5.0 O.16 HVInjection
+    //# P5.1 O.17 RFON
+    //# P5.2 O.18 FHPS_Rampup_complete
+    //# P5.3 O.19 SCM_RU_Complete
+    //# P5.4 O.20 SCM_RD_Complete
+    //# P5.5 O.21 CCPS_IN_OPERATION
+    //# P5.6 O.22 PXI_FLT 
+    //# P5.7 O.23 
+    DO5 = {
+      Type = uint8
+      PortId = 5
+      InversionMask = 0xFF
+    }
+  }
+}
+
+
+//# PXI NI6528 Digital input datasource
+//# TODO: configure it
++NI6528_1_DIO = {
+  Class = NI6528
+  DeviceName = "/dev/pxi6528"
+  BoardId = 0 // TODO: check if not 1
+  Signals = {
+    //# P5.6 O.22 PXI_FLT 
+    DO5 = {
+      Type = uint8
+      PortId = 5
+      InversionMask = 0xFF
+    }
+  }
+}
+
+
+
+//# Direct HW accesses. Follwing device/port assignment must be consistent with actual wiring.
+//# NI6259.0
+//# APS_SWON BoardId=0, PortId=3.0
++NI6259_DIO_P0 = {
+  Class = "NI6259::NI6259DIO"
+  DeviceName = "/dev/pxi6259"
+  BoardId = 1
+  Signals = {
+    Status = {
+      Type = uint32
+    }
+    NI6259Value = {
+      Type = uint32
+      Mask = 0xFF
+      PortId = 0
+    }
+  }
+}

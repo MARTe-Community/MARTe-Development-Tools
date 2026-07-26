@@ -1,0 +1,102 @@
+#package jada_gyro.RTApp.Functions
+
++FastStopRequestGAM = {
+  Class = JAConditionalSignalUpdateGAM
+  Operation = "OR"
+  InputSignals = {
+    GYA_APS_FLT = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    GYA_BPS_FLT = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    MHVPS_OV = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    MHVPS_OC = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    MHVPS_FLT = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    MIS_ITL = {
+      DataSource = EPICSCAInput
+      Type = uint32
+      Comparator = "EQUALS"
+      Value = 1
+    }
+    PLC_ITL = {
+      DataSource = DDB3
+      Type = uint8
+      Comparator = "EQUALS"
+      Value = 1
+    }
+  }
+  OutputSignals = {
+    FAST_STOP = {
+      DataSource = DDB3
+      Type = uint8
+      DefaultValue = 0
+      Value = 1
+    }
+  }
+}
+//# Check the selected mode, and check maximum pulse length. Use with a StateMachineGAM
++ModeLimitGAM = {
+  Class = JAModeControlGAM
+  InputSignals = {
+    PLC_MODE1 = {
+      DataSource = EPICSCAInput
+    }
+    MD1_SHOTLEN_LIM = {
+      DataSource = EPICSCAInput
+    }
+    PLC_MODE2 = {
+      DataSource = EPICSCAInput
+    }
+    MD2_SHOTLEN_LIM = {
+      DataSource = EPICSCAInput
+    }
+    PLC_MODE3 = {
+      DataSource = EPICSCAInput
+    }
+    MD3_SHOTLEN_LIM = {
+      DataSource = EPICSCAInput
+    }
+    PLC_MODE4 = {
+      DataSource = EPICSCAInput
+    }
+    MD4_SHOTLEN_LIM = {
+      DataSource = EPICSCAInput
+    }
+    RFON = {
+      DataSource = Th2Bridge
+    }
+    Time = {
+      DataSource = Th2Bridge
+    }
+    HVInjection = {
+      DataSource = Th2Bridge
+    }
+  }
+  OutputSignals = {
+    MODE_SHOTLEN_FLAG = {
+      DataSource = DDB3
+    }
+  }
+}

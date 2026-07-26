@@ -1,0 +1,152 @@
+#package jada_gyro.StateMachine
+
++WAITREADY = {
+  Class = ReferenceContainer
+  +GoWaitStandby = {
+    Class = StateMachineEvent
+    NextState = WAITSTANDBY
+    NextStateError = ERROR
+/*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = WaitStandby
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_standby
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 0
+      }
+    }
+  }
+  +GoWaitPermit = {
+    Class = StateMachineEvent
+    NextState = WAITPERMIT
+    NextStateError = ERROR
+/*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = WaitPermit
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_permit
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 0
+      }
+    }
+  }
+  +GoError = {
+    Class = StateMachineEvent
+    NextState = ERROR
+    NextStateError = ERROR
+/*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = Error
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_error
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 1
+      }
+    }
+  }
+}

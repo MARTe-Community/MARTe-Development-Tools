@@ -1,0 +1,573 @@
+#package jada_gyro.RTApp.Functions
+
+
+//# Synchronise Thread 1 to Thread 3 using SynchTread data source
+//# Thread 1 will be executed every @fast_slow_ratio cycles of Thread 3
++SyncThreadConsumerGAM = {
+  Class = IOGAM
+  InputSignals = {
+    PXI6259_Status = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+      Frequency = 1
+    }
+    PXI6528_Status = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PXI6683_Status = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PXI6683_PtpdStatus = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    GYA_APS_READY = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    GYA_APS_FLT = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    GYA_BPS_READY = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    GYA_BPS_FLT = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    MHVPS_OV = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    MHVPS_OC = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    MHVPS_FLT = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    MHVPS_READY = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    ECPC_MOD = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    FAST_TRIP = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_ITL = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_STANDBY = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_READY = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_ON = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_PERMIT = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_OP_SELECTED = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_CC_OP_SELECTED = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PLC_SYNCMODE = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    TRIGGER = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    BEAM_ON_STAT = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    HVARMED = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    HVINJECTION = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    RFON = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    BEAM_ON_TIME = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    RFON_TIME = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    SHOT_ID = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    CRIO_RV1 = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    CRIO_RV2 = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    CRIO_RV3 = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PulseStartTime = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }
+    PulseStopTime = {
+      DataSource = SynchThread
+      Samples = @fast_slow_ratio
+    }          
+  }
+  OutputSignals = {
+    PXI6259_Status_SAMPLES = {
+      DataSource = DDB1
+    }
+    PXI6528_Status_SAMPLES = {
+      DataSource = DDB1
+    }
+    PXI6683_Status_SAMPLES = {
+      DataSource = DDB1
+    }
+    PXI6683_PtpdStatus_SAMPLES = {
+      DataSource = DDB1
+    }
+    GYA_APS_READY_SAMPLES = {
+      DataSource = DDB1
+    }
+    GYA_APS_FLT_SAMPLES = {
+      DataSource = DDB1
+    }
+    GYA_BPS_READY_SAMPLES = {
+      DataSource = DDB1
+    }
+    GYA_BPS_FLT_SAMPLES = {
+      DataSource = DDB1
+    }
+    MHVPS_OV_SAMPLES = {
+      DataSource = DDB1
+    }
+    MHVPS_OC_SAMPLES = {
+      DataSource = DDB1
+    }
+    MHVPS_FLT_SAMPLES = {
+      DataSource = DDB1
+    }
+    MHVPS_READY_SAMPLES = {
+      DataSource = DDB1
+    }
+    ECPC_MOD_SAMPLES = {
+      DataSource = DDB1
+    }
+    FAST_TRIP_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_ITL_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_STANDBY_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_READY_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_ON_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_PERMIT_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_OP_SELECTED_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_CC_OP_SELECTED_SAMPLES = {
+      DataSource = DDB1
+    }
+    PLC_SYNCMODE_SAMPLES = {
+      DataSource = DDB1
+    }
+    TRIGGER_SAMPLES = {
+      DataSource = DDB1
+    }
+    BEAM_ON_STAT_SAMPLES = {
+      DataSource = DDB1
+    }
+    HVARMED_SAMPLES = {
+      DataSource = DDB1
+    }
+    HVINJECTION_SAMPLES = {
+      DataSource = DDB1
+    }
+    RFON_SAMPLES = {
+      DataSource = DDB1
+    }
+    ELAPSED_TIME_SAMPLES = {
+      DataSource = DDB1
+    }
+    BEAM_ON_TIME_SAMPLES = {
+      DataSource = DDB1
+    }
+    SHOT_ID_SAMPLES = {
+      DataSource = DDB1
+    }
+    CRIO_RV1_SAMPLES = {
+      DataSource = DDB1
+    }
+    CRIO_RV2_SAMPLES = {
+      DataSource = DDB1
+    }
+    CRIO_RV3_SAMPLES = {
+      DataSource = DDB1
+    }
+    PulseStartTime_SAMPLES = {
+      DataSource = DDB1
+    }
+    PulseStopTime_SAMPLES = {
+      DataSource = DDB1
+    }          
+  }
+}
+
++DecimateGAM = {
+  Class = IOGAM
+  InputSignals = {
+    PXI6259_Status_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PXI6528_Status_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PXI6683_Status_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PXI6683_PtpdStatus_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    GYA_APS_READY_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    GYA_APS_FLT_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    GYA_BPS_READY_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    GYA_BPS_FLT_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    MHVPS_OV_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    MHVPS_OC_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    MHVPS_FLT_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    MHVPS_READY_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    ECPC_MOD_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    FAST_TRIP_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_ITL_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_STANDBY_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_READY_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_ON_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_PERMIT_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_OP_SELECTED_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_CC_OP_SELECTED_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PLC_SYNCMODE_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    TRIGGER_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    BEAM_ON_STAT_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    HVARMED_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    HVINJECTION_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    RFON_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    ELAPSED_TIME_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    BEAM_ON_TIME_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    SHOT_ID_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    CRIO_RV1_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    CRIO_RV2_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    CRIO_RV3_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PulseStartTime_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }
+    PulseStopTime_SAMPLES = {
+      DataSource = DDB1
+      Ranges = { { @dec_index, @dec_index } }
+    }              
+    FHPS_A_RU = {
+     DataSource = WGAsyncBridge 
+    }
+  }
+  OutputSignals = {
+    PXI6259_Status = {
+      DataSource = DDB1
+    }
+    PXI6528_Status = {
+      DataSource = DDB1
+    }
+    PXI6683_Status = {
+      DataSource = DDB1
+    }
+    PXI6683_PtpdStatus = {
+      DataSource = DDB1
+    }
+    GYA_APS_READY = {
+      DataSource = DDB1
+    }
+    GYA_APS_FLT = {
+      DataSource = DDB1
+    }
+    GYA_BPS_READY = {
+      DataSource = DDB1
+    }
+    GYA_BPS_FLT = {
+      DataSource = DDB1
+    }
+    MHVPS_OV = {
+      DataSource = DDB1
+    }
+    MHVPS_OC = {
+      DataSource = DDB1
+    }
+    MHVPS_FLT = {
+      DataSource = DDB1
+    }
+    MHVPS_READY = {
+      DataSource = DDB1
+    }
+    ECPC_MOD = {
+      DataSource = DDB1
+    }
+    FAST_TRIP = {
+      DataSource = DDB1
+    }
+    PLC_ITL = {
+      DataSource = DDB1
+    }
+    PLC_STANDBY = {
+      DataSource = DDB1
+    }
+    PLC_READY = {
+      DataSource = DDB1
+    }
+    PLC_ON = {
+      DataSource = DDB1
+    }
+    PLC_PERMIT = {
+      DataSource = DDB1
+    }
+    PLC_OP_SELECTED = {
+      DataSource = DDB1
+    }
+    PLC_CC_OP_SELECTED = {
+      DataSource = DDB1
+    }
+    PLC_SYNCMODE = {
+      DataSource = DDB1
+    }
+    TRIGGER = {
+      DataSource = DDB1
+    }
+    BEAM_ON_STAT = {
+      DataSource = DDB1
+    }
+    HVARMED = {
+      DataSource = DDB1
+    }
+    HVINJECTION = {
+      DataSource = DDB1
+    }
+    RFON = {
+      DataSource = DDB1
+    }
+    ELAPSED_TIME = {
+      DataSource = DDB1
+    }
+    BEAM_ON_TIME = {
+      DataSource = DDB1
+    }
+    SHOT_ID = {
+      DataSource = DDB1
+    }
+    CRIO_RV1 = {
+      DataSource = DDB1
+    }
+    CRIO_RV2 = {
+      DataSource = DDB1
+    }
+    CRIO_RV3 = {
+      DataSource = DDB1
+    }
+    PulseStartTime = {
+      DataSource = DDB1
+    }
+    PulseStopTime = {
+      DataSource = DDB1
+    }              
+    FHPS_A_RU = {
+     DataSource = DDB1 
+    }
+  }
+}
+
++EPICSThSyncGAM = {
+  Class = IOGAM
+  InputSignals = {
+    BPS_OUT = {
+      DataSource = DDB1
+    }
+    APS_OUT = {
+      DataSource = DDB1
+    }
+    MHVPS_OUT = {
+      DataSource = DDB1
+    }
+    PLC_STANDBY = {
+      DataSource = DDB1
+    }
+    FHPS_A_PrePro = {
+      DataSource = DDB1
+    }
+    MCPS_RU_COMPLETED = {
+     DataSource = EPICSCAInput 
+    }
+    MCPS_RD_COMPLETED = {
+     DataSource = EPICSCAInput 
+    }
+    CCPS_IN_OPERATION = {
+     DataSource = EPICSCAInput 
+    }
+  }
+  OutputSignals = {
+    BPS_OUT = {
+      DataSource = Th1Bridge
+    }
+    APS_OUT = {
+      DataSource = Th1Bridge
+    }
+    MHVPS_OUT = {
+      DataSource = Th1Bridge
+    }
+    PLC_STANDBY = {
+      DataSource = Th1Bridge
+    }
+    FHPS_A_PrePro = {
+      DataSource = Th1Bridge
+    }
+    MCPS_RU_COMPLETED = {
+      DataSource = Th1Bridge
+    }
+    MCPS_RD_COMPLETED = {
+      DataSource = Th1Bridge
+    }
+    CCPS_IN_OPERATION = {
+      DataSource = Th1Bridge
+    }
+  }
+}

@@ -1,0 +1,792 @@
+#package jada_gyro.RTApp.States
+
+#let wg_functions: [&GAM] = {
+  WGTimerGAM,
+  CCPSWaveformGAM,
+  FHPS_A_SetpointGAM,
+  FHPS_A_RampupGAM,
+  FHPS_A_StateGAM,
+  FHPS_A_GainGAM,
+  FHPS_B_SetpointGAM,
+  FHPS_B_RampupGAM,
+  FHPS_B_StateGAM,
+  FHPS_B_GainGAM,
+  WGProducerGAM
+}
+#if @udp_streamer
+  #let adc_thread: [&GAM] = {
+    ReadADC,
+    AdcTimeStamp,
+    PulseDetector,
+    ComputeDANTrigger,
+    PushADCtoDAN,
+    PushADCtoEpics,
+    PushADCtoUDP
+  }
+#else
+  #let adc_thread: [&GAM] = {
+    ReadADC,
+    AdcTimeStamp,
+    PulseDetector,
+    ComputeDANTrigger,
+    PushADCtoDAN,
+    PushADCtoEpics
+  }
+#end
+
++Disabled = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_epics
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        MCPSGAM,
+        PXIErrorGAM,
+        GoErrorGAM,
+        GoWaitStandbyGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+    }
+    #if @sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_sdn
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_rt
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        HVPSsOffGAM,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      Functions = {
+        ReadADC,
+        AdcTimeStamp,
+        PulseDetector,
+        ComputeDANTrigger,
+        PushADCtoDAN,
+        PushADCtoEpics,
+        #if @udp_streamer
+          PushADCtoUDP
+        #end
+      }
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = {
+        WGTimerGAM,
+        CCPSWaveformGAM,
+        FHPS_A_StateGAM,
+        FHPS_A_GainGAM,
+        FHPS_B_StateGAM,
+        FHPS_B_GainGAM,
+        WGProducerGAM
+      }
+    }
+  }
+}
++WaitStandby = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        MCPSGAM,
+        PXIErrorGAM,
+        GoDisabledGAM,
+        GoWaitReadyGAM,
+        GoErrorGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+      CPUs = @cpus_epics
+    }
+    #if @sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        HVPSsOffGAM,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+      CPUs = @cpus_rt
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      Functions = {
+        ReadADC,
+        AdcTimeStamp,
+        PulseDetector,
+        ComputeDANTrigger,
+        PushADCtoDAN,
+        PushADCtoEpics,
+        #if @udp_streamer
+          PushADCtoUDP
+        #end
+      }
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = @wg_functions
+    }
+  }
+}
++WaitReady = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        WFRecordGAM,
+        PreProgrammedGAM,
+        PXIErrorGAM,
+        GoWaitPermitGAM,
+        GoWaitStandbyFromReadyGAM,
+        GoErrorGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+      CPUs = @cpus_epics
+    }
+    #if @sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        HVPSsOffGAM,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+      CPUs = @cpus_rt
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      #if @udp_streamer
+        Functions = {
+          ReadADC,
+          AdcTimeStamp,
+          PulseDetector,
+          ComputeDANTrigger,
+          PushADCtoDAN,
+          PushADCtoEpics,
+          PushADCtoUDP
+        }
+      #else
+        Functions = {
+          ReadADC,
+          AdcTimeStamp,
+          PulseDetector,
+          ComputeDANTrigger,
+          PushADCtoDAN,
+          PushADCtoEpics
+        }
+      #end
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = @wg_functions
+    }
+  }
+}
++WaitPermit = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        WFRecordGAM,
+        PreProgrammedGAM,
+        PXIErrorGAM,
+        GoWaitReadyFromWaitPermitGAM,
+        GoWaitHVONGAM,
+        #if @prep_enabled
+          GoWaitHVON_PREP_GAM
+        #end
+        #if @sdn_enabled
+          GoWaitHVON_SDN_GAM
+        #end
+        #if (@sdn_enabled && @prep_enabled)
+          GoWaitHVON_SDN_PREP_GAM
+        #end
+        GoErrorHVGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+      CPUs = @cpus_epics
+    }
+    #if @sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        HVPSsOffGAM,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+      CPUs = @cpus_rt
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      Functions = {
+        ReadADC,
+        AdcTimeStamp,
+        PulseDetector,
+        ComputeDANTrigger,
+        PushADCtoDAN,
+        PushADCtoEpics,
+        #if @udp_streamer
+          PushADCtoUDP
+        #end
+      }
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = @wg_functions
+    }
+  }
+}
+// Real-Time state for HVPS sequence timing control.
++WaitHVON = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        PXIErrorGAM,
+        FromWaitHVONToWaitStandby,
+        FromWaitHVONToWaitPermit,
+        GoErrorHVGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+      CPUs = @cpus_epics
+    }
+    #if sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        FastEpicsInputGAM,
+        FastStopRequestGAM,
+        ModeLimitGAM,
+        GAMRealTimeStateMachine,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+      CPUs = @cpus_rt
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      Functions = {
+        ReadADC,
+        AdcTimeStamp,
+        PulseDetector,
+        ComputeDANTrigger,
+        PushADCtoDAN,
+        PushADCtoEpics,
+        #if @udp_streamer
+          PushADCtoUDP
+        #end
+      }
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = @wg_functions
+    }
+  }
+}
+#if @sdn_enabled
+  +WaitHVON_SDN = {
+    Class = RealTimeState
+    +Threads = {
+      Class = ReferenceContainer
+      +EPICSThread = {
+        Class = RealTimeThread
+        Functions = {
+          SyncThreadConsumerGAM,
+          DecimateGAM,
+          StateGAM,
+          PXIErrorGAM,
+          FromWaitHVONToWaitStandby,
+          FromWaitHVONToWaitPermit,
+          GoErrorHVGAM,
+          ChoiceGAM,
+          ReferencesConditioning,
+          EPICSThSyncGAM,
+          EPICSOutputGAM
+        }
+        CPUs = @cpus_epics
+      }
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+      +RealTimeThread = {
+        Class = RealTimeThread
+        Functions = {
+          FastTimerGAM,
+          NI6528_0_ReaderGAM,
+          AsyncIOGAM,
+          FastEpicsInputGAM,
+          FastStopRequestGAM,
+          ModeLimitGAM,
+          GAMSDNRealTimeStateMachine,
+          StoreStartPulseTime,
+          StoreStopPulseTime,
+          NI6528_0_WriterGAM,
+          SyncThreadProducerGAM
+        }
+        CPUs = @cpus_rt
+      }
+      +ADCThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_adc
+        Functions = {
+          ReadADC,
+          AdcTimeStamp,
+          PulseDetector,
+          ComputeDANTrigger,
+          PushADCtoDAN,
+          PushADCtoEpics,
+          #if @udp_streamer
+            PushADCtoUDP
+          #end
+        }
+      }
+      +DANThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_dan
+        Functions = {
+          WaitForDioSignals,
+          DANDIOPublisherGAM,
+          #if @udp_streamer
+            UdpDIOPublisherGAM
+          #end
+        }
+      }
+      +ReferenceGenerationThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_wg
+        Functions = @wg_functions
+      }
+    }
+  }
+#end
+#if @prep_enabled
+  +WaitHVON_PREP = {
+    Class = RealTimeState
+    +Threads = {
+      Class = ReferenceContainer
+      +EPICSThread = {
+        Class = RealTimeThread
+        Functions = {
+          SyncThreadConsumerGAM,
+          DecimateGAM,
+          StateGAM,
+          PreProgrammedGAM,
+          PXIErrorGAM,
+          FromWaitHVONToWaitStandby,
+          FromWaitHVONToWaitPermit,
+          GoErrorHVGAM,
+          ChoiceGAM,
+          ReferencesConditioning,
+          EPICSThSyncGAM,
+          EPICSOutputGAM
+        }
+        CPUs = @cpus_epics
+      }
+      #if @sdn_enabled
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = {
+            TimeSDNGAM,
+            SDNCommandGAM,
+            SDNReplyGAM
+          }
+          CPUs = @cpus_sdn
+        }
+      #end
+      +RealTimeThread = {
+        Class = RealTimeThread
+        Functions = {
+          FastTimerGAM,
+          NI6528_0_ReaderGAM,
+          AsyncIOGAM,
+          FastEpicsInputGAM,
+          FastStopRequestGAM,
+          ModeLimitGAM,
+          GAMRealTimeStateMachine,
+          StoreStartPulseTime,
+          StoreStopPulseTime,
+          NI6528_0_WriterGAM,
+          SyncThreadProducerGAM
+        }
+        CPUs = @cpus_rt
+      }
+      +ADCThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_adc
+        Functions = @adc_thread
+      }
+      +DANThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_dan
+        Functions = {
+          WaitForDioSignals,
+          DANDIOPublisherGAM,
+          #if @udp_streamer
+            UdpDIOPublisherGAM
+          #end
+        }
+      }
+      +ReferenceGenerationThread = {
+        Class = RealTimeThread
+        CPUs = @cpus_wg
+        Functions = @wg_functions
+      }
+    }
+  }
+  #if @sdn_enabled
+    +WaitHVON_SDN_PREP = {
+      Class = RealTimeState
+      +Threads = {
+        Class = ReferenceContainer
+        +EPICSThread = {
+          Class = RealTimeThread
+          Functions = {
+            SyncThreadConsumerGAM,
+            DecimateGAM,
+            StateGAM,
+            PreProgrammedGAM,
+            PXIErrorGAM,
+            FromWaitHVONToWaitStandby,
+            FromWaitHVONToWaitPermit,
+            GoErrorHVGAM,
+            ChoiceGAM,
+            ReferencesConditioning,
+            EPICSThSyncGAM,
+            EPICSOutputGAM
+          }
+          CPUs = @cpus_epics
+        }
+        +SDNThread = {
+          Class = RealTimeThread
+          Functions = {
+            TimeSDNGAM,
+            SDNCommandGAM,
+            SDNReplyGAM
+          }
+          CPUs = @cpus_sdn
+        }
+        +RealTimeThread = {
+          Class = RealTimeThread
+          Functions = {
+            FastTimerGAM,
+            NI6528_0_ReaderGAM,
+            AsyncIOGAM,
+            FastEpicsInputGAM,
+            FastStopRequestGAM,
+            ModeLimitGAM,
+            GAMSDNRealTimeStateMachine,
+            StoreStartPulseTime,
+            StoreStopPulseTime,
+            SyncThreadProducerGAM
+          }
+          CPUs = @cpus_rt
+        }
+        +ADCThread = {
+          Class = RealTimeThread
+          CPUs = @cpus_adc
+          Functions = {
+            ReadADC,
+            AdcTimeStamp,
+            PulseDetector,
+            ComputeDANTrigger,
+            PushADCtoDAN,
+            PushADCtoEpics,
+            #if @udp_streamer
+              PushADCtoUDP
+            #end
+          }
+        }
+        +DANThread = {
+          Class = RealTimeThread
+          CPUs = @cpus_dan
+          Functions = {
+            WaitForDioSignals,
+            DANDIOPublisherGAM,
+            #if @udp_streamer
+              UdpDIOPublisherGAM
+            #end
+          }
+        }
+        +ReferenceGenerationThread = {
+          Class = RealTimeThread
+          CPUs = @cpus_wg
+          Functions = @wg_functions
+        }
+      }
+    }
+  #end
+#end
++Error = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +EPICSThread = {
+      Class = RealTimeThread
+      Functions = {
+        SyncThreadConsumerGAM,
+        DecimateGAM,
+        StateGAM,
+        PXIErrorGAM,
+        ResetErrorGAM,
+        ChoiceGAM,
+        ReferencesConditioning,
+        EPICSThSyncGAM,
+        EPICSOutputGAM
+      }
+      // REMOVED: GoErrorGAM (redundant), FHPSSetPointGAM and FHPSRumpUpGAM
+      // TODO: Discus about the removal
+      CPUs = @cpus_epics
+    }
+    #if @sdn_enabled
+      +SDNThread = {
+        Class = RealTimeThread
+        Functions = {
+          TimeSDNGAM,
+          SDNCommandGAM,
+          SDNReplyGAM
+        }
+        CPUs = @cpus_sdn
+      }
+    #end
+    +RealTimeThread = {
+      Class = RealTimeThread
+      Functions = {
+        FastTimerGAM,
+        NI6528_0_ReaderGAM,
+        AsyncIOGAM,
+        HVPSsOffGAM,
+        StoreStartPulseTime,
+        StoreStopPulseTime,
+        NI6528_0_WriterGAM,
+        SyncThreadProducerGAM
+      }
+      CPUs = @cpus_rt
+    }
+    +ADCThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_adc
+      Functions = {
+        ReadADC,
+        AdcTimeStamp,
+        PulseDetector,
+        ComputeDANTrigger,
+        PushADCtoDAN,
+        PushADCtoEpics,
+        #if @udp_streamer
+          PushADCtoUDP
+        #end
+      }
+    }
+    +DANThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_dan
+      Functions = {
+        WaitForDioSignals,
+        DANDIOPublisherGAM,
+        #if @udp_streamer
+          UdpDIOPublisherGAM
+        #end
+      }
+    }
+    +ReferenceGenerationThread = {
+      Class = RealTimeThread
+      CPUs = @cpus_wg
+      Functions = {
+        WGTimerGAM,
+        CCPSWaveformGAM,
+        FHPS_A_StateGAM,
+        FHPS_A_GainGAM,
+        FHPS_B_StateGAM,
+        FHPS_B_GainGAM,
+        WGProducerGAM
+      }
+    }
+  }
+}

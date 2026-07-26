@@ -335,7 +335,7 @@ var (
 	valMu       sync.Mutex
 	valCancels  = make(map[string]context.CancelFunc)
 	valTimers   = make(map[string]*time.Timer)
-	valGen      = make(map[string]int) // generation counter for debounce (BUG-012)
+	valGen      = make(map[string]int)
 
 	diagMu        sync.Mutex
 	lastPublished = make(map[string]string) // URI -> Hash of diagnostics
@@ -367,15 +367,17 @@ func triggerValidation(uri string) {
 	}
 
 	valMu.Lock()
-	gen := valGen[uri]
-	gen++
-	valGen[uri] = gen
+	defer valMu.Unlock()
 
 	if timer, ok := valTimers[uri]; ok {
 		timer.Stop()
 	}
 
 	valTimers[uri] = time.AfterFunc(1000*time.Millisecond, func() {
+		// This closure runs on its own goroutine (time.AfterFunc), so a panic
+		// here would otherwise crash the whole LSP process -- recover() only
+		// protects the goroutine it's declared in, it is not inherited from
+		// any caller.
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Printf("[ERROR] panic in debounced validation for %s: %v", uri, r)
@@ -383,14 +385,9 @@ func triggerValidation(uri string) {
 		}()
 
 		valMu.Lock()
-		// Only run if our generation is still current (BUG-012: prevents
-		// stale timer callbacks from running after Stop/reschedule).
-		if valGen[uri] != gen {
-			valMu.Unlock()
-			return
-		}
 		delete(valTimers, uri)
 
+		// Cancel previous validation for this URI
 		if cancel, ok := valCancels[uri]; ok {
 			cancel()
 		}
@@ -421,7 +418,7 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 		}
 	}
 
-	const maxBodySize = 10 * 1024 * 1024 // 10 MB
+	const maxBodySize = 10 * 1024 * 1024
 	if contentLength <= 0 || contentLength > maxBodySize {
 		return nil, fmt.Errorf("invalid Content-Length: %d (max %d)", contentLength, maxBodySize)
 	}
@@ -709,8 +706,7 @@ func HandleDidClose(params DidCloseTextDocumentParams) {
 		return
 	}
 
-	// 1. Cancel any pending validation and invalidate generation counter
-	//    so any in-flight timer callbacks become no-ops (BUG-013).
+	// 1. Cancel pending validation and invalidate generation (BUG-013)
 	valMu.Lock()
 	if timer, ok := valTimers[uri]; ok {
 		timer.Stop()
@@ -720,7 +716,7 @@ func HandleDidClose(params DidCloseTextDocumentParams) {
 		cancel()
 		delete(valCancels, uri)
 	}
-	valGen[uri]++ // invalidate any in-flight timer callback for this URI
+	valGen[uri]++
 	valMu.Unlock()
 
 	// 2. Clear diagnostics in the client
@@ -958,7 +954,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	for path, diags := range fileDiags {
 		fileURI := "file://" + path
 
-		// Simple hash via fmt.Sprintf (cheaper than json.Marshal for comparison)
+		// Simple hash (JSON representation)
 		hash := fmt.Sprintf("%v", diags)
 
 		if lastPublished[fileURI] == hash {
@@ -2948,14 +2944,6 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 }
 
 func respond(id any, result any) {
-	// JSON-RPC 2.0 requires id to be string, number, or null (BUG-036).
-	switch id.(type) {
-	case string, float64, int, int64, json.Number, nil:
-		// valid
-	default:
-		logger.Printf("[WARN] respond: invalid JSON-RPC id type %T, dropping response", id)
-		return
-	}
 	msg := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      id,
@@ -3555,9 +3543,6 @@ func HandleDocumentSymbol(params DocumentSymbolParams) []DocumentSymbol {
 	return symbols
 }
 
-// matchesQuery reports whether name matches the workspace symbol query.
-// Short queries (< 3 chars) use prefix matching to avoid noise.
-// Longer queries use substring matching.
 func matchesQuery(name, query string) bool {
 	if query == "" {
 		return true

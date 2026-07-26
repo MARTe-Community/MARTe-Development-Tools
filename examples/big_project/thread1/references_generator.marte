@@ -1,0 +1,136 @@
+#package jada_gyro.RTApp.Functions
+
+//# MCPS, GCPS PV to DDB1
++MCPSGAM = {
+  Class = IOGAM
+  InputSignals = {
+    MCPS_TRG_CURR_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    GCPS_TRG_CURR_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+  }
+  OutputSignals = {
+    MCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+    GCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+  }
+}
+//# Switching AO port source between internal variable and EPICS PV.
++ChoiceGAM = {
+  Class = JASourceChoiceGAM
+  numberOfPVs = 5
+  InputSignals = {
+    BPS_REF = {
+      DataSource = DDB1
+      Type = float32
+    }
+    BPS_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    BPS_MM = {
+      DataSource = EPICSCAInput
+      Type = uint32
+    }
+    DDB1::APS_REF: float32
+    // APS_MANUAL = {
+    //   DataSource = DDB1
+    //   Type = float32
+    // }
+    APS_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    APS_MM = {
+      DataSource = EPICSCAInput
+      Type = uint32
+    }
+    MHVPS_REF = {
+      DataSource = DDB1
+      Type = float32
+    }
+    MHVPS_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    MHVPS_MM = {
+      DataSource = EPICSCAInput
+      Type = uint32
+    }
+    MCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+    MCPS_TRG_CURR_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    MCPS_MM = {
+      DataSource = EPICSCAInput
+      Type = uint32
+    }
+    GCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+    GCPS_TRG_CURR_MANUAL = {
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    GCPS_MM = {
+      DataSource = EPICSCAInput
+      Type = uint32
+    }
+  }
+  OutputSignals = {
+    BPS_OUT = {
+      DataSource = DDB1
+      Type = float32
+    }
+    APS_TEMP = {
+      DataSource = DDB1
+      Type = float32
+    }
+    MHVPS_OUT = {
+      DataSource = DDB1
+      Type = float32
+    }
+    MCPS_OUT = {
+      DataSource = DDB1
+      Type = float32
+    }
+    GCPS_OUT = {
+      DataSource = DDB1
+      Type = float32
+    }
+  }
+}
++ReferencesConditioning = {
+  Class = IOExt::MathExpressionExprtkGAM
+  InputSignals = {
+    APS_TEMP = {
+      DataSource = DDB1
+      Type = float32
+    }
+  }
+  OutputSignals = {
+    APS_OUT = {
+      DataSource = DDB1
+      Type = float32
+      Expression = "APS_OUT := (APS_TEMP<0)?(APS_TEMP/2.0):(APS_TEMP)"
+    }
+  }
+}
+
+
+
+

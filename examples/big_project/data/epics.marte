@@ -1,0 +1,573 @@
+#package jada_gyro.RTApp.Data
+
++EPICSCAInput = {
+  Class = "EPICSCA::EPICSCAInput"
+  Signals = {
+    TRIGGER_DAN = {
+      PVName = (@rfid .. ":DAN_ENABLED")
+      Type = uint8
+    }
+    CSV_LOAD = {
+      PVName = (@rfid .. "-GAF:STAT-CSV-LOAD")
+      Type = uint32
+    }
+    CSV_NAME = {
+      PVName = (@rfid .. "-GAF:STAT-CSV-NAME")
+      Type = char8
+      NumberOfElements = 40
+    }
+    MIS_ITL = {
+      Type = uint32
+      PVName = (@rfid .. "-GAFP:FMC4310-YTRP")
+    }
+    RESET_FLT = {
+      PVName = (@rfid .. "-GPF:STAT-RST-FLT")
+      Type = uint32
+    }
+    PLC_SELECT = {
+      PVName = (@rfid .. "-GPS:PLC4110-CON-OPGY1")
+      Type = uint32
+    }
+    FHPS_RU = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-YTS-RUP")
+      Type = uint32
+    }
+    CCPS_OUTPUT_FREQ = {
+      PVName = (@rfid .. "-GAF-CCPS:STAT-FREQ")
+      Type = float32
+    }
+    CCPS_OUTPUT_AMP = {
+      PVName = (@rfid .. "-GAF-CCPS:STAT-AMP")
+      Type = float32
+    }
+    CCPS_OUTPUT_OFFS = {
+      PVName = (@rfid .. "-GAF-CCPS:STAT-OFFS")
+      Type = float32
+    }
+    GCPS_TRG_CURR_MANUAL = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-TRG-CURR-SET-MI")
+      Type = float32
+    }
+    MCPS_TRG_CURR_MANUAL = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-TRG-CURR-SET-MI")
+      Type = float32
+    }
+    MCPS_RU_COMPLETED = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-YTS-RUP")
+      Type = uint8
+    }
+    MCPS_RD_COMPLETED = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-YTS-RDOWN")
+      Type = uint8
+    }
+    BPS_MANUAL = {
+      PVName = (@rfid .. "-PB1F:PSU1000-EREF-MSP")
+      Type = float32
+    }
+    BPS_MM = {
+      PVName = (@rfid .. "-PB1F:STAT-MANM")
+      Type = uint32
+    }
+    /*
+    APS_MANUAL = {
+      PVName = (@rfid .. "-PA1F:PSU3000-EREF-MSP")
+      Type = float32
+    }*/
+    APS_MM = {
+      PVName = (@rfid .. "-PA1F:STAT-MANM")
+      Type = uint32
+    }
+    MHVPS_MANUAL = {
+      PVName = (@rfid .. "-PMF:PSU0000-EREF-MSP")
+      Type = float32
+    }
+    MHVPS_MM = {
+      PVName = (@rfid .. "-PMF:STAT-MANM")
+      Type = uint32
+    }
+    MCPS_MM = {
+      PVName = (@rfid .. "-GAF-MCPS:STAT-MANM")
+      Type = uint32
+    }
+    GCPS_MM = {
+      PVName = (@rfid .. "-GAF-GCPS:STAT-MANM")
+      Type = uint32
+    }
+    FHPS_A_AUTO_TAGV = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-AUTO-TAGV")
+      Type = float32
+    }
+    FHPS_A_AUTO_TIME = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-AUTO-RU-TIME")
+      Type = float32
+    }
+    FHPS_A_AUTO_START = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-AUTO-START")
+      Type = uint32
+    }
+    FHPS_A_MANM = {
+      PVName = (@rfid .. "-GAF-FHPS:STAT-MANM")
+      Type = uint32
+    }
+    FHPS_B_AUTO_TAGV = {
+      PVName = (@rfid .. "-GBF-FHPS:PSU2610-AUTO-TAGV")
+      Type = float32
+    }
+    FHPS_B_AUTO_TIME = {
+      PVName = (@rfid .. "-GBF-FHPS:PSU2610-AUTO-RU-TIME")
+      Type = float32
+    }
+    FHPS_B_AUTO_START = {
+      PVName = (@rfid .. "-GBF-FHPS:PSU2610-AUTO-START")
+      Type = uint32
+    }
+    FHPS_B_MANM = {
+      PVName = (@rfid .. "-GBF-FHPS:STAT-MANM")
+      Type = uint32
+    }
+    //# Guncoil state readback
+    GCPS_ACT_RB = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-ACT-RB")
+      Type = uint32
+    }
+    //# Guncoil current monitor
+    GCPS_CURR_MON = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-CURR-MON")
+      Type = float32
+    }
+    //# Main coil state readback
+    MCPS_ACT_RB = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-ACT-RB")
+      Type = uint32
+    }
+    //# Main coil current monitor
+    MCPS_CURR_MON = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-CURR-MON")
+      Type = float32
+    }
+    //# Pre-program flag
+    PREP_MODE = {
+      PVName = (@rfid .. "-GAF:STAT-PREP-MODE")
+      Type = uint32
+    }
+    // Timing settings
+    MHVPS_DT = {
+      PVName = (@rfid .. "-PMF:STAT-DT-HVON")
+      Type = uint32
+    }
+    APS_HVON_DT = {
+      PVName = (@rfid .. "-PA1F:STAT-DT-HVON")
+      Type = uint32
+    }
+    APS_SWON_DT = {
+      PVName = (@rfid .. "-PA1F:STAT-DT-SWON")
+      Type = uint32
+    }
+    BPS_HVON_DT = {
+      PVName = (@rfid .. "-PB1F:STAT-DT-HVON")
+      Type = uint32
+    }
+    BPS_SWON_DT = {
+      PVName = (@rfid .. "-PB1F:STAT-DT-SWON")
+      Type = uint32
+    }
+    SHOTLEN = {
+      PVName = (@rfid .. "-GAF:STAT-DT-SHOTLEN")
+      Type = uint32
+    }
+    PLC_MODE1 = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-MD1")
+      Type = uint32
+    }
+    PLC_MODE2 = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-MD2")
+      Type = uint32
+    }
+    PLC_MODE3 = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-MD3")
+      Type = uint32
+    }
+    PLC_MODE4 = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-MD4")
+      Type = uint32
+    }
+    MD1_SHOTLEN_LIM = {
+      PVName = (@rfid .. "-GPF:STAT-MD1-LIM")
+      Type = uint32
+    }
+    MD2_SHOTLEN_LIM = {
+      PVName = (@rfid .. "-GPF:STAT-MD2-LIM")
+      Type = uint32
+    }
+    MD3_SHOTLEN_LIM = {
+      PVName = (@rfid .. "-GPF:STAT-MD3-LIM")
+      Type = uint32
+    }
+    MD4_SHOTLEN_LIM = {
+      PVName = (@rfid .. "-GPF:STAT-MD4-LIM")
+      Type = uint32
+    }
+    GY_MCPS_CURR_MON = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-CURR-MON")
+      Type = float32
+    }
+    GY_GCPS_CURR_MON = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-CURR-MON")
+      Type = float32
+    }
+    GY_FHPS_MEAS_ACI = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-MEAS-ACI")
+      Type = float32
+    }
+    GY_FHPS_MEAS_ACV = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-MEAS-ACV")
+      Type = float32
+    }
+    GY_CCPS_MEAS_DCI = {
+      PVName = (@rfid .. "-GAF-CCPS:PSU2320-MEAS-DCI")
+      Type = float32
+    }
+    SHORT_PULSE_MODE = {
+      PVName = (@rfid .. "-GAF:STAT-SHORT-PULSE")
+      Type = uint32
+    }
+    CCPS_IN_OPERATION = {
+      PVName = (@rfid .. "-GAF-CCPS:PSU2320-TR")
+      Type = uint8
+    }
+    /*
+    BPS_VREF = {
+      Type = float32
+      PVName = (@rfid .. "-PB1F:PSU1000-EREF")
+    }
+    */
+    APS_MANUAL = {
+      Type = float32
+      PVName = (@rfid .. "-PA1F:PSU3000-EREF-MSP")
+    }
+    /*
+    MAIN_VREF = {
+      Type = float32
+      PVName = (@rfid .. "-PMF:PSU0000-EREF")
+    }
+    */
+    MHVPS_MODSW = {
+      Type = uint8
+      PVName = (@rfid .. "-PMF:PSU0000-CON-MOD")
+    }
+    FAST_PAUSE = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-RV6")
+    }
+  }
+}
++EPICSCAOutput = {
+  Class = EPICSCAOutput
+  CPUMask = @cpus_epics // change from 0x200
+  StackSize = 10000000
+  NumberOfBuffers = 50
+  CyclePeriod = @epics_slow_ratio
+  Signals = {
+    PCF_STATE = {
+      PVName = (@rfid .. "-GAF:STAT-SM")
+      Type = uint32
+    }
+    // Analog Output PVs in Variables-signal tab.
+    FHPS_REF = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-EREF")
+      Type = float32
+    }
+    BPS_REF = {
+      PVName = (@rfid .. "-PB1F:PSU1000-EREF")
+      Type = float32
+    }
+    APS_REF = {
+      PVName = (@rfid .. "-PA1F:STAT-EREF-CONV.A")
+      // TODO: PSU3000-YSTA
+      Type = float32
+    }
+    MHVPS_REF = {
+      PVName = (@rfid .. "-PMF:STAT-EREF-CALC.A")
+      Type = float32
+    }
+    // Digital Output PVs in Variables-signal tab.
+    APS_STOP = {
+      PVName = (@rfid .. "-PA1F:PSU3000-CTRP")
+      Type = uint32
+    }
+    BPS_STOP = {
+      PVName = (@rfid .. "-PB1F:PSU1000-CTRP")
+      Type = uint32
+    }
+    BEAM_ON_STAT = {
+      PVName = (@rfid .. "-GAFP:FMC4310-YSTA-GAOP")
+      Type = uint8
+    }
+    MHVPS_STOP = {
+      PVName = (@rfid .. "-PMF:PSU0000-COFF")
+      Type = uint32
+    }
+    PCF_FLT = {
+      PVName = (@rfid .. "-GPF:PCF4210-CTRP")
+      Type = uint8
+    }
+    PXI_FLT = {
+      PVName = (@rfid .. "-GPS:PLC4110-RV2")
+      Type = uint8
+    }
+    HVARMED = {
+      PVName = (@rfid .. "-GPF:PCF4210-YTS-GA1")
+      Type = uint8
+    }
+    HVINJECTION = {
+      PVName = (@rfid .. "-GPF:PCF4210-YTS-GA2")
+      Type = uint8
+    }
+    RFON = {
+      PVName = (@rfid .. "-GPF:PCF4210-YTS-GA3")
+      Type = uint8
+    }
+    // Output PVs in Variables-operation tab.
+    MHVPS_PREP_WF = {
+      PVName = (@rfid .. "-PMF:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    BPS_PREP_WF = {
+      PVName = (@rfid .. "-PB1F:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    APS_PREP_WF = {
+      PVName = (@rfid .. "-PA1F:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    FHPS_PREP_WF = {
+      PVName = (@rfid .. "-GAF-FHPS:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    MCPS_PREP_WF = {
+      PVName = (@rfid .. "-GAF-MCPS:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    GCPS_PREP_WF = {
+      PVName = (@rfid .. "-GAF-GCPS:STAT-PREP-WF")
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    PREP_TIME_WF = {
+      PVName = (@rfid .. "-GAF:STAT-PREP-TIME-WF")
+      Type = int32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    BEAM_ON_TIME = {
+      PVName = (@rfid .. "-GAF:STAT-BEAMON-TIME")
+      Type = uint32
+    }
+    ELAPSED_TIME = {
+      PVName = (@rfid .. "-GAF:STAT-ELAPSED")
+      Type = uint32
+    }
+    SHOT_ID = {
+      PVName = (@rfid .. "-GAF:STAT-SHOT-ID")
+      Type = uint32
+    }
+    CSV_LOADED = {
+      PVName = (@rfid .. "-GAF:STAT-CSV-LOADED")
+      Type = uint32
+    }
+    CSV_ERR = {
+      PVName = (@rfid .. "-GAF:STAT-CSV-ERR")
+      Type = uint32
+    }
+    // Output PVs in Variables-jastec tab.
+    MCPS_TRG_CURR_SET = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-TRG-CURR-SET-MO")
+      Type = float32
+    }
+    MCPS_ACT_SP = {
+      PVName = (@rfid .. "-GAF-MCPS:PSU2120-ACT-SP-MO")
+      Type = uint32
+    }
+    GCPS_TRG_CURR_SET = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-TRG-CURR-SET-MO")
+      Type = float32
+    }
+    GCPS_ACT_SP = {
+      PVName = (@rfid .. "-GAF-GCPS:PSU2130-ACT-SP-MO")
+      Type = uint32
+    }
+    // Output PVs in Variables-kikusui tab.
+    CCPS_REF = {
+      PVName = (@rfid .. "-GAF-CCPS:PSU2320-EREF")
+      Type = float32
+    }
+    FHPS_AUTO_STAT = {
+      PVName = (@rfid .. "-GAF-FHPS:PSU2610-AUTO-STAT")
+      Type = uint32
+    }
+    // Add 20201117
+    APS_HVON = {
+      PVName = (@rfid .. "-PA1F:PSU3000-CON-HV")
+      Type = uint8
+    }
+    APS_SWON = {
+      PVName = (@rfid .. "-PA1F:PSU3000-CON-SW")
+      Type = uint8
+    }
+    BPS_HVON = {
+      PVName = (@rfid .. "-PB1F:PSU1000-CON-HV")
+      Type = uint8
+    }
+    BPS_SWON = {
+      PVName = (@rfid .. "-PB1F:PSU1000-CON-SW")
+      Type = uint8
+    }
+    MHVPS_HVON = {
+      PVName = (@rfid .. "-PMF:STAT-HVON-CALC.A")
+      Type = uint8
+    }
+    EXT_TRIGGER = {
+      PVName = (@rfid .. "-GAF:DIO4900-YON")
+      Type = uint8
+    }
+    ECPC_MHVPS_MOD = {
+      PVName = (@rfid .. "-GPF:PSU0000-YSTA-MOD")
+      Type = uint8
+    }
+    PLC_PERMIT = {
+      PVName = (@rfid .. "-GPS:PLC4110-CON-GY1PRM")
+      Type = uint8
+    }
+    PLC_OP_SELECTED = {
+      PVName = (@rfid .. "-GPS:PLC4110-CON-OPGY1")
+      Type = uint8
+    }
+    CCPS_IN_OP = {
+      PVName = (@rfid .. "-GPS:PLC4110-YON-CCPS1")
+      Type = uint8
+    }
+    PLC_SYNCMODE = {
+      PVName = (@rfid .. "-GPS:PLC4110-YSTA-MPSS")
+      Type = uint8
+    }
+    PLC_ITL = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTRP")
+      Type = uint8
+    }
+    PLC_STANDBY = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-ST1R")
+      Type = uint8
+    }
+    PLC_READY = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-ST2R")
+      Type = uint8
+    }
+    PLC_ON = {
+      PVName = (@rfid .. "-GPS:PLC4110-YTS-ST3R")
+      Type = uint8
+    }
+    APS_FLT = {
+      PVName = (@rfid .. "-PA1F:PSU3000-YFLT")
+      Type = uint8
+    }
+    APS_READY = {
+      PVName = (@rfid .. "-PA1F:PSU3000-YSTA")
+      Type = uint8
+    }
+    BPS_FLT = {
+      PVName = (@rfid .. "-PB1F:PSU1000-YFLT")
+      Type = uint8
+    }
+    BPS_READY = {
+      PVName = (@rfid .. "-PB1F:PSU1000-YSTA")
+      Type = uint8
+    }
+    MHPS_FLT = {
+      PVName = (@rfid .. "-PMF:PSU0000-YFLT")
+      Type = uint8
+    }
+    MHPS_READY = {
+      PVName = (@rfid .. "-PMF:PSU0000-TYSTA")
+      Type = uint8
+    }
+    MHPS_OC = {
+      PVName = (@rfid .. "-GAFP:FMC4310-YFLT-OC")
+      Type = uint8
+    }
+    MHPS_OV = {
+      PVName = (@rfid .. "-GAFP:FMC4310-YFLT-OV")
+      Type = uint8
+    }
+    CRIO_RV1 = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-RV1")
+    }
+    CRIO_RV2 = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-RV2")
+    }
+    CRIO_RV3 = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-RV3")
+    }
+    FAST_ITL = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-YTRP")
+    }
+    //! unused: Not shared with th1 (TODO)
+    FAST_PAUSE = {
+      Type = uint8
+      PVName = (@rfid .. "-GAFP:FMC4310-YTRP2")
+    }
+    PXI_6259_STATE = {
+      Type = uint32
+      PVName = (@rfid .. "-HWCF:6259-0-STATUS")
+    }
+    //! unused: No 6683 DS (TODO)
+    PXI_6683_STATE = {
+      Type = uint8
+      PVName = (@rfid .. "-HWCF:6683-0-STATUS")
+    }
+    //! unused: No 6683 DS (TODO)
+    PXI_6683_SYNC = {
+      Type = uint8
+      PVName = (@rfid .. "-HWCF:6683-0-SYNC")
+    }
+    //! unused: No 6683 DS (TODO)
+    PXI_6683_SYNCLOST = {
+      Type = uint8
+      PVName = (@rfid .. "-HWCF:6683-0-SYNCLOST")
+    }
+    PXI_6528_STATE = {
+      Type = uint32
+      PVName = (@rfid .. "-HWCF:6528-0-STATUS")
+    }
+    PulseStartTimeL = {
+      Type = uint32
+      PVName = (@rfid .. ":START_PULSE_T_L")
+    }
+    PulseStartTimeH = {
+      Type = uint32
+      PVName = (@rfid .. ":START_PULSE_T_H")
+    }
+    PulseStopTimeL = {
+      Type = uint32
+      PVName = (@rfid .. ":STOP_PULSE_T_L")
+    }
+    PulseStopTimeH = {
+      Type = uint32
+      PVName = (@rfid .. ":STOP_PULSE_T_H")
+    }
+  }
+}

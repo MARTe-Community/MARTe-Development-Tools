@@ -1,0 +1,472 @@
+#package jada_gyro.RTApp
+
+
++Data = {
+  +SynchThread = {
+    Class = RealTimeThreadSynchronisation
+    Timeout = @sync_dio_timeout
+    Signals = {
+      DiTime = {
+        Type = uint64
+      }    
+      PXI6259_Status = {
+        Type = uint32
+      }
+      PXI6528_Status = {
+        Type = uint32
+      }
+      PXI6683_Status = {
+        Type = uint8
+      }
+      PXI6683_PtpdStatus = {
+        Type = uint8
+      }
+      GYA_APS_READY = {
+        Type = uint8
+      }
+      GYA_APS_FLT = {
+        Type = uint8
+      }
+      GYA_BPS_READY = {
+        Type = uint8
+      }
+      GYA_BPS_FLT = {
+        Type = uint8
+      }
+      MHVPS_OV = {
+        Type = uint8
+      }
+      MHVPS_OC = {
+        Type = uint8
+      }
+      MHVPS_FLT = {
+        Type = uint8
+      }
+      MHVPS_READY = {
+        Type = uint8
+      }
+      ECPC_MOD = {
+        Type = uint8
+      }
+      FAST_TRIP = {
+        Type = uint8
+      }
+      CRIO_RV1 = {
+        Type = uint8
+      }
+      CRIO_RV2 = {
+        Type = uint8
+      }
+      CRIO_RV3 = {
+        Type = uint8
+      }
+      PLC_ITL = {
+        Type = uint8
+      }
+      PLC_STANDBY = {
+        Type = uint8
+      }
+      PLC_READY = {
+        Type = uint8
+      }
+      PLC_ON = {
+        Type = uint8
+      }
+      PLC_PERMIT = {
+        Type = uint8
+      }
+      PLC_OP_SELECTED = {
+        Type = uint8
+      }
+      PLC_CC_OP_SELECTED = {
+        Type = uint8
+      }
+      PLC_SYNCMODE = {
+        Type = uint8
+      }
+      TRIGGER = {
+        Type = uint8
+      }
+      BEAM_ON_STAT = {
+        Type = uint8
+      }
+      HVARMED = {
+        Type = uint8
+      }
+      HVINJECTION = {
+        Type = uint8
+      }
+      RFON = {
+        Type = uint8
+      }
+      APS_HVON = {
+        Type = uint8
+      }
+      APS_SWON = {
+        Type = uint8
+      }
+      BPS_HVON = {
+        Type = uint8
+      }
+      BPS_SWON = {
+        Type = uint8
+      }
+      MHVPS_HVON = {
+        Type = uint8
+      }
+      BEAM_ON_TIME = {
+        Type = uint32
+      }
+      RFON_TIME = {
+        Type = uint32
+      }
+      SHOT_ID = {
+        Type = uint32
+      }
+      PulseStartTime = {
+        Type = uint64
+      }
+      PulseStopTime = {
+        Type = uint64
+      }        
+    }
+  }
+  +DDB3 = {
+    Signals = {
+      BEAM_ON_TIME = {
+        Type = uint32
+      }
+      RFON_TIME = {
+        Type = uint32
+      }
+      PXI6528_Status = {
+        Type = uint32
+      }
+      MHVPS_DT = {
+        Type = uint32
+      }
+      APS_HVON_DT = {
+        Type = uint32
+      }
+      APS_SWON_DT = {
+        Type = uint32
+      }
+      BPS_HVON_DT = {
+        Type = uint32
+      }
+      BPS_SWON_DT = {
+        Type = uint32
+      }
+      SHOTLEN = {
+        Type = uint32
+      }
+      SHORT_PULSE_MODE = {
+        Type = uint32
+      }
+    }
+  }
+}
++Functions = {
+  +SyncThreadProducerGAM = {
+    Class = IOGAM
+    InputSignals = {
+      AbsoluteTime = {
+        DataSource = DDB3
+      }        
+      PXI6259_Status = {
+        Alias = Status
+        DataSource = NI6259_DIO_P0
+      }
+      PXI6528_Status = {
+        DataSource = DDB3
+        Value = 0
+      }
+      PXI6683_Status = {
+        DataSource = TimingBoard
+        Alias = Status
+      }
+      PXI6683_PtpdStatus = {
+        DataSource = TimingBoard
+        Alias = PtpdStatus
+      }
+      GYA_APS_READY = {
+        DataSource = DDB3
+      }
+      GYA_APS_FLT = {
+        DataSource = DDB3
+      }
+      GYA_BPS_READY = {
+        DataSource = DDB3
+      }
+      GYA_BPS_FLT = {
+        DataSource = DDB3
+      }
+      MHVPS_OV = {
+        DataSource = DDB3
+      }
+      MHVPS_OC = {
+        DataSource = DDB3
+      }
+      MHVPS_FLT = {
+        DataSource = DDB3
+      }
+      MHVPS_READY = {
+        DataSource = DDB3
+      }
+      ECPC_MOD = {
+        DataSource = DDB3
+      }
+      FAST_TRIP = {
+        DataSource = DDB3
+      }
+      CRIO_RV1 = {
+        DataSource = DDB3
+      }
+      CRIO_RV2 = {
+        DataSource = DDB3
+      }
+      CRIO_RV3 = {
+        DataSource = DDB3
+      }
+      PLC_ITL = {
+        DataSource = DDB3
+      }
+      PLC_STANDBY = {
+        DataSource = DDB3
+      }
+      PLC_READY = {
+        DataSource = DDB3
+      }
+      PLC_ON = {
+        DataSource = DDB3
+      }
+      PLC_PERMIT = {
+        DataSource = DDB3
+      }
+      PLC_OP_SELECTED = {
+        DataSource = DDB3
+      }
+      PLC_CC_OP_SELECTED = {
+        DataSource = DDB3
+      }
+      PLC_SYNCMODE = {
+        DataSource = DDB3
+      }
+      TRIGGER = {
+        DataSource = DDB3
+      }
+      BEAM_ON_STAT = {
+        DataSource = DDB3
+      }
+      HVARMED = {
+        DataSource = DDB3
+      }
+      HVINJECTION = {
+        DataSource = DDB3
+      }
+      RFON = {
+        DataSource = DDB3
+      }
+      APS_HVON = {
+        DataSource = DDB3
+      }
+      APS_SWON = {
+        DataSource = DDB3
+      }
+      BPS_HVON = {
+        DataSource = DDB3
+      }
+      BPS_SWON = {
+        DataSource = DDB3
+      }
+      MHVPS_HVON = {
+        DataSource = DDB3
+      }      
+      BEAM_ON_TIME = {
+        DataSource = DDB3
+      }
+      RFON_TIME = {
+        DataSource = DDB3
+      }
+      SHOT_ID = {
+        DataSource = DDB3
+      }
+      PulseStartTime = {
+        DataSource = DDB3
+      }
+      PulseStopTime = {
+        DataSource = DDB3
+      }      
+      PulseStartTime_Next = {
+        Alias = PulseStartTime
+        DataSource = DDB3
+      }
+      PulseStopTime_Next = {
+        Alias = PulseStopTime
+        DataSource = DDB3
+      }      
+    }
+    OutputSignals = {
+      DiTime = {
+        DataSource = SynchThread
+      }     
+      PXI6259_Status = {
+        DataSource = SynchThread
+      }
+      PXI6528_Status = {
+        DataSource = SynchThread
+      }
+      PXI6683_Status = {
+        DataSource = SynchThread
+      }
+      PXI6683_PtpdStatus = {
+        DataSource = SynchThread
+      }
+      GYA_APS_READY = {
+        DataSource = SynchThread
+      }
+      GYA_APS_FLT = {
+        DataSource = SynchThread
+      }
+      GYA_BPS_READY = {
+        DataSource = SynchThread
+      }
+      GYA_BPS_FLT = {
+        DataSource = SynchThread
+      }
+      MHVPS_OV = {
+        DataSource = SynchThread
+      }
+      MHVPS_OC = {
+        DataSource = SynchThread
+      }
+      MHVPS_FLT = {
+        DataSource = SynchThread
+      }
+      MHVPS_READY = {
+        DataSource = SynchThread
+      }
+      ECPC_MOD = {
+        DataSource = SynchThread
+      }
+      FAST_TRIP = {
+        DataSource = SynchThread
+      }
+      CRIO_RV1 = {
+        DataSource = SynchThread
+      }
+      CRIO_RV2 = {
+        DataSource = SynchThread
+      }
+      CRIO_RV3 = {
+        DataSource = SynchThread
+      }
+      PLC_ITL = {
+        DataSource = SynchThread
+      }
+      PLC_STANDBY = {
+        DataSource = SynchThread
+      }
+      PLC_READY = {
+        DataSource = SynchThread
+      }
+      PLC_ON = {
+        DataSource = SynchThread
+      }
+      PLC_PERMIT = {
+        DataSource = SynchThread
+      }
+      PLC_OP_SELECTED = {
+        DataSource = SynchThread
+      }
+      PLC_CC_OP_SELECTED = {
+        DataSource = SynchThread
+      }
+      PLC_SYNCMODE = {
+        DataSource = SynchThread
+      }
+      TRIGGER = {
+        DataSource = SynchThread
+      }
+      BEAM_ON_STAT = {
+        DataSource = SynchThread
+      }
+      HVARMED = {
+        DataSource = SynchThread
+      }
+      HVINJECTION = {
+        DataSource = SynchThread
+      }
+      RFON = {
+        DataSource = SynchThread
+      }
+      APS_HVON = {
+        DataSource = SynchThread
+      }
+      APS_SWON = {
+        DataSource = SynchThread
+      }
+      BPS_HVON = {
+        DataSource = SynchThread
+      }
+      BPS_SWON = {
+        DataSource = SynchThread
+      }
+      MHVPS_HVON = {
+        DataSource = SynchThread
+      }      
+      BEAM_ON_TIME = {
+        DataSource = SynchThread
+      }
+      RFON_TIME = {
+        DataSource = SynchThread
+      }
+      SHOT_ID = {
+        DataSource = SynchThread
+      }
+      PulseStartTime = {
+        DataSource = SynchThread
+      }
+      PulseStopTime = {
+        DataSource = SynchThread
+      }      
+      PulseStartTime_1 = {
+        DataSource = DDB3
+      }
+      PulseStopTime_1 = {
+        DataSource = DDB3
+      }      
+    }
+  }
+  +AsyncIOGAM = {
+    Class = IOGAM
+    InputSignals = {
+      FHPS_A_RU = {
+        DataSource = WGAsyncBridge
+      }
+      CCPS_IN_OPERATION = {
+        DataSource = Th1Bridge
+      }
+      MCPS_RU_COMPLETED = {
+        DataSource = Th1Bridge
+      }
+      MCPS_RD_COMPLETED = {
+        DataSource = Th1Bridge
+      }
+    }
+    OutputSignals = {
+      FHPS_RU = {
+        DataSource = DDB3
+      }
+      CCPS_IN_OPERATION = {
+        DataSource = DDB3
+      }   
+      SCM_RU = {
+        DataSource = DDB3
+      }
+      SCM_RD = {
+        DataSource = DDB3
+      }
+    }
+  }
+}

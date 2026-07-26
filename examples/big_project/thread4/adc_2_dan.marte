@@ -1,0 +1,1082 @@
+#package jada_gyro.RTApp
+
++Data = {
+  +FastADC = {
+    Class = "NI6368::NI6368ADC"
+    // The divisor is computed on BaseSampleClockFrequency.
+    SamplingFrequency = @sampling_freq
+    DeviceName = "/dev/pxie-6368"
+    IsMultiplexed = 0 // Default is 0 for 6368. Set to 1 if using 6363.
+    BoardId = 0 // Mandatory
+    ExecutionMode = "RealTimeThread" // Optional (default is IndepenentThread). Possible values:IndependentThread, RealTimeThread
+    Calibrate = 1 // Optional (default is 0). If disabled the signals show raw acquired value (signal type must be int16). If enabled the samples already converted accordingly to the declared InputRange. In this case the signal type must be float32
+    RealTimeMode = 1
+    Signals = {
+      //! unused: not used but mandatory
+      Counter = {
+        Type = uint64
+        ResetOnBufferChange = 1
+      }
+      //! unused: not used but mandatory
+      Time = {
+        Type = uint64
+      }
+      Status = {
+        Type = uint32
+      }
+      GY_BPS_V_MEAS = {
+        Type = float32
+        ChannelId = 0
+      }
+      GY_BPS_I_MEAS = {
+        Type = float32
+        ChannelId = 1
+      }
+      GY_APS_V_MEAS = {
+        Type = float32
+        ChannelId = 2
+      }
+      GY_APS_I_MEAS = {
+        Type = float32
+        ChannelId = 3
+      }
+      GY_MHV_V_MEAS = {
+        Type = float32
+        ChannelId = 4
+      }
+      GY_MHV_I_MEAS = {
+        Type = float32
+        ChannelId = 5
+      }
+      GY_ARC1_V_MEAS = {
+        Type = float32
+        ChannelId = 6
+      }
+      GY_ARC2_V_MEAS = {
+        Type = float32
+        ChannelId = 7
+      }
+      GY_ARC3_V_MEAS = {
+        Type = float32
+        ChannelId = 8
+      }
+      GY_RF_V_MEAS = {
+        Type = float32
+        ChannelId = 9
+      }
+      // Temporarily added from gyrotron
+      GY_MHV_V_MEAS_PSU = {
+        Type = float32
+        ChannelId = 10
+      }
+      GY_MHV_I_MEAS_PSU = {
+        Type = float32
+        ChannelId = 11
+      }
+      Channel_12 = {
+        Type = float32
+        ChannelId = 12
+      }
+      Channel_13 = {
+        Type = float32
+        ChannelId = 13
+      }
+      Channel_14 = {
+        Type = float32
+        ChannelId = 14
+      }
+      Channel_15 = {
+        Type = float32
+        ChannelId = 15
+      }
+    }
+  }
+  +TimingBoard = {
+    Class = NI6683H
+    BoardId = 0
+    Signals = {
+      Status = {
+        Type = uint8
+      }
+      PtpdStatus = {
+        Type = uint8
+      }
+      //! unused: time is very unstable
+      Time = {
+        Type = uint64
+      }
+    }
+  }
+  +DDB4 = {
+    Class = GAMDataSource
+    Signals = {
+      Time = {
+        Type = uint64
+      }
+      MHVPS_PULSE_ON = {
+        Type = uint8
+      }
+      TRIGGER_DAN = {
+        Type = uint8
+      }
+      PXI6368_Status = {
+        Type = uint32
+      }
+      GY_APS_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_APS_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_BPS_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_BPS_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_MHV_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_MHV_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_ARC1_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_ARC2_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_ARC3_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_RF_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_MHV_V_MEAS_PSU = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      GY_MHV_I_MEAS_PSU = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      Channel_12 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      Channel_13 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      Channel_14 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+      Channel_15 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+    }
+  }
+  #if @udp_streamer
+    +UdpAnalogDataSource = {
+      Class = IOExt::UDPStreamer
+      MulticastGroup = "239.0.197.80"
+      Interface = @UDP_IFACE
+      Port = 44600 
+      MaxPayloadSize = 8972 
+      Signals = {
+        Time = {
+          Type = uint64
+        }
+        APS_V_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+        BPS_V_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+        MHV_V_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+        MHV_I_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+        Emitter_V_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+        Collector_I_Meas = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "LastSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+      }
+    }
+  #end
+  +FastAnalogDAN = {
+    Class = DAN::DANSource
+    NumberOfBuffers = 100
+    CPUMask = @cpus_fdan
+    StackSize = 10000000
+    DanBufferMultiplier = @adc_dan_mul
+    StoreOnTrigger = 1
+    ICProgName = @app_name
+    NumberOfPreTriggers = 0
+    NumberOfPostTriggers = 0
+    Signals = {
+      Trigger = {
+        Type = uint8
+      }
+      AI_Time = {
+        Type = uint64
+        TimeSignal = 1
+        AbsoluteTime = 1
+        TimeSignalMultiplier = 1e-9
+        TimeSignalOffset = (-37 - @adc_cycle_time)
+      }
+      GY_APS_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_APS_V_MEAS")
+      }
+      GY_APS_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_APS_I_MEAS")
+      }
+      GY_BPS_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_BPS_V_MEAS")
+      }
+      GY_BPS_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_BPS_I_MEAS")
+      }
+      GY_MHV_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_MHV_V_MEAS")
+      }
+      GY_MHV_I_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_MHV_I_MEAS")
+      }
+      GY_ARC1_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_ARC1_V_MEAS")
+      }
+      GY_ARC2_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_ARC2_V_MEAS")
+      }
+      GY_ARC3_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_ARC3_V_MEAS")
+      }
+      GY_RF_V_MEAS = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_RF_V_MEAS")
+      }
+      GY_MHV_V_MEAS_PSU = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_MHV_V_MEAS_PSU")
+      }
+      GY_MHV_I_MEAS_PSU = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":GY_MHV_I_MEAS_PSU")
+      }
+      Channel_12 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":CHANNEL_12")
+      }
+      Channel_13 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":CHANNEL_13")
+      }
+      Channel_14 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":CHANNEL_14")
+      }
+      Channel_15 = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = (@rfid .. ":CHANNEL_15")
+      }
+    }
+  }
+  +AnalogEpicsOutput = {
+    Class = EPICSCA::EPICSCAOutput
+    CPUMask = @cpus_epics // change from 0x200
+    StackSize = 10000000
+    NumberOfBuffers = 50
+    CyclePeriod = @epics_fast_ratio
+    Signals = {
+      TRIGGER_DAN = {
+        Type = uint8
+        PVName = (@rfid .. ":DAN_ENABLED_OUT")
+      }
+      PXI6368_Status = {
+        Type = uint32
+        PVName = (@rfid .. "-HWCF:6368-0-STATUS")
+      }
+      GY_APS_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PA1F:PSU3000-ET")
+      }
+      GY_APS_I_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PA1F:PSU3000-IT")
+      }
+      GY_BPS_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PB1F:PSU1000-ET")
+      }
+      GY_BPS_I_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PB1F:PSU1000-IT")
+      }
+      GY_MHV_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PMF:PSU0000-ET-GA")
+      }
+      GY_MHV_I_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-PMF:PSU0000-IT-GA")
+      }
+      GY_ARC1_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MOE2810-ET")
+      }
+      GY_ARC2_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MOE2820-ET")
+      }
+      GY_ARC3_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MOE2830-ET")
+      }
+      GY_RF_V_MEAS = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MRF2910-ET")
+      }
+      GY_MHV_V_MEAS_PSU = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MHVPS_V_PSU")
+      }
+      GY_MHV_I_MEAS_PSU = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:MHVPS_I_PSU")
+      }
+      Channel_12 = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:CHANNEL_12")
+      }
+      Channel_13 = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:CHANNEL_13")
+      }
+      Channel_14 = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:CHANNEL_14")
+      }
+      Channel_15 = {
+        Type = float32
+        PVName = (@rfid .. "-GAF:CHANNEL_15")
+      }
+    }
+  }
+  +Th4Bridge = {
+    Class = RealTimeThreadAsyncBridge
+    NumberOfBuffers = 5
+    Signals = {
+      PXI6368_Status = {
+        Type = uint32
+      }
+
+      GY_APS_V_MEAS = {
+        Type = float32
+      }
+      GY_APS_I_MEAS = {
+        Type = float32
+      }
+      GY_BPS_V_MEAS = {
+        Type = float32
+      }
+      GY_BPS_I_MEAS = {
+        Type = float32
+      }
+      GY_MHV_V_MEAS = {
+        Type = float32
+      }
+      GY_MHV_I_MEAS = {
+        Type = float32
+      }
+      GY_ARC1_V_MEAS = {
+        Type = float32
+      }
+      GY_ARC2_V_MEAS = {
+        Type = float32
+      }
+      GY_ARC3_V_MEAS = {
+        Type = float32
+      }
+      GY_RF_V_MEAS = {
+        Type = float32
+      }
+    }
+  }
+}
+
++Functions = {
+  +ReadADC = {
+    Class = IOGAM
+    InputSignals = {
+      Status = {
+        DataSource = FastADC
+        Frequency = @adc_publish_freq
+      }
+      GY_APS_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_APS_I_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_RF_V_MEAS = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      Channel_12 = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      Channel_13 = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      Channel_14 = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+      Channel_15 = {
+        DataSource = FastADC
+        Samples = @samples_adc
+      }
+    }
+    OutputSignals = {
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+      GY_APS_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_APS_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_RF_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = DDB4
+      }
+      Channel_12 = {
+        DataSource = DDB4
+      }
+      Channel_13 = {
+        DataSource = DDB4
+      }
+      Channel_14 = {
+        DataSource = DDB4
+      }
+      Channel_15 = {
+        DataSource = DDB4
+      }
+    }
+  }
+  +AdcTimeStamp = {
+    Class = IOExt::SystemClockGAM
+    OutputSignals = {
+      Time = { 
+        DataSource = DDB4
+      }
+    }
+  }
+  #if @udp_streamer
+    +PushADCtoUDP = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = DDB4
+        }
+        GY_APS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_V_MEAS_PSU = {
+          DataSource = DDB4
+        }
+        GY_MHV_I_MEAS_PSU = {
+          DataSource = DDB4
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = DDB4
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = DDB4
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = UdpAnalogDataSource
+        }
+        APS_V_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+        BPS_V_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+        MHV_V_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+        MHV_I_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+        Emitter_V_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+        Collector_I_Meas = {
+          DataSource = UdpAnalogDataSource
+        }
+      }
+    }
+  #end
+  +PulseDetector = {
+    Class = PulseDetectorGAM
+    UpperLimit = 2.40
+    LowerLimit = 0.03
+    InputSignals = {
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+        Type = float32
+      }
+    }
+    OutputSignals = {
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Type = uint8
+      }
+    }
+  } 
+  +ComputeDANTrigger = {
+    Class = JAConditionalSignalUpdateGAM
+    Operation = "OR"
+    LatchOutput = 0
+    InputSignals = {
+      TRIGGER_DAN_ONPULSE = {
+        DataSource = Th1Bridge
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      TRIGGER_DAN = {
+        DataSource = EPICSCAInput
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+
+    }
+    OutputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+        DefaultValue = 0
+        Type = uint8
+        Value = 1
+      }
+    }
+  }
+  +PushADCtoDAN = {
+    Class = IOGAM
+    InputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      Time = {
+        DataSource = DDB4
+      }
+      GY_APS_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_APS_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_RF_V_MEAS = {
+        DataSource = DDB4
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = DDB4
+      }
+      Channel_12 = {
+        DataSource = DDB4
+      }
+      Channel_13 = {
+        DataSource = DDB4
+      }
+      Channel_14 = {
+        DataSource = DDB4
+      }
+      Channel_15 = {
+        DataSource = DDB4
+      }
+    }
+    OutputSignals = {
+      Trigger = {
+        DataSource = FastAnalogDAN
+      }
+      AI_Time = {
+        DataSource = FastAnalogDAN
+      }
+      GY_APS_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_APS_I_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_RF_V_MEAS = {
+        DataSource = FastAnalogDAN
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = FastAnalogDAN
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = FastAnalogDAN
+      }
+      Channel_12 = {
+        DataSource = FastAnalogDAN
+      }
+      Channel_13 = {
+        DataSource = FastAnalogDAN
+      }
+      Channel_14 = {
+        DataSource = FastAnalogDAN
+      }
+      Channel_15 = {
+        DataSource = FastAnalogDAN
+      }
+    }
+  }
+  +PushADCtoEpics = {
+    Class = IOGAM
+    InputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = DDB4
+      }
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+      GY_APS_V_MEAS_Async = {
+        Alias = GY_APS_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_APS_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_APS_I_MEAS_Async = {
+        Alias = GY_APS_I_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_APS_I_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_BPS_V_MEAS_Async = {
+        Alias = GY_BPS_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_BPS_I_MEAS_Async = {
+        Alias = GY_BPS_I_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_V_MEAS_Async = {
+        Alias = GY_MHV_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_I_MEAS_Async = {
+        Alias = GY_MHV_I_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC1_V_MEAS_Async = {
+        Alias = GY_ARC1_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC2_V_MEAS_Async = {
+        Alias = GY_ARC2_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC3_V_MEAS_Async = {
+        Alias = GY_ARC3_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_RF_V_MEAS_Async = {
+        Alias = GY_RF_V_MEAS
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_RF_V_MEAS = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      Channel_12 = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      Channel_13 = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      Channel_14 = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      Channel_15 = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+    }
+    OutputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = Th4Bridge
+      }
+      TRIGGER_DAN = {
+        DataSource = AnalogEpicsOutput
+      }
+      PXI6368_Status = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_APS_V_MEAS_Async = {
+        Alias = GY_APS_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_APS_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_APS_I_MEAS_Async = {
+        Alias = GY_APS_I_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_APS_I_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_BPS_V_MEAS_Async = {
+        Alias = GY_BPS_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_BPS_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_BPS_I_MEAS_Async = {
+        Alias = GY_BPS_I_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_BPS_I_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_MHV_V_MEAS_Async = {
+        Alias = GY_MHV_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_MHV_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_MHV_I_MEAS_Async = {
+        Alias = GY_MHV_I_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_MHV_I_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_ARC1_V_MEAS_Async = {
+        Alias = GY_ARC1_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_ARC1_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_ARC2_V_MEAS_Async = {
+        Alias = GY_ARC2_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_ARC2_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_ARC3_V_MEAS_Async = {
+        Alias = GY_ARC3_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_ARC3_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_RF_V_MEAS_Async = {
+        Alias = GY_RF_V_MEAS
+        DataSource = Th4Bridge
+      }
+      GY_RF_V_MEAS = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = AnalogEpicsOutput
+      }
+      GY_MHV_I_MEAS_PSU = {
+        DataSource = AnalogEpicsOutput
+      }
+      Channel_12 = {
+        DataSource = AnalogEpicsOutput
+      }
+      Channel_13 = {
+        DataSource = AnalogEpicsOutput
+      }
+      Channel_14 = {
+        DataSource = AnalogEpicsOutput
+      }
+      Channel_15 = {
+        DataSource = AnalogEpicsOutput
+      }
+    }
+  }
+}

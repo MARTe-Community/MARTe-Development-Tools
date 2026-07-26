@@ -1,0 +1,345 @@
+#package jada_gyro.StateMachine
+
++WAITPERMIT = {
+  Class = ReferenceContainer
+  +GoWaitReady = {
+    Class = StateMachineEvent
+    NextState = WAITREADY
+    NextStateError = ERROR
+    /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = WaitReady
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_ready
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 0
+      }
+    }
+  }
+  +GoWaitHVON = {
+    Class = StateMachineEvent
+    NextState = WAITHVON
+    NextStateError = ERROR
+    /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = WaitHVON
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_hvon
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 0
+      }
+    }
+    +SetTriggerDanOnPulse = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = TRIGGER_DAN_ONPULSE
+        SignalValue = 1
+      }
+    }
+  }
+  #if @sdn_enabled
+    +GoWaitHVON_SDN = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_SDN
+      NextStateError = ERROR
+      /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_SDN
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = @state_hvon_sdn
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+      +SetTriggerDanOnPulse = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = TRIGGER_DAN_ONPULSE
+          SignalValue = 1
+        }
+      }
+    }
+  #end
+  #if @prep_enabled
+    +GoWaitHVON_PREP = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_PREP
+      NextStateError = ERROR
+      /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_PREP
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = @state_hvon_prep
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+      +SetTriggerDanOnPulse = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = TRIGGER_DAN_ONPULSE
+          SignalValue = 1
+        }
+      }
+    }
+  #end
+  #if (@sdn_enabled && @prep_enabled)
+    +GoWaitHVON_SDN_PREP = {
+      Class = StateMachineEvent
+      NextState = WAITHVON_SDN_PREP
+      NextStateError = ERROR
+      /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+      +PrepareNextStateMsg = {
+        Class = Message
+        Destination = RTApp
+        Mode = "ExpectsReply"
+        Function = "PrepareNextState"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          param1 = WaitHVON_SDN_PREP
+        }
+      }
+      +StartNextStateExecutionMsg = {
+        Class = Message
+        Destination = RTApp
+        Function = "StartNextStateExecution"
+        Mode = "ExpectsReply"
+      }
+      +SetState = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_STATE
+          SignalValue = @state_hvon_sdn_prep
+        }
+      }
+      +SetFault = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = PCF_FAULT
+          SignalValue = 0
+        }
+      }
+      +SetTriggerDanOnPulse = {
+        Class = Message
+        Destination = RTApp.Functions.StateGAM
+        Function = "SetOutput"
+        +Parameters = {
+          Class = ConfigurationDatabase
+          SignalName = TRIGGER_DAN_ONPULSE
+          SignalValue = 1
+        }
+      }
+    }
+  #end
+  +GoError = {
+    Class = StateMachineEvent
+    NextState = ERROR
+    NextStateError = ERROR
+    /*
+    +StopCurrentStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StopCurrentStateExecution"
+      Mode = "ExpectsReply"
+    }
+*/
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = Error
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_error
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 1
+      }
+    }
+  }
+}

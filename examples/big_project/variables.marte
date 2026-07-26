@@ -1,0 +1,71 @@
+#package jada_gyro
+
+//# debug flag to enable udp stream
+var udp_streamer: bool = true
+var sdn_enabled: bool = false
+var prep_enabled: bool = true
+var web_service: bool = true
+var debug_service: bool = true
+
+var SDN_IFACE: string = "lo"
+var UDP_IFACE: string = "lo"
+//# Gyrotron ID
+var rfid: string = "EC-GN-P01"
+//# Fast Clock
+var fast_clock: uint32 = 5000 // Hz
+//# Slow Clock
+var slow_clock: uint32 = 1000 // Hz
+//# WF Generation Clock
+var wg_clock: uint32 = 1000 // Hz
+//# ADC Clock
+var sampling_freq: uint32 = 1000000 // Hz 
+//# App name
+var app_name: string = "JADA_RF01App"
+//# ADC acquisition and publishing frequency
+var adc_publish_freq: uint32 = 100
+//# Samples ADC
+let samples_adc: uint32 = (@sampling_freq / @adc_publish_freq) // samples
+//# Epics Frequency
+var epics_publish_freq: uint32 = 20 // Hz
+//# Ratio between epics and adc
+let epics_fast_ratio: uint32 = (@adc_publish_freq / @epics_publish_freq) // samples
+
+//# Ratio between fast and slow
+let fast_slow_ratio: uint32 = (@fast_clock / @slow_clock)
+//# Ratio between epics and slow
+let epics_slow_ratio: uint32 = (@slow_clock / @epics_publish_freq) // samples
+
+//# Number of DAN DIO samples
+var dan_ratio: uint32 = 1000
+
+//# Sync DIO data source timeout in ms (double of period)
+let sync_dio_timeout: uint32 = (@fast_clock / @dan_ratio) * 500
+
+// Constants for state values
+let state_error: uint32 = 1
+let state_disabled: uint32 = 2
+let state_standby: uint32 = 3
+let state_ready: uint32 = 4
+let state_permit: uint32 = 5
+let state_hvon: uint32 = 6
+let state_hvon_prep: uint32 = 7
+let state_hvon_sdn: uint32 = 8
+let state_hvon_sdn_prep: uint32 = 9
+let state_none: uint32 = 0
+
+//# decimation index for sync gam
+let dec_index: int = (@fast_slow_ratio - 1)
+
+// CPUS pinning
+var cpus_epics: uint = 0x80
+var cpus_rt: uint = 0x10
+var cpus_adc: uint = 0x20
+var cpus_dio: uint = 0x1000
+var cpus_fdan: uint = 0x8000
+var cpus_dan: uint = 0x4000
+var cpus_wg: uint = 0x40
+var cpus_sdn: uint = 0x2000
+
+let adc_dan_mul: uint32 = ((@sampling_freq * 10) / @samples_adc) // 10s DAN buffer for fast ADC data
+let dio_dan_mul: uint32 = ((@fast_clock * 10) / @dan_ratio) // 10s DAN buffer for DIO data
+let adc_cycle_time: float32 = ((@samples_adc * 1.0) / @sampling_freq)
