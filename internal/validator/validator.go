@@ -374,20 +374,12 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 		queueTask(node)
 	}
 
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-ctx.Done():
-		// Canceled
-	case <-done:
-		// Finished workers
-	}
-
+	// Close the tasks channel to signal workers that no more tasks will arrive.
+	// Workers drain any remaining in-flight tasks, then exit when the channel
+	// is empty and closed. This prevents goroutine leaks when the context is
+	// cancelled (BUG-005).
 	close(tasks)
+	wg.Wait()
 
 	if ctx.Err() != nil {
 		return

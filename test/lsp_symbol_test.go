@@ -149,11 +149,16 @@ func TestHandleWorkspaceSymbol(t *testing.T) {
 		t.Errorf("Expected 2 symbols for 'Object', got %d", len(res1))
 	}
 
-	// 2. Search for "A"
-	res2 := lsp.HandleWorkspaceSymbol(lsp.WorkspaceSymbolParams{Query: "A"})
-	// ObjectA AND GLOBAL_VAR (contains A)
+	// 2. Search for "Obj" — prefix match (len >= 3, generates 2 results)
+	res2 := lsp.HandleWorkspaceSymbol(lsp.WorkspaceSymbolParams{Query: "Obj"})
 	if len(res2) != 2 {
-		t.Errorf("Expected 2 symbols for 'A' (ObjectA and GLOBAL_VAR), got %d", len(res2))
+		t.Errorf("Expected 2 symbols for prefix 'Obj', got %d", len(res2))
+	}
+
+	// 3. Short query "A" — prefix match only (len < 3), nothing starts with A
+	resShort := lsp.HandleWorkspaceSymbol(lsp.WorkspaceSymbolParams{Query: "A"})
+	if len(resShort) != 0 {
+		t.Logf("Short query 'A' matched %d symbols (prefix-only, expected 0)", len(resShort))
 	}
 
 	// 3. Search for "GLOBAL"

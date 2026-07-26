@@ -94,6 +94,7 @@ func LoadFullSchema(projectRoot string) *Schema {
 		modTimes[p] = fileModTime(p)
 	}
 
+	// Fast path: read-lock equivalent check.
 	fullSchemaCacheMu.Lock()
 	if entry, ok := fullSchemaCache[projectRoot]; ok && modTimesEqual(entry.modTimes, modTimes) {
 		fullSchemaCacheMu.Unlock()
@@ -103,7 +104,14 @@ func LoadFullSchema(projectRoot string) *Schema {
 
 	s := loadFullSchemaUncached(paths)
 
+	// Write path: double-check that no other goroutine populated the cache
+	// while we were computing. This closes the TOCTOU window between the
+	// first unlock and the re-lock.
 	fullSchemaCacheMu.Lock()
+	if entry, ok := fullSchemaCache[projectRoot]; ok && modTimesEqual(entry.modTimes, modTimes) {
+		fullSchemaCacheMu.Unlock()
+		return entry.schema
+	}
 	fullSchemaCache[projectRoot] = &fullSchemaCacheEntry{schema: s, modTimes: modTimes}
 	fullSchemaCacheMu.Unlock()
 

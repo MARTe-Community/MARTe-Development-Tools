@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
-
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
@@ -16,6 +16,7 @@ import (
 type Builder struct {
 	Files           []string
 	Overrides       map[string]string
+	ProjectRoot     string // Directory containing .marte_schema.cue (derived from Files)
 	variables       map[string]parser.Value
 	tree            *index.ProjectTree
 	activeNodes     map[*index.ProjectNode]bool
@@ -23,9 +24,16 @@ type Builder struct {
 }
 
 func NewBuilder(files []string, overrides map[string]string) *Builder {
+	root := "."
+	if len(files) > 0 {
+		if d := filepath.Dir(files[0]); d != "" {
+			root = d
+		}
+	}
 	return &Builder{
 		Files:           files,
 		Overrides:       overrides,
+		ProjectRoot:     root,
 		variables:       make(map[string]parser.Value),
 		activeNodes:     make(map[*index.ProjectNode]bool),
 		activeFragments: make(map[*index.Fragment]bool),
@@ -120,7 +128,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				for _, f := range node.Fragments {
 					if f.IsConditional && f.BranchID == id+":then" {
 						b.activeFragments[f] = true
-					} else {
+					} else if f.IsConditional {
 						b.activeFragments[f] = false
 					}
 				}
@@ -283,7 +291,7 @@ func (b *Builder) Build(f *os.File) error {
 		ActiveNodes:     make(map[*index.ProjectNode]bool),
 		Variables:       b.variables,
 		Overrides:       make(map[string]parser.Value),
-		Schema:          schema.LoadFullSchema("."),
+		Schema:          schema.LoadFullSchema(b.ProjectRoot),
 	}
 	v.ValidateProject(context.Background())
 	if len(v.Diagnostics) > 0 {
@@ -391,8 +399,10 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 								valStr = "\"" + valStr + "\""
 							}
 							p := parser.NewParser("Temp = " + valStr)
-							cfg, _ := p.Parse()
-							if len(cfg.Definitions) > 0 {
+							cfg, err := p.Parse()
+							if err != nil {
+								fmt.Fprintf(os.Stderr, "Warning: failed to parse variable override for %s: %v\n", vdef.Name, err)
+							} else if len(cfg.Definitions) > 0 {
 								if f, ok := cfg.Definitions[0].(*parser.Field); ok {
 									b.variables[vdef.Name] = f.Value
 									continue

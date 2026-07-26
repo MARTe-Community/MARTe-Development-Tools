@@ -318,13 +318,18 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 	// ── Apply state filter to DS ──────────────────────────────────────────
 	dss := allDSS
 	if opts.stateFilter != "" {
+		// Build reverse lookup: DS base ID → DS node (BUG-021: was O(|edges|×|DS|))
+		idToDS := make(map[string]*index.ProjectNode, len(allDSS))
+		for _, ds := range allDSS {
+			idToDS[dsIDMap[ds]] = ds
+		}
 		connectedDS := make(map[*index.ProjectNode]bool)
 		for _, e := range edges {
-			for _, ds := range allDSS {
-				id := dsIDMap[ds]
-				if e.fromID == id || e.toID == id {
-					connectedDS[ds] = true
-				}
+			if ds, ok := idToDS[e.fromID]; ok {
+				connectedDS[ds] = true
+			}
+			if ds, ok := idToDS[e.toID]; ok {
+				connectedDS[ds] = true
 			}
 		}
 		var filtered []*index.ProjectNode

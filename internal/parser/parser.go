@@ -650,6 +650,7 @@ func (p *Parser) parseBlock() ([]Definition, Token, bool) {
 	for {
 		t := p.peek()
 		if t.Type == TokenEOF {
+			p.addError(t.Position, "unexpected EOF, expected #end or #else")
 			return defs, t, false
 		}
 		if t.Type == TokenEnd || t.Type == TokenElse {
@@ -853,6 +854,10 @@ func (p *Parser) parseAtom() (Value, bool) {
 				return nil, false
 			}
 			return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
+		}
+		if tok.Value != "{" {
+			p.addError(tok.Position, fmt.Sprintf("unexpected symbol %q", tok.Value))
+			return nil, false
 		}
 		fallthrough
 	case TokenLBrace:

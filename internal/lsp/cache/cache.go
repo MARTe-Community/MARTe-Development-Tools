@@ -25,7 +25,9 @@ func NewSession(id string) *Session {
 func (s *Session) Views() []*View {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.views
+	out := make([]*View, len(s.views))
+	copy(out, s.views)
+	return out
 }
 
 func (s *Session) View(id string) *View {
@@ -99,7 +101,11 @@ type View struct {
 }
 
 func (v *View) Snapshot() *Snapshot {
-	return v.snapshot.Load().(*Snapshot)
+	val := v.snapshot.Load()
+	if val == nil {
+		return nil
+	}
+	return val.(*Snapshot)
 }
 
 // SetSnapshot sets the new snapshot.

@@ -98,17 +98,27 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Printf("[ERROR] panic indexing %s: %v", path, r)
+				}
+			}()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			logger.Printf("indexing: %s [%s]\n", filepath.Base(path), path)
 			content, err := os.ReadFile(path)
-			if err == nil {
-				p := parser.NewParser(string(content))
-				config, _ := p.Parse()
-				if config != nil {
-					results <- result{path, config}
-				}
+			if err != nil {
+				logger.Printf("[ERROR] reading %s: %v", path, err)
+				return
+			}
+			p := parser.NewParser(string(content))
+			config, err := p.Parse()
+			if err != nil {
+				logger.Printf("[ERROR] parsing %s: %v", path, err)
+			}
+			if config != nil {
+				results <- result{path, config}
 			}
 		}(f)
 	}
