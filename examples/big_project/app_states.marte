@@ -16,7 +16,6 @@
 
 #let adc_thread: [&GAM] = {
   ReadADC,
-  AbsoluteTimeGenerator,
   PulseDetector,
   ComputeDANTrigger,
   PushADCtoDAN,
