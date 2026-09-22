@@ -13,26 +13,18 @@
   FHPS_B_GainGAM,
   WGProducerGAM
 }
-#if @udp_streamer
-  #let adc_thread: [&GAM] = {
-    ReadADC,
-    AdcTimeStamp,
-    PulseDetector,
-    ComputeDANTrigger,
-    PushADCtoDAN,
-    PushADCtoEpics,
-    PushADCtoUDP
-  }
-#else
-  #let adc_thread: [&GAM] = {
-    ReadADC,
-    AdcTimeStamp,
-    PulseDetector,
-    ComputeDANTrigger,
-    PushADCtoDAN,
-    PushADCtoEpics
-  }
-#end
+
+#let adc_thread: [&GAM] = {
+  ReadADC,
+  AbsoluteTimeGenerator,
+  PulseDetector,
+  ComputeDANTrigger,
+  PushADCtoDAN,
+  #if @udp_streamer
+    PushADCtoUDP,
+  #end
+  PushADCtoEpics,
+}
 
 +Disabled = {
   Class = RealTimeState

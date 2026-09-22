@@ -10,7 +10,7 @@ import (
 func TestNameScoping(t *testing.T) {
 	// App1 = { A = { Data = 10 } B = { Ref = A } }
 	// App2 = { C = { Data = 10 } A = { Data = 12 } D = { Ref = A } }
-	
+
 	content := `
 +App1 = {
     Class = App
@@ -27,11 +27,13 @@ func TestNameScoping(t *testing.T) {
 	pt := index.NewProjectTree()
 	p := parser.NewParser(content)
 	cfg, err := p.Parse()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	pt.AddFile("main.marte", cfg)
-	
+
 	pt.ResolveReferences(nil)
-	
+
 	// Helper to find ref target
 	findRefTarget := func(refName string, containerName string) *index.ProjectNode {
 		for _, ref := range pt.References {
@@ -44,7 +46,7 @@ func TestNameScoping(t *testing.T) {
 		}
 		return nil
 	}
-	
+
 	targetB := findRefTarget("A", "+B")
 	if targetB == nil {
 		t.Fatal("Could not find reference A in +B")
@@ -53,7 +55,7 @@ func TestNameScoping(t *testing.T) {
 	if targetB.Parent == nil || targetB.Parent.RealName != "+App1" {
 		t.Errorf("App1.B.Ref resolved to wrong target: %v (Parent %v)", targetB.RealName, targetB.Parent.RealName)
 	}
-	
+
 	targetD := findRefTarget("A", "+D")
 	if targetD == nil {
 		t.Fatal("Could not find reference A in +D")

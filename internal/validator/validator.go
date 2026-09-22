@@ -1029,11 +1029,13 @@ func (v *Validator) ValueToInterface(val parser.Value, ctx *index.ProjectNode) i
 		}
 		return nil
 	case *parser.ArrayValue:
-		var arr []interface{}
+		arr := make([]interface{}, 0, len(t.Elements))
 		for _, e := range t.Elements {
-			arr = append(arr, v.ValueToInterface(e, ctx))
+			arr = v.appendValue(arr, e, ctx)
 		}
 		return arr
+	case *parser.ConditionalArrayElements:
+		return v.appendValue(nil, t, ctx)
 	case *parser.BinaryExpression:
 		left := v.ValueToInterface(t.Left, ctx)
 		right := v.ValueToInterface(t.Right, ctx)
@@ -1043,6 +1045,32 @@ func (v *Validator) ValueToInterface(val parser.Value, ctx *index.ProjectNode) i
 		return v.evaluateUnary(t.Operator.Type, val)
 	}
 	return nil
+}
+
+// appendValue converts val and appends it to dst, flattening conditional
+// array elements (#if/#else blocks) into dst inline.
+func (v *Validator) appendValue(dst []interface{}, val parser.Value, ctx *index.ProjectNode) []interface{} {
+	if cae, ok := val.(*parser.ConditionalArrayElements); ok {
+		for _, e := range v.activeConditionalBranch(cae, ctx) {
+			dst = v.appendValue(dst, e, ctx)
+		}
+		return dst
+	}
+	return append(dst, v.ValueToInterface(val, ctx))
+}
+
+// activeConditionalBranch returns the value list of the first branch whose
+// condition evaluates to true, falling back to the #else branch.
+func (v *Validator) activeConditionalBranch(cae *parser.ConditionalArrayElements, ctx *index.ProjectNode) []parser.Value {
+	if v.Tree.IsTrue(v.Tree.Evaluate(cae.Condition, ctx)) {
+		return cae.Then
+	}
+	for _, ei := range cae.ElseIf {
+		if v.Tree.IsTrue(v.Tree.Evaluate(ei.Condition, ctx)) {
+			return ei.Body
+		}
+	}
+	return cae.Else
 }
 
 func (v *Validator) evaluateBinary(left interface{}, op parser.TokenType, right interface{}) interface{} {

@@ -11,7 +11,7 @@ import (
 func TestBuilderMergeNodes(t *testing.T) {
 	// Two files without package, defining SAME root node +App.
 	// This triggers merging logic in Builder.
-	
+
 	content1 := `
 +App = {
     Field1 = 10
@@ -38,7 +38,7 @@ func TestBuilderMergeNodes(t *testing.T) {
 
 	outF, _ := os.CreateTemp("", "out_merge.marte")
 	defer os.Remove(outF.Name())
-	
+
 	err := b.Build(outF)
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -48,11 +48,21 @@ func TestBuilderMergeNodes(t *testing.T) {
 	outContent, _ := os.ReadFile(outF.Name())
 	outStr := string(outContent)
 
-	if !strings.Contains(outStr, "Field1 = 10") { t.Error("Missing Field1") }
-	if !strings.Contains(outStr, "Field2 = 20") { t.Error("Missing Field2") }
-	if !strings.Contains(outStr, "+Sub = {") { t.Error("Missing Sub") }
-	if !strings.Contains(outStr, "Val = 1") { t.Error("Missing Sub.Val") }
-	if !strings.Contains(outStr, "Val2 = 2") { t.Error("Missing Sub.Val2") }
+	if !strings.Contains(outStr, "Field1 = 10") {
+		t.Error("Missing Field1")
+	}
+	if !strings.Contains(outStr, "Field2 = 20") {
+		t.Error("Missing Field2")
+	}
+	if !strings.Contains(outStr, "+Sub = {") {
+		t.Error("Missing Sub")
+	}
+	if !strings.Contains(outStr, "Val = 1") {
+		t.Error("Missing Sub.Val")
+	}
+	if !strings.Contains(outStr, "Val2 = 2") {
+		t.Error("Missing Sub.Val2")
+	}
 }
 
 func TestBuilderIfBlockPreservesNonConditionalFields(t *testing.T) {

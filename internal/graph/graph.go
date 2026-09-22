@@ -399,6 +399,11 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 				if we.fromID == re.toID {
 					continue // skip self-loop
 				}
+				if ioGAMIDSet[we.fromID] || ioGAMIDSet[re.toID] {
+					// An endpoint hidden as IOGAM cannot receive a port edge;
+					// its flow is carried by the resolved IOGAM bypass edges.
+					continue
+				}
 				bk := [4]string{we.fromID, we.fromPort, re.toID, re.toPort}
 				if seen3[bk] {
 					continue
@@ -406,39 +411,61 @@ func generate(tree *index.ProjectTree, diags map[*index.ProjectNode][]NodeDiag, 
 				seen3[bk] = true
 				bypassEntries = append(bypassEntries, bypassEntry{
 					fromID: we.fromID, fromPort: we.fromPort,
-					toID:   re.toID, toPort: re.toPort,
+					toID: re.toID, toPort: re.toPort,
 					color: "#40a060", style: "dashed",
 				})
 			}
 		}
 
-		// IOGAM bypass: srcDS → dstDS (node-level dashed edge).
-		// If srcDS is itself a pass-through DS, chain one level to its writers.
+		// IOGAM bypass: connect the IOGAM's displayed sources to its displayed
+		// destinations. Chains across hidden pass-through DSes and hidden
+		// IOGAMs are resolved transitively so no edge touches a hidden node.
+		gamInByID := make(map[string][]string)
+		gamOutByID := make(map[string][]string)
+		dsWritersByID := make(map[string]map[string]bool)
+		dsReadersByID := make(map[string]map[string]bool)
+		for _, e := range edges {
+			if e.isWrite {
+				if dsWritersByID[e.toID] == nil {
+					dsWritersByID[e.toID] = make(map[string]bool)
+				}
+				dsWritersByID[e.toID][e.fromID] = true
+				gamOutByID[e.fromID] = append(gamOutByID[e.fromID], e.toID)
+			} else {
+				if dsReadersByID[e.fromID] == nil {
+					dsReadersByID[e.fromID] = make(map[string]bool)
+				}
+				dsReadersByID[e.fromID][e.toID] = true
+				gamInByID[e.toID] = append(gamInByID[e.toID], e.fromID)
+			}
+		}
+		linker := &bypassLinker{
+			isHiddenDS:  func(id string) bool { return passThroughDSIDSet[id] },
+			isHiddenGAM: func(id string) bool { return ioGAMIDSet[id] },
+			dsWriters:   dsWritersByID,
+			dsReaders:   dsReadersByID,
+			gamInputs:   gamInByID,
+			gamOutputs:  gamOutByID,
+		}
 		seen2 := make(map[[2]string]bool)
 		for iogamID := range ioGAMIDSet {
-			srcIDs2 := make(map[string]bool)
-			dstIDs2 := make(map[string]bool)
-			for _, e := range edges {
-				if !e.isWrite && e.toID == iogamID { // IOGAM reads from DS
-					if passThroughDSIDSet[e.fromID] {
-						// One-level chain: use writers of that pass-through DS.
-						for _, we := range edges {
-							if we.isWrite && we.toID == e.fromID && !ioGAMIDSet[we.fromID] {
-								srcIDs2[we.fromID] = true
-							}
-						}
-					} else {
-						srcIDs2[e.fromID] = true
-					}
-				}
-				if e.isWrite && e.fromID == iogamID { // IOGAM writes to DS
-					dstIDs2[e.toID] = true
+			visited := map[string]bool{iogamID: true}
+			srcIDs := make(map[string]bool)
+			dstIDs := make(map[string]bool)
+			for _, in := range gamInByID[iogamID] {
+				for _, id := range linker.upstream(in, visited) {
+					srcIDs[id] = true
 				}
 			}
-			for srcID := range srcIDs2 {
-				for dstID := range dstIDs2 {
+			for _, out := range gamOutByID[iogamID] {
+				for _, id := range linker.downstream(out, visited) {
+					dstIDs[id] = true
+				}
+			}
+			for srcID := range srcIDs {
+				for dstID := range dstIDs {
 					bk := [2]string{srcID, dstID}
-					if seen2[bk] {
+					if srcID == dstID || seen2[bk] {
 						continue
 					}
 					seen2[bk] = true
@@ -1982,7 +2009,7 @@ func generateSimplified(tree *index.ProjectTree, diags map[*index.ProjectNode][]
 		ds    *index.ProjectNode
 		canon string
 	}
-	sigWriters := make(map[sigKey]*index.ProjectNode)  // one writer per signal
+	sigWriters := make(map[sigKey]*index.ProjectNode)   // one writer per signal
 	sigReaders := make(map[sigKey][]*index.ProjectNode) // many readers per signal
 	for _, c := range conns {
 		if c.isRead {
@@ -2040,42 +2067,73 @@ func generateSimplified(tree *index.ProjectTree, diags map[*index.ProjectNode][]
 		}
 	}
 
-	// IOGAM bypass: DS_in → DS_out  (or writerGAM → DS_out if DS_in is pass-through).
+	// IOGAM bypass: connect the IOGAM's displayed sources to its displayed
+	// destinations. Chains across hidden pass-through DSes and hidden IOGAMs
+	// are resolved transitively so no edge touches a hidden node.
+	gamInputs := make(map[string][]string)
+	gamOutputs := make(map[string][]string)
+	for _, c := range conns {
+		gid := gamIDMap[c.gam]
+		did := dsIDMap[c.ds]
+		if c.isRead {
+			gamInputs[gid] = append(gamInputs[gid], did)
+		} else {
+			gamOutputs[gid] = append(gamOutputs[gid], did)
+		}
+	}
+	dsWritersByID := make(map[string]map[string]bool, len(dsWriters))
+	for ds, ws := range dsWriters {
+		wsByID := make(map[string]bool, len(ws))
+		for w := range ws {
+			wsByID[gamIDMap[w]] = true
+		}
+		dsWritersByID[dsIDMap[ds]] = wsByID
+	}
+	dsReadersByID := make(map[string]map[string]bool, len(dsReaders))
+	for ds, rs := range dsReaders {
+		rsByID := make(map[string]bool, len(rs))
+		for r := range rs {
+			rsByID[gamIDMap[r]] = true
+		}
+		dsReadersByID[dsIDMap[ds]] = rsByID
+	}
+	hiddenDSByID := make(map[string]bool, len(passThroughDSSet))
+	for ds := range passThroughDSSet {
+		hiddenDSByID[dsIDMap[ds]] = true
+	}
+	hiddenGAMByID := make(map[string]bool, len(ioGAMSet))
+	for g := range ioGAMSet {
+		hiddenGAMByID[gamIDMap[g]] = true
+	}
+	linker := &bypassLinker{
+		isHiddenDS:  func(id string) bool { return hiddenDSByID[id] },
+		isHiddenGAM: func(id string) bool { return hiddenGAMByID[id] },
+		dsWriters:   dsWritersByID,
+		dsReaders:   dsReadersByID,
+		gamInputs:   gamInputs,
+		gamOutputs:  gamOutputs,
+	}
 	for iogam := range ioGAMSet {
 		gamName := realName(iogam)
-		// Collect source IDs (what feeds this IOGAM).
+		gid := gamIDMap[iogam]
+		visited := map[string]bool{gid: true}
 		sourceIDs := make(map[string]bool)
-		for _, c := range conns {
-			if c.gam != iogam || !c.isRead {
-				continue
-			}
-			if passThroughDSSet[c.ds] {
-				// One-level chain: look through pass-through DS to its writers.
-				for writerGAM := range dsWriters[c.ds] {
-					if !ioGAMSet[writerGAM] {
-						if id, ok := gamIDMap[writerGAM]; ok {
-							sourceIDs[id] = true
-						}
-					}
-				}
-			} else {
-				if id, ok := dsIDMap[c.ds]; ok {
-					sourceIDs[id] = true
-				}
+		destIDs := make(map[string]bool)
+		for _, in := range gamInputs[gid] {
+			for _, id := range linker.upstream(in, visited) {
+				sourceIDs[id] = true
 			}
 		}
-		// Collect destination IDs (where this IOGAM writes).
-		destIDs := make(map[string]bool)
-		for _, c := range conns {
-			if c.gam != iogam || c.isRead {
-				continue
-			}
-			if id, ok := dsIDMap[c.ds]; ok {
+		for _, out := range gamOutputs[gid] {
+			for _, id := range linker.downstream(out, visited) {
 				destIDs[id] = true
 			}
 		}
 		for srcID := range sourceIDs {
 			for dstID := range destIDs {
+				if srcID == dstID {
+					continue
+				}
 				addBypass(srcID, dstID, gamName, "iogam")
 			}
 		}
@@ -2465,4 +2523,73 @@ func dsWriteSigsOf(conns []sigConnEntry, ds *index.ProjectNode) map[string]bool 
 		}
 	}
 	return m
+}
+
+// bypassLinker resolves displayed graph endpoints across hidden nodes so
+// bypass edges always connect two nodes that are actually emitted.
+//
+// Simplification hides two node kinds: pass-through DataSources
+// (GAMDataSource / AsynchThreadDataSource) and IOGAMs. Data still flows
+// through them, so an edge that would have touched a hidden node must be
+// rerouted to the displayed nodes beyond it, transitively.
+type bypassLinker struct {
+	// isHiddenDS / isHiddenGAM report whether an ID belongs to a node type
+	// that is removed from the display.
+	isHiddenDS  func(string) bool
+	isHiddenGAM func(string) bool
+	// dsWriters / dsReaders: DS ID → GAM IDs writing to / reading from it.
+	dsWriters map[string]map[string]bool
+	dsReaders map[string]map[string]bool
+	// gamInputs / gamOutputs: GAM ID → input / output DS IDs.
+	gamInputs  map[string][]string
+	gamOutputs map[string][]string
+}
+
+// upstream returns the displayed node IDs that ultimately feed dsID.
+// A displayed DS resolves to itself; a hidden pass-through DS resolves to
+// its writers, recursing through hidden IOGAM writers to *their* sources.
+// visited must be seeded with the starting GAM and prevents cycles.
+func (b *bypassLinker) upstream(dsID string, visited map[string]bool) []string {
+	if !b.isHiddenDS(dsID) {
+		return []string{dsID}
+	}
+	var out []string
+	for w := range b.dsWriters[dsID] {
+		if !b.isHiddenGAM(w) {
+			out = append(out, w)
+			continue
+		}
+		if visited[w] {
+			continue
+		}
+		visited[w] = true
+		for _, in := range b.gamInputs[w] {
+			out = append(out, b.upstream(in, visited)...)
+		}
+	}
+	return out
+}
+
+// downstream returns the displayed node IDs ultimately fed by dsID.
+// A hidden pass-through DS resolves to its readers, recursing through
+// hidden IOGAM readers to *their* sinks.
+func (b *bypassLinker) downstream(dsID string, visited map[string]bool) []string {
+	if !b.isHiddenDS(dsID) {
+		return []string{dsID}
+	}
+	var out []string
+	for r := range b.dsReaders[dsID] {
+		if !b.isHiddenGAM(r) {
+			out = append(out, r)
+			continue
+		}
+		if visited[r] {
+			continue
+		}
+		visited[r] = true
+		for _, outDS := range b.gamOutputs[r] {
+			out = append(out, b.downstream(outDS, visited)...)
+		}
+	}
+	return out
 }

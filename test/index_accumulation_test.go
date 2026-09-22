@@ -136,5 +136,3 @@ func TestIndex_VariableRemoval(t *testing.T) {
 		t.Errorf("Variable should have been removed from index!")
 	}
 }
-
-

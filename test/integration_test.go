@@ -1,8 +1,8 @@
 package integration
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"io/ioutil"
 	"os"
 	"strings"

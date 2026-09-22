@@ -1,10 +1,10 @@
 package integration
 
 import (
-	"testing"
-	"github.com/marte-community/marte-dev-tools/internal/parser"
-	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"bytes"
+	"github.com/marte-community/marte-dev-tools/internal/formatter"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"testing"
 )
 
 func TestAdvancedNumbers(t *testing.T) {
@@ -54,9 +54,15 @@ Scientific = 1e-3
 			}
 		}
 	}
-	if !foundHex { t.Error("Hex field not found") }
-	if !foundHexLower { t.Error("HexLower field not found") }
-	if !foundBinary { t.Error("Binary field not found") }
+	if !foundHex {
+		t.Error("Hex field not found")
+	}
+	if !foundHexLower {
+		t.Error("HexLower field not found")
+	}
+	if !foundBinary {
+		t.Error("Binary field not found")
+	}
 
 	// Verify formatting
 	var buf bytes.Buffer
