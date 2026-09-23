@@ -38,6 +38,7 @@ mdt lsp --graph --graph-port=9090
 ```
 
 In this mode the graph:
+
 - Rebuilds whenever the LSP finishes validation (i.e. on every file save).
 - Follows the cursor: hovering over a GAM or DataSource in the editor sends a `focus` event that zooms the graph to that node.
 
@@ -59,36 +60,36 @@ If `--graph-port` is omitted, the OS assigns a free port.
 
 ### Legend
 
-| Colour | Meaning |
-|--------|---------|
-| Blue border | DataSource (DS) |
-| Purple border | IOGAM |
+| Colour        | Meaning            |
+| ------------- | ------------------ |
+| Blue border   | DataSource (DS)    |
+| Purple border | IOGAM              |
 | Orange border | Message/Timing GAM |
-| Dark border | Standard GAM |
-| Blue edge | Read (DS → GAM) |
-| Orange edge | Write (GAM → DS) |
+| Dark border   | Standard GAM       |
+| Blue edge     | Read (DS → GAM)    |
+| Orange edge   | Write (GAM → DS)   |
 
 Conditional nodes (inside `#if` blocks) are shown with a dashed border.
 
 ## Navigation
 
-| Action | Result |
-|--------|--------|
-| `/` or ⌕ button | Open search overlay (nodes and signals) |
-| `Home` / `h` | Reset view — fit entire graph |
-| `+` / `−` buttons | Zoom in / out |
-| `Tab` | Cycle between the read-clone and write-clone of a split DataSource |
-| Drag | Pan the graph |
-| Scroll wheel | Zoom |
+| Action            | Result                                                             |
+| ----------------- | ------------------------------------------------------------------ |
+| `/` or ⌕ button   | Open search overlay (nodes and signals)                            |
+| `Home` / `h`      | Reset view — fit entire graph                                      |
+| `+` / `−` buttons | Zoom in / out                                                      |
+| `Tab`             | Cycle between the read-clone and write-clone of a split DataSource |
+| Drag              | Pan the graph                                                      |
+| Scroll wheel      | Zoom                                                               |
 
 ## Selection
 
-| Action | Result |
-|--------|--------|
-| Click a node | Select it; highlight its direct signal connections |
-| Shift+click | Add node to multi-selection |
-| Click background | Clear selection |
-| ✕ Clear button | Clear selection |
+| Action           | Result                                             |
+| ---------------- | -------------------------------------------------- |
+| Click a node     | Select it; highlight its direct signal connections |
+| Shift+click      | Add node to multi-selection                        |
+| Click background | Clear selection                                    |
+| ✕ Clear button   | Clear selection                                    |
 
 Selected nodes are highlighted; unselected nodes and edges are dimmed.
 
@@ -105,7 +106,7 @@ Focus mode draws a compact, optimised Graphviz layout showing only the relevant 
 
 Pin nodes of interest by clicking the **⊕** pin icon next to them in the sidebar.
 
-- **◉ N** button (where *N* is the pin count) — draws an optimised layout for all pinned nodes and their DataSources.
+- **◉ N** button (where _N_ is the pin count) — draws an optimised layout for all pinned nodes and their DataSources.
 - Click ⊕ again to unpin.
 
 ### Returning to the full graph
@@ -117,19 +118,19 @@ Click **← Full** to exit focus/watchlist/filter mode and return to the complet
 Use the **State** and **Thread** dropdown menus in the header to restrict the graph to GAMs active in a particular MARTe real-time state or thread.
 
 - The graph switches to an optimised focused layout showing only the matching GAMs and all DataSources that supply or consume their signals.
-- Click **← Full** (or reset both dropdowns to *All*) to return to the full graph.
+- Click **← Full** (or reset both dropdowns to _All_) to return to the full graph.
 
 ## Sidebar
 
 The sidebar on the left shows all GAMs and DataSources in a tree.
 
-| Action | Result |
-|--------|--------|
+| Action       | Result                                                     |
+| ------------ | ---------------------------------------------------------- |
 | Click a node | Expand its signal list; select and zoom to it in the graph |
-| Ctrl+click | Deselect the node |
-| ⊕ pin icon | Pin / unpin to watchlist |
-| Filter box | Filter tree by node name or signal name |
-| ☰ button | Collapse / expand the sidebar |
+| Ctrl+click   | Deselect the node                                          |
+| ⊕ pin icon   | Pin / unpin to watchlist                                   |
+| Filter box   | Filter tree by node name or signal name                    |
+| ☰ button    | Collapse / expand the sidebar                              |
 
 Signal rows show type, direction, and any diagnostics (errors / warnings).
 
@@ -145,11 +146,11 @@ In LSP-integrated mode (`mdt lsp --graph`) the graph rebuilds after every succes
 
 ## Keyboard shortcuts summary
 
-| Key | Action |
-|-----|--------|
-| `/` | Open search |
-| `h` | Reset view (fit graph) |
-| `?` | Toggle help overlay |
-| `Tab` | Cycle DataSource clones |
-| `Home` | Reset view |
-| `+` / `−` | Zoom in / out |
+| Key       | Action                  |
+| --------- | ----------------------- |
+| `/`       | Open search             |
+| `h`       | Reset view (fit graph)  |
+| `?`       | Toggle help overlay     |
+| `Tab`     | Cycle DataSource clones |
+| `Home`    | Reset view              |
+| `+` / `−` | Zoom in / out           |
