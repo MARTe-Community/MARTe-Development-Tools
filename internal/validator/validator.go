@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,7 +14,9 @@ import (
 	"cuelang.org/go/cue/errors"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/loader"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
+
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
 
@@ -41,7 +44,12 @@ type Validator struct {
 	mu              sync.Mutex
 	ActiveNodes     map[*index.ProjectNode]bool
 	ActiveFragments map[*index.Fragment]bool
-	muActive        sync.Mutex
+	// visited tracks (child node -> source definition) pairs already
+	// expanded by activation, keeping repeated passes idempotent.
+	visited map[*index.ProjectNode]map[parser.Definition]bool
+	// loadCache memoizes with-block document loads by absolute path.
+	loadCache map[string]parser.Value
+	muActive  sync.Mutex
 }
 
 func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[string]string) *Validator {
@@ -50,9 +58,9 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		Schema:          schema.LoadFullSchema(projectRoot),
 		Overrides:       make(map[string]parser.Value),
 		Variables:       make(map[string]parser.Value),
-		RawOverrides:    overrides,
 		ActiveNodes:     make(map[*index.ProjectNode]bool),
 		ActiveFragments: make(map[*index.Fragment]bool),
+		visited:         make(map[*index.ProjectNode]map[parser.Definition]bool),
 	}
 
 	for name, valStr := range overrides {
@@ -62,7 +70,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
 				v.Overrides[name] = f.Value
 				v.Variables[name] = f.Value
-							}
+			}
 		}
 	}
 
@@ -92,6 +100,12 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 }
 
 func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
+	if v.visited == nil {
+		v.visited = make(map[*index.ProjectNode]map[parser.Definition]bool)
+	}
+	if v.loadCache == nil {
+		v.loadCache = make(map[string]parser.Value)
+	}
 	if ctx.Err() != nil {
 		return
 	}
@@ -110,8 +124,13 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 		active := v.ActiveFragments[frag]
 		v.muActive.Unlock()
 		if active {
-			// fmt.Printf("[DEBUG] Evaluating fragment definitions (count=%d) from %s\n", len(frag.Definitions), frag.File)
-			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+			c := evalCtx
+			if frag.EvalCtx != nil {
+				// Fragment materialized under loop/template/with
+				// bindings: evaluate with those.
+				c = frag.EvalCtx
+			}
+			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 		}
 	}
 
@@ -124,7 +143,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 			case *parser.ObjectNode:
 				objName := v.ValueToString(d.Name, ed.Ctx)
 				norm := index.NormalizeName(objName)
-				
+
 				// Find or create the child node
 				v.muActive.Lock()
 				child, ok := node.Children[norm]
@@ -142,12 +161,15 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					node.Children[norm] = child
 					v.Tree.AddToNodeMap(child)
 				}
-				
+
 				// Ensure this fragment is present and active
 				found := false
 				for _, f := range child.Fragments {
 					if f.Source == d {
 						v.ActiveFragments[f] = true
+						if f.EvalCtx == nil {
+							f.EvalCtx = ed.Ctx
+						}
 						found = true
 						break
 					}
@@ -157,13 +179,27 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							v.ActiveFragments[f] = true
+							if f.EvalCtx == nil {
+								f.EvalCtx = ed.Ctx
+							}
 							break
 						}
 					}
 				}
+
+				// Only recurse the first time this source definition
+				// materializes this child: later passes must not re-walk
+				// (and re-expand) already-activated subtrees.
+				alreadyVisited := v.visited[child] != nil && v.visited[child][d]
+				if !alreadyVisited {
+					if v.visited[child] == nil {
+						v.visited[child] = make(map[parser.Definition]bool)
+					}
+					v.visited[child][d] = true
+				}
 				v.muActive.Unlock()
 
-				if !written[norm] {
+				if !written[norm] && !alreadyVisited {
 					v.collectActiveNodes(ctx, child, ed.Ctx)
 					written[norm] = true
 				}
@@ -180,35 +216,35 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 					v.muActive.Unlock()
 					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
-			} else {
-				matched := false
-				for i, ei := range d.ElseIf {
-					elseifCond := v.Tree.EvaluateValue(ei.Condition, ed.Ctx)
-					if v.Tree.IsTrue(elseifCond) {
-						branchID := fmt.Sprintf("%s:elseif%d", id, i)
+				} else {
+					matched := false
+					for i, ei := range d.ElseIf {
+						elseifCond := v.Tree.EvaluateValue(ei.Condition, ed.Ctx)
+						if v.Tree.IsTrue(elseifCond) {
+							branchID := fmt.Sprintf("%s:elseif%d", id, i)
+							v.muActive.Lock()
+							for _, f := range node.Fragments {
+								if f.IsConditional && f.BranchID == branchID {
+									v.ActiveFragments[f] = true
+								}
+							}
+							v.muActive.Unlock()
+							processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+							matched = true
+							break
+						}
+					}
+					if !matched && len(d.Else) > 0 {
 						v.muActive.Lock()
 						for _, f := range node.Fragments {
-							if f.IsConditional && f.BranchID == branchID {
+							if f.IsConditional && f.BranchID == id+":else" {
 								v.ActiveFragments[f] = true
 							}
 						}
 						v.muActive.Unlock()
-						processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
-						matched = true
-						break
+						processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
 					}
 				}
-				if !matched && len(d.Else) > 0 {
-					v.muActive.Lock()
-					for _, f := range node.Fragments {
-						if f.IsConditional && f.BranchID == id+":else" {
-							v.ActiveFragments[f] = true
-						}
-					}
-					v.muActive.Unlock()
-					processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
-				}
-			}
 			case *parser.ForeachBlock:
 				iterable := v.Tree.EvaluateValue(d.Iterable, ed.Ctx)
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
@@ -234,7 +270,54 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						}
 						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
 					}
+				} else if m, ok := iterable.(*parser.MapValue); ok {
+					// Dict iteration: two-variable foreach binds
+					// key and value of every member.
+					v.muActive.Lock()
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":body" {
+							v.ActiveFragments[f] = true
+						}
+					}
+					v.muActive.Unlock()
+					for _, key := range m.Keys {
+						subCtx := &index.EvaluationContext{
+							Variables: make(map[string]parser.Value),
+							Parent:    ed.Ctx,
+							Tree:      v.Tree,
+						}
+						if d.KeyVar != "" {
+							subCtx.Variables[d.KeyVar] = &parser.StringValue{Value: key, Quoted: true}
+						}
+						if d.ValueVar != "" {
+							subCtx.Variables[d.ValueVar] = m.Values[key]
+						}
+						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+					}
 				}
+			case *parser.WithBlock:
+				resolved := loader.ResolvePath(ed.File, v.ValueToString(d.Path, ed.Ctx))
+				val, err := v.loadStructured(resolved, d.Format)
+				if err != nil {
+					v.report(node, "with_load_failed", LevelError,
+						fmt.Sprintf("with %s(%q): %v", d.Format, resolved, err),
+						d.Position, ed.File)
+					continue
+				}
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				v.muActive.Lock()
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":with" {
+						v.ActiveFragments[f] = true
+					}
+				}
+				v.muActive.Unlock()
+				subCtx := &index.EvaluationContext{
+					Variables: map[string]parser.Value{d.BindName: val},
+					Parent:    ed.Ctx,
+					Tree:      v.Tree,
+				}
+				processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
 			case *parser.TemplateDefinition:
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 				v.muActive.Lock()
@@ -269,7 +352,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	// Multi-pass active node collection to handle variables defined in conditional blocks
 	for pass := 0; pass < 5; pass++ { // Max 5 passes to avoid infinite loops
 		evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
-		
+
 		v.Tree.Walk(func(n *index.ProjectNode) {
 			for k, varInfo := range n.Variables {
 				if _, ok := v.Variables[k]; !ok || varInfo.Def.IsConst {
@@ -302,7 +385,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 		for _, node := range v.Tree.IsolatedFiles {
 			v.collectActiveNodes(ctx, node, evalCtx)
 		}
-		
+
 		// Re-resolve only active things after activation pass
 		v.Tree.ResolveFields(v.ActiveFragments)
 		v.Tree.ResolveReferences(v.ActiveFragments)
@@ -334,7 +417,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								log.Printf("[ERROR] panic while validating node %q: %v", node.RealName, r)
+								log.Printf("[ERROR] panic while validating node %q: %v\n%s", node.RealName, r, debug.Stack())
 							}
 							wg.Done()
 						}()
@@ -434,7 +517,11 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		active := v.ActiveFragments[frag]
 		v.muActive.Unlock()
 		if active {
-			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+			c := evalCtx
+			if frag.EvalCtx != nil {
+				c = frag.EvalCtx
+			}
+			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 		}
 	}
 
@@ -530,6 +617,12 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	for _, obj := range objects {
 		objectNode := obj.Def.(*parser.ObjectNode)
 		objName := v.ValueToString(objectNode.Name, obj.Ctx)
+		if strings.Contains(objName, "@") {
+			// Unexpanded loop/template body definition: the
+			// materialized instances (with resolved bindings) are
+			// validated instead.
+			continue
+		}
 		norm := index.NormalizeName(objName)
 
 		if child, ok := node.Children[norm]; ok {
@@ -613,12 +706,10 @@ func (v *Validator) extractFields(evaluated []index.EvaluatedDefinition) map[str
 	return fields
 }
 
-
 func (v *Validator) ValueToString(val parser.Value, ctx *index.EvaluationContext) string {
 	res := v.Tree.EvaluateValue(val, ctx)
 	return v.Tree.ValueToString(res)
 }
-
 
 func (v *Validator) validateClassField(f index.EvaluatedField, node *index.ProjectNode) {
 	// Class field should always have a value Class (string quoted or not)
@@ -715,13 +806,13 @@ func (v *Validator) validateValue(val parser.Value, node *index.ProjectNode, fil
 
 func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bool {
 	// Global suppression check
-	// Use an empty string if node is nil for file context, 
+	// Use an empty string if node is nil for file context,
 	// but isGloballyAllowed should ideally have a file context.
 	file := ""
 	if node != nil {
 		file = v.getNodeFile(node)
 	}
-	
+
 	if v.isGloballyAllowed(warningType, file) {
 		return true
 	}
@@ -737,7 +828,7 @@ func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bo
 			return true
 		}
 	}
-	
+
 	if node == nil {
 		return false
 	}
@@ -957,7 +1048,6 @@ func (v *Validator) getMetaType(node *index.ProjectNode) string {
 	return ""
 }
 
-
 func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
 	list := errors.Errors(err)
 	for _, e := range list {
@@ -1002,7 +1092,6 @@ func (v *Validator) nodeToMapWithDepth(node *index.ProjectNode, depth int) map[s
 	return m
 }
 
-
 func (v *Validator) ValueToInterface(val parser.Value, ctx *index.ProjectNode) interface{} {
 	switch t := val.(type) {
 	case *parser.StringValue:
@@ -1036,13 +1125,30 @@ func (v *Validator) ValueToInterface(val parser.Value, ctx *index.ProjectNode) i
 		return arr
 	case *parser.ConditionalArrayElements:
 		return v.appendValue(nil, t, ctx)
-	case *parser.BinaryExpression:
-		left := v.ValueToInterface(t.Left, ctx)
-		right := v.ValueToInterface(t.Right, ctx)
-		return v.evaluateBinary(left, t.Operator.Type, right)
-	case *parser.UnaryExpression:
-		val := v.ValueToInterface(t.Right, ctx)
-		return v.evaluateUnary(t.Operator.Type, val)
+	case *parser.MemberAccess:
+		res := v.Tree.Evaluate(val, ctx)
+		if _, stillExpr := res.(*parser.MemberAccess); stillExpr {
+			return nil // unresolvable member access
+		}
+		return v.ValueToInterface(res, ctx)
+	case *parser.MapValue:
+		m := make(map[string]interface{}, len(t.Keys))
+		for _, k := range t.Keys {
+			m[k] = v.ValueToInterface(t.Values[k], ctx)
+		}
+		return m
+	case *parser.BinaryExpression, *parser.UnaryExpression:
+		// Delegate to the tree evaluator, which implements the full
+		// operator set: arithmetic, comparison, logical, bitwise and
+		// string concatenation. When an operand cannot be computed the
+		// evaluator returns the expression itself; treat that as an
+		// unknown (null) value instead of recursing forever.
+		res := v.Tree.Evaluate(val, ctx)
+		switch res.(type) {
+		case *parser.BinaryExpression, *parser.UnaryExpression:
+			return nil
+		}
+		return v.ValueToInterface(res, ctx)
 	}
 	return nil
 }
@@ -1057,6 +1163,23 @@ func (v *Validator) appendValue(dst []interface{}, val parser.Value, ctx *index.
 		return dst
 	}
 	return append(dst, v.ValueToInterface(val, ctx))
+}
+
+// loadStructured loads (and caches) an external structured document
+// for a with-block binding.
+func (v *Validator) loadStructured(path, format string) (parser.Value, error) {
+	if v.loadCache == nil {
+		v.loadCache = make(map[string]parser.Value)
+	}
+	if val, ok := v.loadCache[path]; ok {
+		return val, nil
+	}
+	val, err := loader.Load(format, path)
+	if err != nil {
+		return nil, err
+	}
+	v.loadCache[path] = val
+	return val, nil
 }
 
 // activeConditionalBranch returns the value list of the first branch whose
@@ -1195,7 +1318,7 @@ func (v *Validator) validateSignal(node *index.ProjectNode, fields map[string][]
 				typeFields[0].Raw.Position, typeFields[0].File)
 		}
 	}
-	
+
 	v.validateByteSize(node, fields)
 }
 
@@ -1207,8 +1330,6 @@ func (v *Validator) validateGAM(node *index.ProjectNode) {
 		v.validateGAMSignals(node, outputs, "Output")
 	}
 }
-
-
 
 func (v *Validator) validateDataSource(node *index.ProjectNode) {
 	// Hooks for DataSource specialized validation
@@ -1322,46 +1443,46 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 			}
 		}
 
-	// Property checks
-	v.checkSignalProperty(signalNode, targetNode, "Type")
+		// Property checks
+		v.checkSignalProperty(signalNode, targetNode, "Type")
 
-	// Validate Ranges
-	if rangeFields, ok := fields["Ranges"]; ok && len(rangeFields) > 0 {
-		val := rangeFields[0].Value
-		if arr, ok := val.(*parser.ArrayValue); ok {
-			for _, elem := range arr.Elements {
-				if inner, ok := elem.(*parser.ArrayValue); ok {
-					if len(inner.Elements) != 2 {
+		// Validate Ranges
+		if rangeFields, ok := fields["Ranges"]; ok && len(rangeFields) > 0 {
+			val := rangeFields[0].Value
+			if arr, ok := val.(*parser.ArrayValue); ok {
+				for _, elem := range arr.Elements {
+					if inner, ok := elem.(*parser.ArrayValue); ok {
+						if len(inner.Elements) != 2 {
+							v.report(signalNode, "invalid_ranges_format", LevelError,
+								fmt.Sprintf("Ranges element must be a 2D vector [start, end], found %d elements", len(inner.Elements)),
+								inner.Position, rangeFields[0].File)
+						}
+					} else {
 						v.report(signalNode, "invalid_ranges_format", LevelError,
-							fmt.Sprintf("Ranges element must be a 2D vector [start, end], found %d elements", len(inner.Elements)),
-							inner.Position, rangeFields[0].File)
+							"Ranges property must be a 2D vector (array of arrays), e.g. {{0, 0}}",
+							elem.Pos(), rangeFields[0].File)
 					}
-				} else {
-					v.report(signalNode, "invalid_ranges_format", LevelError,
-						"Ranges property must be a 2D vector (array of arrays), e.g. {{0, 0}}",
-						elem.Pos(), rangeFields[0].File)
 				}
+			} else {
+				v.report(signalNode, "invalid_ranges_format", LevelError,
+					"Ranges property must be an array, e.g. {{0, 0}}",
+					val.Pos(), rangeFields[0].File)
 			}
-		} else {
-			v.report(signalNode, "invalid_ranges_format", LevelError,
-				"Ranges property must be an array, e.g. {{0, 0}}",
-				val.Pos(), rangeFields[0].File)
 		}
-	}
-	
-	// If Ranges or Samples are present, NumberOfElements/Dimensions might differ legitimately (local override/modification)
-	hasModifiers := false
-	if r, ok := fields["Ranges"]; ok && len(r) > 0 {
-		hasModifiers = true
-	}
-	if s, ok := fields["Samples"]; ok && len(s) > 0 {
-		hasModifiers = true
-	}
 
-	if !hasModifiers {
-		v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
-		v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
-	}
+		// If Ranges or Samples are present, NumberOfElements/Dimensions might differ legitimately (local override/modification)
+		hasModifiers := false
+		if r, ok := fields["Ranges"]; ok && len(r) > 0 {
+			hasModifiers = true
+		}
+		if s, ok := fields["Samples"]; ok && len(s) > 0 {
+			hasModifiers = true
+		}
+
+		if !hasModifiers {
+			v.checkSignalProperty(signalNode, targetNode, "NumberOfElements")
+			v.checkSignalProperty(signalNode, targetNode, "NumberOfDimensions")
+		}
 
 		// Check Type validity if present
 		if typeFields, ok := fields["Type"]; ok && len(typeFields) > 0 {
@@ -2457,27 +2578,53 @@ func translateTypeToCUE(typeExpr string) string {
 		return "any"
 	}
 
-	// If it doesn't contain reference indicator "&", preserve the original typeExpr
-	// to avoid modifying existing CUE types and validations.
-	if !strings.Contains(clean, "&") {
+	// Regex-constrained types: `string =~ "^re"` compiles as
+	// `string & =~"^re"`.
+	if idx := strings.Index(clean, "=~"); idx != -1 {
+		base := strings.TrimSuffix(strings.TrimSpace(clean[:idx]), "&")
+		base = strings.TrimSpace(base)
+		pattern := clean[idx+2:]
+		if base == "" {
+			base = "string"
+		}
+		return base + " & =~" + pattern
+	}
+
+	// Anything with CUE-structural syntax is passed through verbatim.
+	if strings.ContainsAny(clean, "{}()~") {
 		return typeExpr
 	}
 
-	// Helper to translate a single base type to CUE
+	// Translate a single base type to CUE.
 	translateBase := func(t string) string {
 		if strings.HasPrefix(t, "&") {
+			// References to nodes/classes are spelled as strings.
 			return "string"
 		}
-		return t
+		switch t {
+		case "int8", "int16", "int32", "int64":
+			return "int"
+		case "uint8", "uint16", "uint32", "uint64":
+			return "uint"
+		case "float16", "float32", "float64":
+			return "float"
+		}
+		switch t {
+		case "string", "int", "uint", "float", "bool", "number":
+			return t
+		}
+		// Any other named type denotes a reference to a node or class;
+		// references are spelled as strings in configurations.
+		return "string"
 	}
 
-	// Check if it's an array type, e.g. [&GAM]
+	// Array types, e.g. [int] or [&GAM]: open list.
 	if strings.HasPrefix(clean, "[") && strings.HasSuffix(clean, "]") {
 		inner := clean[1 : len(clean)-1]
 		return "[..." + translateBase(inner) + "]"
 	}
 
-	// Handle union types like &GAM|&DataSource
+	// Union types, e.g. int|uint or &GAM|&DataSource.
 	if strings.Contains(clean, "|") {
 		parts := strings.Split(clean, "|")
 		for i, p := range parts {

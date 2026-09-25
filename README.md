@@ -38,6 +38,7 @@ Few additional features have been added to the standard MARTe configuration lang
 - [Step-by-Step Tutorial](docs/TUTORIAL.md)
 - [Editor Integration Guide](docs/EDITOR_INTEGRATION.md)
 - [Configuration Guide](docs/CONFIGURATION_GUIDE.md)
+- [Language Reference](docs/LANGUAGE_REFERENCE.md)
 - [Signal Flow Graph Guide](docs/GRAPH_GUIDE.md)
 - [Examples Readme](/examples/README.md)
 

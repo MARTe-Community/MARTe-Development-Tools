@@ -79,13 +79,20 @@ VarDecl         = OptionalHash "var" Identifier ":" TypeExpr [ "=" Value ] ;
 LetDecl         = OptionalHash "let" Identifier ":" TypeExpr "=" Value ;
 
 IfBlock         = OptionalHash "if" Value ConfigurationBlock
-                  { "else" "if" Value ConfigurationBlock }
+                  { "else" OptionalHash ( "if" Value | "elseif" Value )
+                    ConfigurationBlock }
                   [ "else" ConfigurationBlock ]
                   OptionalHash "end" ;
 
-ForeachBlock    = OptionalHash "foreach" [ Identifier "," ] Identifier
+(* `#else if cond` (two words) and `#elseif cond` (one word) are both
+   accepted; the two-word form is the recommended spelling. *)
+
+ForeachBlock    = OptionalHash "foreach" [ Identifier ] Identifier
                   "in" Value ConfigurationBlock
                   OptionalHash "end" ;
+
+(* One identifier binds the element; two space-separated identifiers
+   bind index and element. No comma is used. *)
 
 TemplateDef     = OptionalHash "template" Identifier "("
                   [ ParamList ] ")" ConfigurationBlock
@@ -110,21 +117,17 @@ Arg             = Identifier "=" Value ;
 
 Value           = Expression ;
 
-(* Precedence levels, lowest to highest *)
+(* Precedence levels, lowest to highest.
+   `..` concatenates strings and merges arrays (list concat). *)
 Expression      = OrExpr ;
 
 OrExpr          = AndExpr { "||" AndExpr } ;
 AndExpr         = CmpExpr { "&&" CmpExpr } ;
 CmpExpr         = CatExpr { ("<" | ">" | "<=" | ">=" | "==" | "!=") CatExpr } ;
-CatExpr         = AddExpr { ".." AddExpr } ;                   (* string concat *)
+CatExpr         = AddExpr { ".." AddExpr } ;
 AddExpr         = MultExpr { ("+" | "-") MultExpr } ;
 MultExpr        = UnaryExpr { ("*" | "/" | "%") UnaryExpr } ;
-UnaryExpr       = [ "-" | "!" ] BitExpr ;
-BitExpr         = PostfixExpr { ("&" | "|" | "^") PostfixExpr } ;
-
-PostfixExpr     = ArrayAccess { IndexAccess } ;                 (* not yet in lang *)
-ArrayAccess     = Atom ;
-
+UnaryExpr       = [ "-" | "!" ] Atom ;
 Atom            = IntLiteral
                 | FloatLiteral
                 | BoolLiteral
@@ -135,7 +138,6 @@ Atom            = IntLiteral
                 | "(" Expression ")"
                 ;
 
-IndexAccess     = "[" Expression "]" ;                          (* reserved *)
 
 (* ── LITERALS ────────────────────────────────────────────────────────────── *)
 
@@ -162,9 +164,18 @@ QualifiedID     = Identifier { "::" Identifier } ;
 (* ── PACKAGE URI ─────────────────────────────────────────────────────────── *)
 
 PackageURI      = Identifier { "." Identifier } ;
-TypeExpr        = Identifier { "|" Identifier } ;               (* union types *)
-TypeExpr       |= "string" | "int" | "uint" | "float" | "bool" | "array" ;
-ArrayDim        = "[" Expression "]" ;
+TypeExpr        = Identifier { "|" Identifier }               (* union types *)
+                | "string" | "int" | "uint" | "float" | "bool"
+                | "int8" | "int16" | "int32" | "int64"
+                | "uint8" | "uint16" | "uint32" | "uint64"
+                | "float16" | "float32" | "float64"
+                | "[" TypeExpr "]"                             (* open list *)
+                | TypeExpr "=~" StringLiteral                  (* regex constraint *)
+                ;
+
+(* Bare class names (e.g. GAM, DataSource) denote references and are
+   type-checked as strings. Width-suffixed integer/float names map to
+   their CUE counterparts. *)
 
 (* ── TEMPLATE NAMES ──────────────────────────────────────────────────────── *)
 
@@ -189,17 +200,15 @@ Reason          = { any_char_except_newline } ;
 
    Whitespace:    spaces, tabs, newlines → ignored between tokens.
 
-   keywords:      "package" "var" "let" "if" "else" "end" "foreach" "in"
-                  "template" "use" "as" "true" "false"
+   keywords:      "package" "var" "let" "if" "else" "elseif" "end" "foreach"
+                  "in" "template" "use" "as" "true" "false"
+                  Cannot be a keyword when appearing at directive position.
+                  Can be a keyword when used as a field name.
 
    operators:     "+"  "-"  "*"  "/"  "%"  "^"  "&"  "|"
                   ".." "<"  ">"  "<=" ">=" "==" "!=" "!"
                   "="  ":"  "("  ")"  "{"  "}"  "["  "]"
                   ","  "::"
-
-   identifiers:   [a-zA-Z_] [a-zA-Z0-9_\-\.]*
-                  Cannot be a keyword when appearing at directive position.
-                  Can be a keyword when used as a field name.
 
    numbers:       decimal:   [0-9]+
                   hex:       0[xX][0-9a-fA-F]+

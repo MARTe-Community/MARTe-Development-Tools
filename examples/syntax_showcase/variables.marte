@@ -1,0 +1,29 @@
+//# Syntax Showcase — variables, literals, types and expressions.
+#package Showcase
+
+//# Master switch for the streaming branch of the configuration.
+//# Override on the command line: mdt build -vudp_streamer=false
+var udp_streamer: bool = true
+
+//# Number of acquisition channels unrolled by loops.marte.
+var NumChannels: int = 4
+
+//# Threshold used by the if / else if chain in app.marte.
+var ChannelBudget: int = 3
+
+//# Literals of every supported flavour.
+var int_dec: int = 42                       // decimal
+var int_hex: int = 0x1F                     // hexadecimal (31)
+var int_bin: int = 0b101                    // binary (5)
+var int_neg: int = -7                       // negative
+var a_float: float = 2.5                    // simple float
+var a_sci: float = 1.0e6                    // scientific notation
+var a_bool: bool = false
+var a_string: string = "localhost"
+
+//# Computed constant — evaluated from other variables at load time.
+let Period_us: float = (1.0e6 / @a_sci)
+//# Arithmetic in initializers is fully supported. (Bitwise operators
+//# work in field values and conditions, but not in variable initializers.)
+let WeightedSum: int = (2 + 3 * 4)
+

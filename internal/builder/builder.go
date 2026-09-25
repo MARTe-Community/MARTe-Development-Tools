@@ -3,14 +3,15 @@ package builder
 import (
 	"context"
 	"fmt"
+	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/loader"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
+	"github.com/marte-community/marte-dev-tools/internal/schema"
+	"github.com/marte-community/marte-dev-tools/internal/validator"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"github.com/marte-community/marte-dev-tools/internal/index"
-	"github.com/marte-community/marte-dev-tools/internal/parser"
-	"github.com/marte-community/marte-dev-tools/internal/schema"
-	"github.com/marte-community/marte-dev-tools/internal/validator"
 )
 
 type Builder struct {
@@ -71,6 +72,9 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == parser.Definition(d) {
 							b.activeFragments[f] = true
+							if f.EvalCtx == nil {
+								f.EvalCtx = ed.Ctx
+							}
 							break
 						}
 					}
@@ -103,6 +107,9 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				for _, f := range child.Fragments {
 					if f.Source == parser.Definition(d) {
 						b.activeFragments[f] = true
+						if f.EvalCtx == nil {
+							f.EvalCtx = ed.Ctx
+						}
 						found = true
 						break
 					}
@@ -112,6 +119,9 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							b.activeFragments[f] = true
+							if f.EvalCtx == nil {
+								f.EvalCtx = ed.Ctx
+							}
 							break
 						}
 					}
@@ -122,45 +132,68 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					written[norm] = true
 				}
 			case *parser.IfBlock:
-			cond := b.tree.EvaluateValue(d.Condition, ed.Ctx)
-			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
-			if b.tree.IsTrue(cond) {
-				for _, f := range node.Fragments {
-					if f.IsConditional && f.BranchID == id+":then" {
-						b.activeFragments[f] = true
-					} else if f.IsConditional {
-						b.activeFragments[f] = false
+				cond := b.tree.EvaluateValue(d.Condition, ed.Ctx)
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				if b.tree.IsTrue(cond) {
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":then" {
+							b.activeFragments[f] = true
+						} else if f.IsConditional {
+							b.activeFragments[f] = false
+						}
 					}
-				}
-				processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
-			} else {
-				matched := false
-				for i, ei := range d.ElseIf {
-					elseifCond := b.tree.EvaluateValue(ei.Condition, ed.Ctx)
-					if b.tree.IsTrue(elseifCond) {
-						branchID := fmt.Sprintf("%s:elseif%d", id, i)
+					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
+				} else {
+					matched := false
+					for i, ei := range d.ElseIf {
+						elseifCond := b.tree.EvaluateValue(ei.Condition, ed.Ctx)
+						if b.tree.IsTrue(elseifCond) {
+							branchID := fmt.Sprintf("%s:elseif%d", id, i)
+							for _, f := range node.Fragments {
+								if f.IsConditional && f.BranchID == branchID {
+									b.activeFragments[f] = true
+								}
+							}
+							processEval(b.tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+							matched = true
+							break
+						}
+					}
+					if !matched && len(d.Else) > 0 {
 						for _, f := range node.Fragments {
-							if f.IsConditional && f.BranchID == branchID {
+							if f.IsConditional && f.BranchID == id+":else" {
 								b.activeFragments[f] = true
 							}
 						}
-						processEval(b.tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
-						matched = true
-						break
+						processEval(b.tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
 					}
 				}
-				if !matched && len(d.Else) > 0 {
-					for _, f := range node.Fragments {
-						if f.IsConditional && f.BranchID == id+":else" {
-							b.activeFragments[f] = true
-						}
-					}
-					processEval(b.tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
-				}
-			}
 			case *parser.ForeachBlock:
 				iterable := b.tree.EvaluateValue(d.Iterable, ed.Ctx)
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				if m, ok := iterable.(*parser.MapValue); ok {
+					// Dict iteration: two-variable foreach binds
+					// key and value of every member.
+					for _, f := range node.Fragments {
+						if f.IsConditional && f.BranchID == id+":body" {
+							b.activeFragments[f] = true
+						}
+					}
+					for _, key := range m.Keys {
+						subCtx := &index.EvaluationContext{
+							Variables: make(map[string]parser.Value),
+							Parent:    ed.Ctx,
+							Tree:      b.tree,
+						}
+						if d.KeyVar != "" {
+							subCtx.Variables[d.KeyVar] = &parser.StringValue{Value: key, Quoted: true}
+						}
+						if d.ValueVar != "" {
+							subCtx.Variables[d.ValueVar] = m.Values[key]
+						}
+						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+					}
+				}
 				if arr, ok := iterable.(*parser.ArrayValue); ok {
 					for _, f := range node.Fragments {
 						if f.IsConditional && f.BranchID == id+":body" {
@@ -182,6 +215,25 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
 					}
 				}
+			case *parser.WithBlock:
+				resolved := loader.ResolvePath(ed.File, b.tree.ValueToString(b.tree.EvaluateValue(d.Path, ed.Ctx)))
+				val, err := loader.Load(d.Format, resolved)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: with %s(%q): %v\n", d.Format, resolved, err)
+					continue
+				}
+				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":with" {
+						b.activeFragments[f] = true
+					}
+				}
+				subCtx := &index.EvaluationContext{
+					Variables: map[string]parser.Value{d.BindName: val},
+					Parent:    ed.Ctx,
+					Tree:      b.tree,
+				}
+				processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
 			case *parser.TemplateDefinition:
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 				for _, f := range node.Fragments {
@@ -332,7 +384,6 @@ func (b *Builder) Build(f *os.File) error {
 		}
 	}
 
-	// Determine root node to print
 	rootNode := tree.Root
 	if expectedProject != "" {
 		if node, ok := tree.Root.Children[expectedProject]; ok {
@@ -475,6 +526,12 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 			if child.IsConditional {
 				continue
 			}
+			if strings.Contains(child.RealName, "@") {
+				// Leftover from a definition whose dynamic name could
+				// not be resolved during indexing; the resolved
+				// iterations are written through the evaluated path.
+				continue
+			}
 			b.writeNodeContent(f, child, indent, ctx)
 		}
 	}
@@ -483,9 +540,17 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *index.EvaluationContext, indent int, parentNode *index.ProjectNode, writtenChildren map[string]bool) {
 	var evaluated []index.EvaluatedDefinition
 	for _, frag := range node.Fragments {
-		if b.activeFragments[frag] {
-			evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, ctx, frag.File)...)
+		if !b.activeFragments[frag] {
+			continue
 		}
+		c := ctx
+		if frag.EvalCtx != nil {
+			// Fragment materialized under a loop iteration or template
+			// expansion: evaluate with those bindings so field values
+			// referencing loop/parameter variables resolve.
+			c = frag.EvalCtx
+		}
+		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 	}
 	b.writeEvaluatedDefinitions(f, evaluated, indent, parentNode, writtenChildren, ctx)
 }
@@ -632,6 +697,15 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 			elements = append(elements, b.formatValueWithCtx(e, ctx))
 		}
 		return fmt.Sprintf("{ %s }", strings.Join(elements, " "))
+	case *parser.MemberAccess:
+		res := b.tree.EvaluateValue(v, ctx)
+		return b.formatValueWithCtx(res, ctx)
+	case *parser.MapValue:
+		parts := []string{}
+		for _, k := range v.Keys {
+			parts = append(parts, fmt.Sprintf("%s = %s", k, b.formatValueWithCtx(v.Values[k], ctx)))
+		}
+		return fmt.Sprintf("{ %s }", strings.Join(parts, " "))
 	case *parser.ConditionalArrayElements:
 		cond := b.tree.EvaluateValue(v.Condition, ctx)
 		if b.tree.IsTrue(cond) {

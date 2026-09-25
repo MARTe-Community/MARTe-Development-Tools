@@ -1,5 +1,7 @@
 package parser
 
+import "sort"
+
 type Node interface {
 	Pos() Position
 	End() Position
@@ -152,6 +154,49 @@ type ConditionalElseIfBranch struct {
 func (c *ConditionalArrayElements) Pos() Position { return c.Position }
 func (c *ConditionalArrayElements) End() Position { return c.EndPosition }
 func (c *ConditionalArrayElements) isValue()      {}
+
+// MapValue is a string-keyed map of values, produced by the structured
+// loaders (`with json("file") as name`). Keys are kept sorted so that
+// iteration and rendering are deterministic.
+type MapValue struct {
+	Position Position
+	Keys     []string
+	Values   map[string]Value
+}
+
+func (v *MapValue) Pos() Position { return v.Position }
+func (v *MapValue) End() Position { return v.Position }
+func (v *MapValue) isValue()      {}
+
+// Lookup returns the value stored under key.
+func (v *MapValue) Lookup(key string) (Value, bool) {
+	val, ok := v.Values[key]
+	return val, ok
+}
+
+// MemberAccess is a structured member lookup on a value, written
+// `@document.member` (chains are allowed: `@a.b.c`).
+type MemberAccess struct {
+	Position Position
+	Base     Value
+	Member   string
+}
+
+func (v *MemberAccess) Pos() Position { return v.Position }
+func (v *MemberAccess) End() Position {
+	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Member) + 1}
+}
+func (v *MemberAccess) isValue() {}
+
+// NewMapValue builds a MapValue from a Go map, sorting the keys.
+func NewMapValue(pos Position, values map[string]Value) *MapValue {
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return &MapValue{Position: pos, Keys: keys, Values: values}
+}
 
 type Package struct {
 	Position Position
@@ -325,3 +370,22 @@ type SignalShorthand struct {
 func (s *SignalShorthand) Pos() Position { return s.Position }
 func (s *SignalShorthand) End() Position { return s.EndPosition }
 func (s *SignalShorthand) isDefinition() {}
+
+// WithBlock loads an external structured document (JSON, CSV, …) and
+// binds it to a name for the duration of the block body:
+//
+//	with json("epics.json") as epics_cfg begin
+//	  …
+//	end
+type WithBlock struct {
+	Position    Position
+	EndPosition Position
+	Format      string // "json", "csv", …
+	Path        Value  // expression evaluating to the file path
+	BindName    string
+	Body        []Definition
+}
+
+func (w *WithBlock) Pos() Position { return w.Position }
+func (w *WithBlock) End() Position { return w.EndPosition }
+func (w *WithBlock) isDefinition() {}

@@ -1,0 +1,38 @@
+//# Syntax Showcase — data sources and signals (routed to $RtApp.Data).
+#package Showcase.RTApp.Data
+
+//# Timing source: produces Counter and Time for the acquisition chain.
++Timer = {
+  Class = LinuxTimer
+  Signals = {
+    Counter = {
+      Type = uint32
+    }
+    //! unused: Time is produced for completeness but not consumed.
+    Time = {
+      Type = uint32
+    }
+  }
+}
+
+//# Shared data buffer between GAMs. The signal exchanged through it
+//# is declared here explicitly to avoid an "implicitly defined
+//# signal" warning.
++DDB1 = {
+  Class = GAMDataSource
+  Signals = {
+    CounterCopy = {
+      Type = uint32
+    }
+  }
+}
+
+//# Sink for the final output signals.
++Logger = {
+  Class = LoggerDataSource
+  Signals = {
+    CounterOut = {
+      Type = uint32
+    }
+  }
+}

@@ -1,0 +1,46 @@
+//# Syntax Showcase — application root tying all showcase files together.
+//# Validate the application files:
+//#   mdt check variables.marte app.marte data.marte functions.marte states.marte
+//# Validate the standalone loops demo:  mdt check loops.marte
+//# Build: mdt build variables.marte app.marte data.marte functions.marte states.marte -o out.marte
+//#
+//# The #package URI routes file contents into the application tree:
+//# data.marte, functions.marte and states.marte attach to
+//# Showcase.RTApp.{Data,Functions,States}. loops.marte is a
+//# standalone template/loop demo validated on its own.
+#package Showcase
+
+//# $ marks the application template root; mdt build emits the
+//# evaluated contents of this node.
+$RtApp = {
+  Class = RealTimeApplication
+
+  //# Profile comes from the if / else if / else chain below;
+  //# ChannelBudget is defined in variables.marte.
+  #if (@ChannelBudget > 2)
+    Profile = "wide"
+  #else if (@ChannelBudget == 2)
+    Profile = "narrow"
+  #else
+    Profile = "single"
+  #end
+
+
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+  }
+
+  +Functions = {
+    Class = ReferenceContainer
+  }
+
+  +States = {
+    Class = ReferenceContainer
+  }
+
+  +Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = Timer
+  }
+}

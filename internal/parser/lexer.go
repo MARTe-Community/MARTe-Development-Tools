@@ -47,6 +47,7 @@ const (
 	TokenUse
 	TokenVar
 	TokenAs
+	TokenElseIf
 )
 
 type Token struct {
@@ -266,6 +267,9 @@ func (l *Lexer) lexIdentifier() Token {
 		if val == "else" {
 			return l.emit(TokenElse)
 		}
+		if val == "elseif" {
+			return l.emit(TokenElseIf)
+		}
 		if val == "end" {
 			return l.emit(TokenEnd)
 		}
@@ -305,6 +309,13 @@ func (l *Lexer) lexObjectIdentifier() Token {
 func (l *Lexer) lexString() Token {
 	for {
 		r := l.next()
+		if r == '\\' {
+			// Skip the escaped character; unescaping happens in the parser.
+			if l.next() == -1 {
+				return l.emit(TokenError)
+			}
+			continue
+		}
 		if r == '"' {
 			return l.emit(TokenString)
 		}
@@ -444,6 +455,8 @@ func (l *Lexer) lexHashIdentifier() Token {
 		return l.emit(TokenIf)
 	case "#else":
 		return l.emit(TokenElse)
+	case "#elseif":
+		return l.emit(TokenElseIf)
 	case "#end":
 		return l.emit(TokenEnd)
 	case "#foreach":

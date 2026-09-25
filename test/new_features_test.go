@@ -54,7 +54,7 @@ func TestNewFeatures(t *testing.T) {
 	defer os.Remove(tmpFile)
 
 	b := builder.NewBuilder([]string{tmpFile}, nil)
-	
+
 	out, err := os.CreateTemp("", "out*.marte")
 	if err != nil {
 		t.Fatal(err)
@@ -78,11 +78,12 @@ func TestNewFeatures(t *testing.T) {
 	if !strings.Contains(res, "+Item_1 = {") || !strings.Contains(res, "+Item_2 = {") || !strings.Contains(res, "+Item_3 = {") {
 		t.Error("Expected items 1, 2, 3 from foreach")
 	}
-	// Template instances are nested under the instance name provided in #use
-	if !strings.Contains(res, "Instance10 = {") || !strings.Contains(res, "+Instance_10 = {") || !strings.Contains(res, "Type = \"Special\"") {
+	// Template instances expand in place: the instance name is only a
+	// label, the template body's dynamic object names provide identity.
+	if !strings.Contains(res, "+Instance_10 = {") || !strings.Contains(res, "Type = \"Special\"") {
 		t.Error("Expected template instance 10 with Special type")
 	}
-	if !strings.Contains(res, "Instance1 = {") || !strings.Contains(res, "+Instance_1 = {") || !strings.Contains(res, "Type = \"Default\"") {
+	if !strings.Contains(res, "+Instance_1 = {") || !strings.Contains(res, "Type = \"Default\"") {
 		t.Error("Expected template instance 1 with Default type")
 	}
 	if !strings.Contains(res, "ExtraField = \"Greater than 1\"") {

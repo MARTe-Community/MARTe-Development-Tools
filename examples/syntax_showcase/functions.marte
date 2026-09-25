@@ -1,0 +1,42 @@
+//# Syntax Showcase — GAM definitions (routed to $RtApp.Functions).
+#package Showcase.RTApp.Functions
+
+//# The acquisition GAM. Input and output signals use the
+//# DataSource::Signal shorthand: type, array dimension, alias and
+//# an extra-field block are all shown.
++AcqReader = {
+  Class = IOGAM
+  InputSignals = {
+    Timer::Counter: uint32 = {
+      Frequency = 100
+    }
+  }
+  OutputSignals = {
+    DDB1::CounterCopy: uint32[1] as Copy
+  }
+}
+
+//# Conditional streaming branch, selected by the udp_streamer
+//# variable (variables.marte). Both taps do the same job here; the
+//# point is the #if / #else syntax.
+#if @udp_streamer
+  +UdpTap = {
+    Class = IOGAM
+    InputSignals = {
+      DDB1::CounterCopy: uint32[1]
+    }
+    OutputSignals = {
+      Logger::CounterOut: uint32[1]
+    }
+  }
+#else
+  +FileTap = {
+    Class = IOGAM
+    InputSignals = {
+      DDB1::CounterCopy: uint32[1]
+    }
+    OutputSignals = {
+      Logger::CounterOut: uint32[1]
+    }
+  }
+#end

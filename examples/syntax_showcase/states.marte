@@ -1,0 +1,34 @@
+//# Syntax Showcase — real-time states (routed to $RtApp.States).
+#package Showcase.RTApp.States
+
+//# Typed list of GAM names — [&GAM] means "list of GAM references".
+#let AcqFunctions: [&GAM] = {
+  AcqReader,
+}
+
+//# The single running state. The thread function list comes from the
+//# typed variable above; a second thread is added conditionally.
++Running = {
+  Class = RealTimeState
+  +Threads = {
+    Class = ReferenceContainer
+    +AcqThread = {
+      Class = RealTimeThread
+      CPUs = 0x1
+      Functions = @AcqFunctions
+    }
+    #if @udp_streamer
+      +TapThread = {
+        Class = RealTimeThread
+        CPUs = 0x2
+        Functions = { UdpTap }
+      }
+    #else
+      +TapThread = {
+        Class = RealTimeThread
+        CPUs = 0x2
+        Functions = { FileTap }
+      }
+    #end
+  }
+}

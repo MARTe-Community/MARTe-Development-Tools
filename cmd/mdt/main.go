@@ -16,6 +16,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
+	"github.com/marte-community/marte-dev-tools/internal/varsfile"
 )
 
 var (
@@ -227,12 +228,59 @@ func runLSP() {
 	lsp.RunServer()
 }
 
+// applyJSONVars loads JSON variable files into the overrides map.
+// Entries already present (from -v flags) take precedence over file
+// values, matching the "most specific wins" convention.
+func applyJSONVars(jsonFiles []string, overrides map[string]string) {
+	for _, jf := range jsonFiles {
+		vars, err := varsfile.LoadJSON(jf)
+		if err != nil {
+			logger.Printf("Error loading JSON variables from %s: %v", jf, err)
+			os.Exit(1)
+		}
+		for k, v := range vars {
+			if _, exists := overrides[k]; !exists {
+				overrides[k] = v
+			}
+		}
+	}
+}
+
+// expandDirectoryInputs replaces directory entries in the input list
+// with the .marte files they contain, so `mdt check <dir>` behaves
+// like `mdt check -P <dir>`.
+func expandDirectoryInputs(files []string) []string {
+	expanded := make([]string, 0, len(files))
+	for _, f := range files {
+		st, err := os.Stat(f)
+		if err == nil && st.IsDir() {
+			walkErr := filepath.WalkDir(f, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !d.IsDir() && strings.HasSuffix(path, ".marte") {
+					expanded = append(expanded, path)
+				}
+				return nil
+			})
+			if walkErr != nil {
+				logger.Printf("Error while exploring %s: %v\n", f, walkErr)
+				os.Exit(1)
+			}
+			continue
+		}
+		expanded = append(expanded, f)
+	}
+	return expanded
+}
+
 func runBuild(args []string) {
 	files := []string{}
 	overrides := make(map[string]string)
 	outputFile := ""
 	root_path := ""
 	projectFilter := ""
+	jsonFiles := []string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -241,6 +289,9 @@ func runBuild(args []string) {
 			i++
 		} else if arg == "-p" && i+1 < len(args) {
 			projectFilter = args[i+1]
+			i++
+		} else if arg == "-j" && i+1 < len(args) {
+			jsonFiles = append(jsonFiles, args[i+1])
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -256,6 +307,7 @@ func runBuild(args []string) {
 			files = append(files, arg)
 		}
 	}
+	applyJSONVars(jsonFiles, overrides)
 	if root_path != "" {
 		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -272,8 +324,9 @@ func runBuild(args []string) {
 		}
 	}
 
+	files = expandDirectoryInputs(files)
 	if len(files) < 1 {
-		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-o output] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-j json_vars] [-o output] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
@@ -364,6 +417,7 @@ func runCheck(args []string) {
 	overrides := make(map[string]string)
 	root_path := ""
 	projectFilter := ""
+	jsonFiles := []string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -372,6 +426,9 @@ func runCheck(args []string) {
 			i++
 		} else if arg == "-p" && i+1 < len(args) {
 			projectFilter = args[i+1]
+			i++
+		} else if arg == "-j" && i+1 < len(args) {
+			jsonFiles = append(jsonFiles, args[i+1])
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -383,6 +440,7 @@ func runCheck(args []string) {
 			files = append(files, arg)
 		}
 	}
+	applyJSONVars(jsonFiles, overrides)
 
 	if root_path != "" {
 		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
@@ -400,8 +458,9 @@ func runCheck(args []string) {
 		}
 	}
 
+	files = expandDirectoryInputs(files)
 	if len(files) < 1 {
-		logger.Println("Usage: mdt check [-P folder_path] [-p project_name] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt check [-P folder_path] [-p project_name] [-j json_vars] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 

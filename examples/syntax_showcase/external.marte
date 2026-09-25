@@ -1,0 +1,25 @@
+//# Syntax Showcase — external structured data.
+//#
+//# Loads data/epics_cfg.json and unrolls one signal entry per member of
+//# the "signals" object. Relative paths resolve against the directory
+//# of the file containing the `with` block.
+//#
+//# Supported formats: json, csv. JSON mapping: object → dict, array →
+//# list, number → int/float, string → string, bool → bool, null → omitted.
+#package Showcase
+
+//! allow(unused): entries are consumed by the runtime, not in this file.
+with json("data/epics_cfg.json") as epics_cfg begin
+  +EpicsSignals = {
+    Class = ReferenceContainer
+    Signals = {
+      //# Two-variable foreach over a dict binds key and value.
+      foreach name, object in @epics_cfg.signals do
+        @name = {
+          Type = @object.Type
+          PVName = @object.PVName
+        }
+      end
+    }
+  }
+end

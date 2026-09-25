@@ -121,6 +121,11 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		p.next()
 		name := tok.Value
 
+		// `with json("file") as name begin … end`
+		if name == "with" && p.atWithLoader() {
+			return p.parseWith(tok)
+		}
+
 		// Signal shorthand: DS::Signal [: Type[Dim]] [= { … }]
 		if strings.Contains(name, "::") {
 			return p.parseSignalShorthand(tok, name)
@@ -131,7 +136,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			p.next() // consume =
 
 			if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
-				sub, ok := p.parseSubnode()
+				sub, ok := p.parseSubnodeConcat()
 				if !ok {
 					return nil, false
 				}
@@ -169,7 +174,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		}
 		p.next() // Consume =
 
-		sub, ok := p.parseSubnode()
+		sub, ok := p.parseSubnodeConcat()
 		if !ok {
 			return nil, false
 		}
@@ -194,7 +199,7 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		p.next() // consume =
 
 		if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
-			sub, ok := p.parseSubnode()
+			sub, ok := p.parseSubnodeConcat()
 			if !ok {
 				return nil, false
 			}
@@ -335,26 +340,19 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 	var elseIfBranches []ElseIfBranch
 	var elseBody []Definition
 
-	for endTok.Type == TokenElse {
-		if p.peek().Type == TokenIf {
-			p.next() // consume if
-			elseifCond, ok2 := p.parseValue()
-			if !ok2 {
-				return nil, false
+	for endTok.Type == TokenElse || endTok.Type == TokenElseIf {
+		isPlainElse := false
+		if endTok.Type == TokenElse {
+			switch {
+			case p.peek().Type == TokenIf:
+				p.next() // two-word `else if`
+			case p.peek().Type == TokenElseIf:
+				// one-word `elseif`, consumed below
+			default:
+				isPlainElse = true
 			}
-			if p.peek().Type == TokenLBrace {
-				p.next()
-			}
-			elseifBody, endTok2, ok3 := p.parseBlock()
-			if !ok3 {
-				return nil, false
-			}
-			elseIfBranches = append(elseIfBranches, ElseIfBranch{
-				Condition: elseifCond,
-				Body:      elseifBody,
-			})
-			endTok = endTok2
-		} else {
+		}
+		if isPlainElse {
 			if p.peek().Type == TokenLBrace {
 				p.next()
 			}
@@ -364,6 +362,25 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 			}
 			break
 		}
+		if p.peek().Type == TokenElseIf {
+			p.next() // one-word `elseif`
+		}
+		elseifCond, ok2 := p.parseValue()
+		if !ok2 {
+			return nil, false
+		}
+		if p.peek().Type == TokenLBrace {
+			p.next()
+		}
+		elseifBody, endTok2, ok3 := p.parseBlock()
+		if !ok3 {
+			return nil, false
+		}
+		elseIfBranches = append(elseIfBranches, ElseIfBranch{
+			Condition: elseifCond,
+			Body:      elseifBody,
+		})
+		endTok = endTok2
 	}
 
 	if endTok.Type != TokenEnd {
@@ -399,26 +416,19 @@ func (p *Parser) parseConditionalArrayElements(startTok Token) (Value, bool) {
 	}
 	var elseIfBranches []ConditionalElseIfBranch
 	var elseElems []Value
-	for endTok.Type == TokenElse {
-		if p.peek().Type == TokenIf {
-			p.next()
-			elseifCond, ok2 := p.parseValue()
-			if !ok2 {
-				return nil, false
+	for endTok.Type == TokenElse || endTok.Type == TokenElseIf {
+		isPlainElse := false
+		if endTok.Type == TokenElse {
+			switch {
+			case p.peek().Type == TokenIf:
+				p.next() // two-word `else if`
+			case p.peek().Type == TokenElseIf:
+				// one-word `elseif`, consumed below
+			default:
+				isPlainElse = true
 			}
-			if p.peek().Type == TokenLBrace {
-				p.next()
-			}
-			elseifElems, endTok2, ok3 := p.parseArrayValueBlock()
-			if !ok3 {
-				return nil, false
-			}
-			elseIfBranches = append(elseIfBranches, ConditionalElseIfBranch{
-				Condition: elseifCond,
-				Body:      elseifElems,
-			})
-			endTok = endTok2
-		} else {
+		}
+		if isPlainElse {
 			if p.peek().Type == TokenLBrace {
 				p.next()
 			}
@@ -428,6 +438,25 @@ func (p *Parser) parseConditionalArrayElements(startTok Token) (Value, bool) {
 			}
 			break
 		}
+		if p.peek().Type == TokenElseIf {
+			p.next() // one-word `elseif`
+		}
+		elseifCond, ok2 := p.parseValue()
+		if !ok2 {
+			return nil, false
+		}
+		if p.peek().Type == TokenLBrace {
+			p.next()
+		}
+		elseifElems, endTok2, ok3 := p.parseArrayValueBlock()
+		if !ok3 {
+			return nil, false
+		}
+		elseIfBranches = append(elseIfBranches, ConditionalElseIfBranch{
+			Condition: elseifCond,
+			Body:      elseifElems,
+		})
+		endTok = endTok2
 	}
 	if endTok.Type != TokenEnd {
 		p.addError(endTok.Position, "expected end")
@@ -449,7 +478,7 @@ func (p *Parser) parseArrayValueBlock() ([]Value, Token, bool) {
 	for {
 		t := p.peek()
 		switch t.Type {
-		case TokenElse, TokenEnd, TokenEOF:
+		case TokenElse, TokenElseIf, TokenEnd, TokenEOF:
 			return elems, p.next(), true
 		case TokenComma:
 			p.next()
@@ -485,6 +514,16 @@ func (p *Parser) parseForeach(startTok Token) (Definition, bool) {
 		p.next()
 		keyVar = v1Tok.Value
 		valueVar = next.Value
+	} else if next.Type == TokenComma {
+		// `foreach key, value in …` — comma-separated form.
+		p.next()
+		nameTok := p.next()
+		if nameTok.Type != TokenIdentifier {
+			p.addError(nameTok.Position, "expected variable name after ','")
+			return nil, false
+		}
+		keyVar = v1Tok.Value
+		valueVar = nameTok.Value
 	} else {
 		valueVar = v1Tok.Value
 	}
@@ -497,6 +536,11 @@ func (p *Parser) parseForeach(startTok Token) (Definition, bool) {
 	iterable, ok := p.parseValue()
 	if !ok {
 		return nil, false
+	}
+
+	// Optional `do` before the body: `foreach x in xs do … end`.
+	if p.peek().Type == TokenIdentifier && p.peek().Value == "do" {
+		p.next()
 	}
 
 	if p.peek().Type == TokenLBrace {
@@ -653,7 +697,7 @@ func (p *Parser) parseBlock() ([]Definition, Token, bool) {
 			p.addError(t.Position, "unexpected EOF, expected #end or #else")
 			return defs, t, false
 		}
-		if t.Type == TokenEnd || t.Type == TokenElse {
+		if t.Type == TokenEnd || t.Type == TokenElse || t.Type == TokenElseIf {
 			return defs, p.next(), true
 		}
 		if t.Type == TokenRBrace {
@@ -707,8 +751,57 @@ func (p *Parser) isSubnodeLookahead() bool {
 		return true
 	}
 
+	// Directives opening a block (`#foreach`, `#if`, `#template`, …)
+	// make the braces a subnode containing definitions.
+	switch t1.Type {
+	case TokenForeach, TokenIf, TokenLet, TokenVar, TokenTemplate, TokenUse, TokenElseIf:
+		return true
+	}
+
 	// Literals -> Array
 	return false
+}
+
+// parseSubnodeConcat parses an object body, optionally merged with
+// further bodies via the concat operator:
+//
+//	{ A = 1 } .. { B = 2 }
+//
+// The definitions of all operands are concatenated; on key conflicts
+// the later operand wins at evaluation time.
+func (p *Parser) parseSubnodeConcat() (Subnode, bool) {
+	sub, ok := p.parseSubnode()
+	if !ok {
+		return sub, false
+	}
+	for p.peek().Type == TokenConcat {
+		p.next() // consume '..'
+		next, ok := p.parseSubnode()
+		if !ok {
+			return sub, false
+		}
+		// Dict-merge semantics: fields redefined by the later operand
+		// override the earlier ones instead of duplicating them.
+		overrides := map[string]bool{}
+		for _, d := range next.Definitions {
+			if f, ok := d.(*Field); ok {
+				overrides[f.Name] = true
+			}
+		}
+		if len(overrides) > 0 {
+			merged := make([]Definition, 0, len(sub.Definitions)+len(next.Definitions))
+			for _, d := range sub.Definitions {
+				if f, ok := d.(*Field); ok && overrides[f.Name] {
+					continue
+				}
+				merged = append(merged, d)
+			}
+			sub.Definitions = merged
+		}
+		sub.Definitions = append(sub.Definitions, next.Definitions...)
+		sub.EndPosition = next.EndPosition
+	}
+	return sub, true
 }
 
 func (p *Parser) parseSubnode() (Subnode, bool) {
@@ -759,15 +852,15 @@ func getPrecedence(t Token) int {
 		case "<", ">", "<=", ">=":
 			return 4
 		}
-	case TokenPipe, TokenCaret:
-		return 5 // Bitwise OR/XOR
-	case TokenAmpersand:
-		return 6 // Bitwise AND
-	case TokenPlus, TokenMinus:
-		return 7
-	case TokenStar, TokenSlash, TokenPercent:
-		return 8
 	case TokenConcat:
+		return 5
+	case TokenPipe, TokenCaret:
+		return 6 // Bitwise OR/XOR
+	case TokenAmpersand:
+		return 7 // Bitwise AND
+	case TokenPlus, TokenMinus:
+		return 8
+	case TokenStar, TokenSlash, TokenPercent:
 		return 9
 	}
 	return 0
@@ -808,7 +901,7 @@ func (p *Parser) parseAtom() (Value, bool) {
 	case TokenString:
 		return &StringValue{
 			Position: tok.Position,
-			Value:    strings.Trim(tok.Value, "\""),
+			Value:    unescapeString(strings.Trim(tok.Value, "\"")),
 			Quoted:   true,
 		}, true
 
@@ -829,7 +922,14 @@ func (p *Parser) parseAtom() (Value, bool) {
 	case TokenIdentifier:
 		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
 	case TokenVariableReference:
-		return &VariableReferenceValue{Position: tok.Position, Name: tok.Value}, true
+		var val Value = &VariableReferenceValue{Position: tok.Position, Name: tok.Value}
+		// Structured member access: @doc.member (chains allowed).
+		for p.peek().Type == TokenSymbol && p.peek().Value == "." && p.peekN(1).Type == TokenIdentifier {
+			p.next() // consume '.'
+			member := p.next()
+			val = &MemberAccess{Position: tok.Position, Base: val, Member: member.Value}
+		}
+		return val, true
 	case TokenMinus:
 		val, ok := p.parseAtom()
 		if !ok {
@@ -1031,6 +1131,106 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 	}, true
 }
 
+// atWithLoader reports whether a `with <format>(` loader call follows.
+// Only then is `with` treated as a directive; `with = 3` remains a
+// plain field.
+func (p *Parser) atWithLoader() bool {
+	t1 := p.peek()
+	if t1.Type != TokenIdentifier || (t1.Value != "json" && t1.Value != "csv") {
+		return false
+	}
+	t2 := p.peekN(1)
+	return t2.Type == TokenSymbol && t2.Value == "("
+}
+
+// parseWith parses:
+//
+//	with json("file.json") as name begin … end
+//	with csv("file.csv") as name { … }
+//
+// `begin`/`{` are both accepted as body openers; the body is closed by
+// `end` (or the closing brace).
+func (p *Parser) parseWith(startTok Token) (Definition, bool) {
+	formatTok := p.next()
+	if formatTok.Type != TokenIdentifier {
+		p.addError(formatTok.Position, "expected format name (json, csv, …) after 'with'")
+		return nil, false
+	}
+	if t := p.next(); t.Type != TokenSymbol || t.Value != "(" {
+		p.addError(t.Position, "expected '(' after format name")
+		return nil, false
+	}
+	path, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+	if t := p.next(); t.Type != TokenSymbol || t.Value != ")" {
+		p.addError(t.Position, "expected ')' after path")
+		return nil, false
+	}
+	nameTok := p.next()
+	if nameTok.Type != TokenAs {
+		p.addError(nameTok.Position, "expected 'as' before binding name")
+		return nil, false
+	}
+	bindTok := p.next()
+	if bindTok.Type != TokenIdentifier {
+		p.addError(bindTok.Position, "expected binding name after 'as'")
+		return nil, false
+	}
+	// Optional `begin` or `{` opens the body.
+	if p.peek().Type == TokenLBrace {
+		p.next()
+	} else if p.peek().Type == TokenIdentifier && p.peek().Value == "begin" {
+		p.next()
+	}
+	body, endTok, ok := p.parseBlock()
+	if !ok {
+		return nil, false
+	}
+	if endTok.Type != TokenEnd {
+		p.addError(endTok.Position, "expected end")
+	}
+	return &WithBlock{
+		Position:    startTok.Position,
+		EndPosition: endTok.Position,
+		Format:      formatTok.Value,
+		Path:        path,
+		BindName:    bindTok.Value,
+		Body:        body,
+	}, true
+}
+
 func (p *Parser) Errors() []error {
 	return p.errors
+}
+
+// unescapeString resolves backslash escapes in a string literal body.
+// Recognised: \\ \" \n \t \r. Unknown escapes keep the escaped
+// character verbatim.
+func unescapeString(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	// Classic loop: the body reassigns i to skip escaped characters.
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }

@@ -1,0 +1,7 @@
+{
+  "signals": {
+    "Stat":  { "Type": "uint32",  "PVName": "DEMO:STAT"  },
+    "Temp":  { "Type": "float64", "PVName": "DEMO:TEMP"  },
+    "Press": { "Type": "int32",   "PVName": "DEMO:PRESS" }
+  }
+}

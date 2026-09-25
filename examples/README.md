@@ -8,6 +8,10 @@ This directory contains example projects demonstrating different features and us
 examples/
   simple/           # A basic, single-file application
   complex/          # A multi-file project with custom schema
+  complex_func_list/# Multi-file project with package-routed functions/states
+  big_project/      # A large real-world-style project
+  syntax_showcase/  # Fully validated demo of the complete extended syntax
+  advanced_features.marte  # Historical template/loop demo (superseded)
   README.md         # This file
 ```
 
@@ -62,43 +66,49 @@ Key features shown:
 ./build/mdt build examples/advanced_features.marte
 ```
 
-### Advanced Features (Logic & Templates)
+### Syntax Showcase (Logic & Templates)
 
-The tool supports dynamic configuration generation:
+`syntax_showcase/` is the validated, complete demonstration of the
+extended syntax: variables, literals, expressions, conditionals, loops,
+templates, signal shorthand, pragmas and multi-file package routing.
 
 **Templates:**
 ```marte
-template MyDevice(ID: int, Type: string = "Default")
-    "+Device_" .. @ID = {
-        Class = "MyDriver"
-        Type = @Type
-        Address = 0x100 + @ID
-    }
+template MyDevice(ID: int, Gain: float = 1.0)
+  ("+Device_" .. @ID) = {
+    Class = MyDriver
+    Gain = @Gain
+    Address = (0x100 + @ID)
+  }
 end
 
 +Hardware = {
-    Class = ReferenceContainer
-    use MyDevice Dev1 (ID = 1)
-    use MyDevice Dev2 (ID = 2, Type = "Special")
+  Class = ReferenceContainer
+  use MyDevice Dev1(ID = 1)
+  use MyDevice Dev2(ID = 2, Gain = 2.5)
 }
 ```
 
 **Loops & Conditionals:**
 ```marte
-var Channels: array = { 1 2 3 }
 var EnableLog: bool = true
 
 +DAQ = {
-    Class = ReferenceContainer
-    foreach Ch in $Channels
-        "+Channel_" .. @Ch = {
-            Class = ADCChannel
-            Index = @Ch
-        }
-    end
-    
-    if $EnableLog
-        Logger = { Class = FileLogger }
-    end
+  Class = ReferenceContainer
+  foreach Ch in { 1, 2, 3 }
+    ("+Channel_" .. @Ch) = {
+      Class = ADCChannel
+      Index = @Ch
+    }
+  end
+
+  if @EnableLog
+    Logger = { Class = FileLogger }
+  end
 }
 ```
+
+See [`syntax_showcase/README.md`](syntax_showcase/README.md) for the
+exact validation commands, and
+[`../docs/LANGUAGE_REFERENCE.md`](../docs/LANGUAGE_REFERENCE.md) for the
+full language reference.

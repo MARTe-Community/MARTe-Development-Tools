@@ -186,6 +186,15 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		f.formatBlock(d.Body, indent+1)
 		fmt.Fprintf(f.writer, "%s#end", indentStr)
 		return d.EndPosition.Line
+	case *parser.WithBlock:
+		fmt.Fprintf(f.writer, "%swith %s(", indentStr, d.Format)
+		f.formatValue(d.Path, indent)
+		fmt.Fprintf(f.writer, ") as %s", d.BindName)
+		fmt.Fprintf(f.writer, " begin")
+		fmt.Fprintln(f.writer)
+		f.formatBlock(d.Body, indent+1)
+		fmt.Fprintf(f.writer, "%send", indentStr)
+		return d.EndPosition.Line
 	case *parser.TemplateInstantiation:
 		fmt.Fprintf(f.writer, "%s#use %s %s(", indentStr, d.Template, d.Name)
 		for i, arg := range d.Arguments {
@@ -252,6 +261,21 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		return v.Position.Line
 	case *parser.VariableReferenceValue:
 		fmt.Fprint(f.writer, v.Name)
+		return v.Position.Line
+	case *parser.MemberAccess:
+		f.formatValue(v.Base, indent)
+		fmt.Fprintf(f.writer, ".%s", v.Member)
+		return v.Position.Line
+	case *parser.MapValue:
+		fmt.Fprint(f.writer, "{ ")
+		for i, k := range v.Keys {
+			if i > 0 {
+				fmt.Fprint(f.writer, ", ")
+			}
+			fmt.Fprintf(f.writer, "%s = ", k)
+			f.formatValue(v.Values[k], indent)
+		}
+		fmt.Fprint(f.writer, " }")
 		return v.Position.Line
 	case *parser.BinaryExpression:
 		fmt.Fprint(f.writer, "(")
