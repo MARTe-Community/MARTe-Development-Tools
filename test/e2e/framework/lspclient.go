@@ -2,6 +2,7 @@ package framework
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,20 +15,22 @@ import (
 )
 
 type LSPTestClient struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    *bufio.Reader
-	rootDir   string
-	mu        sync.Mutex
-	nextID    int
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  *bufio.Reader
+	rootDir string
+	mu      sync.Mutex
+	nextID  int
 	// pending maps request id → response channel
-	pending   map[int]chan json.RawMessage
+	pending map[int]chan json.RawMessage
 	// handlers maps notification method → handler
 	handlers  map[string]func(json.RawMessage)
 	documents map[string]string
 	version   int
 	done      chan struct{}
 	metrics   *LSPMetrics
+	// stderr captures whatever the server writes to stderr.
+	stderr *bytes.Buffer
 }
 
 type LSPMetrics struct {
@@ -64,10 +67,15 @@ func NewLSPTestClient(mdtPath, rootDir string) *LSPTestClient {
 		documents: make(map[string]string),
 		version:   0,
 		done:      make(chan struct{}),
+		stderr:    &bytes.Buffer{},
 		metrics: &LSPMetrics{
 			RequestCount: 0,
 		},
 	}
+
+	// Capture stderr before the process starts: editors report server stderr as
+	// errors, and tests assert on what the server does (and does not) log.
+	cmd.Stderr = client.stderr
 
 	if err := cmd.Start(); err != nil {
 		panic(fmt.Sprintf("Failed to start LSP server: %v", err))
@@ -219,7 +227,30 @@ func (c *LSPTestClient) call(method string, params, result interface{}) error {
 	return c.callWithTimeout(method, params, result, 30*time.Second)
 }
 
-func (c *LSPTestClient) callWithTimeout(method string, params, result interface{}, timeout time.Duration) error {
+// Stderr returns everything the server has written to stderr so far.
+func (c *LSPTestClient) Stderr() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stderr.String()
+}
+
+// OnNotification registers a handler for notifications sent by the server
+// (e.g. textDocument/publishDiagnostics). Register before triggering the
+// activity that produces them.
+func (c *LSPTestClient) OnNotification(method string, handler func(json.RawMessage)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.handlers[method] = handler
+}
+
+// RawRequest sends a request and returns the response envelope verbatim. Use
+// it when a test must inspect the raw JSON (e.g. to assert that positions are
+// valid, or that a lifecycle response carries a result).
+func (c *LSPTestClient) RawRequest(method string, params interface{}) (json.RawMessage, error) {
+	return c.rawCall(method, params, 30*time.Second)
+}
+
+func (c *LSPTestClient) rawCall(method string, params interface{}, timeout time.Duration) (json.RawMessage, error) {
 	start := time.Now()
 
 	c.mu.Lock()
@@ -240,23 +271,13 @@ func (c *LSPTestClient) callWithTimeout(method string, params, result interface{
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return err
+		return nil, err
 	}
 
+	var raw json.RawMessage
 	var callErr error
 	select {
-	case raw := <-respChan:
-		var respObj struct {
-			Error  *struct{ Message string } `json:"error"`
-			Result json.RawMessage           `json:"result"`
-		}
-		if err := json.Unmarshal(raw, &respObj); err != nil {
-			callErr = err
-		} else if respObj.Error != nil {
-			callErr = fmt.Errorf("LSP error: %s", respObj.Error.Message)
-		} else if result != nil && respObj.Result != nil {
-			callErr = json.Unmarshal(respObj.Result, result)
-		}
+	case raw = <-respChan:
 	case <-time.After(timeout):
 		c.mu.Lock()
 		delete(c.pending, id)
@@ -271,7 +292,50 @@ func (c *LSPTestClient) callWithTimeout(method string, params, result interface{
 	c.metrics.LastRequestTime = duration
 	c.metrics.mu.Unlock()
 
-	return callErr
+	return raw, callErr
+}
+
+func (c *LSPTestClient) callWithTimeout(method string, params, result interface{}, timeout time.Duration) error {
+	raw, callErr := c.rawCall(method, params, timeout)
+	if callErr != nil {
+		return callErr
+	}
+
+	var respObj struct {
+		Error  *struct{ Message string } `json:"error"`
+		Result json.RawMessage           `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &respObj); err != nil {
+		return err
+	}
+	if respObj.Error != nil {
+		return fmt.Errorf("LSP error: %s", respObj.Error.Message)
+	}
+	if result != nil && respObj.Result != nil {
+		return json.Unmarshal(respObj.Result, result)
+	}
+	return nil
+}
+
+// Shutdown sends the LSP shutdown request and returns the raw response.
+func (c *LSPTestClient) Shutdown() (json.RawMessage, error) {
+	return c.RawRequest("shutdown", nil)
+}
+
+// Exit sends the exit notification and waits for the server process to
+// terminate. The LSP specification requires the server to exit after it.
+func (c *LSPTestClient) Exit(timeout time.Duration) error {
+	c.notify("exit", nil)
+
+	done := make(chan error, 1)
+	go func() { done <- c.cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		_ = c.cmd.Process.Kill()
+		return fmt.Errorf("server did not exit within %v", timeout)
+	}
 }
 
 func (c *LSPTestClient) notify(method string, params interface{}) {

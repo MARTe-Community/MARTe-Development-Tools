@@ -99,7 +99,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	return v
 }
 
-func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext) {
+func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
 	if v.visited == nil {
 		v.visited = make(map[*index.ProjectNode]map[parser.Definition]bool)
 	}
@@ -135,13 +135,21 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 	}
 
 	written := make(map[string]bool)
-	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode)
-	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode) {
+	// forceUncond: definitions in this expansion are unconditional
+	// (true inside `with` blocks, which always load their document).
+	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode, bool)
+	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode, forceUncond bool) {
 		for _, ed := range evaluated {
 			// fmt.Printf("[DEBUG] Processing evaluated definition: %T\n", ed.Def)
 			switch d := ed.Def.(type) {
 			case *parser.ObjectNode:
 				objName := v.ValueToString(d.Name, ed.Ctx)
+				if objName == "" || strings.Contains(objName, "@") {
+					// Unresolvable at this stage: the bound expansion
+					// (loop iteration / with binding) creates the real
+					// object; skip the raw residual here.
+					continue
+				}
 				norm := index.NormalizeName(objName)
 
 				// Find or create the child node
@@ -156,10 +164,16 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						Metadata:      make(map[string]string),
 						Variables:     make(map[string]index.VariableInfo),
 						Fields:        make(map[string][]index.EvaluatedField),
-						IsConditional: false, // It's active now
+						IsConditional: !forceUncond, // It's active now
 					}
 					node.Children[norm] = child
 					v.Tree.AddToNodeMap(child)
+				}
+				if forceUncond {
+					// E.g. materialized inside a `with` block: the
+					// block always loads, so the child is not
+					// conditional even if an earlier pass marked it.
+					child.IsConditional = false
 				}
 
 				// Ensure this fragment is present and active
@@ -175,7 +189,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 				}
 				if !found {
-					v.Tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, true)
+					v.Tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, !forceUncond)
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							v.ActiveFragments[f] = true
@@ -200,7 +214,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 				v.muActive.Unlock()
 
 				if !written[norm] && !alreadyVisited {
-					v.collectActiveNodes(ctx, child, ed.Ctx)
+					v.collectActiveNodes(ctx, child, ed.Ctx, forceUncond)
 					written[norm] = true
 				}
 			case *parser.IfBlock:
@@ -215,7 +229,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						}
 					}
 					v.muActive.Unlock()
-					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
+					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node, false)
 				} else {
 					matched := false
 					for i, ei := range d.ElseIf {
@@ -229,7 +243,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 								}
 							}
 							v.muActive.Unlock()
-							processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+							processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node, false)
 							matched = true
 							break
 						}
@@ -242,7 +256,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 							}
 						}
 						v.muActive.Unlock()
-						processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
+						processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node, false)
 					}
 				}
 			case *parser.ForeachBlock:
@@ -268,7 +282,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
 						}
-						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				} else if m, ok := iterable.(*parser.MapValue); ok {
 					// Dict iteration: two-variable foreach binds
@@ -292,7 +306,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = m.Values[key]
 						}
-						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				}
 			case *parser.WithBlock:
@@ -305,19 +319,26 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					continue
 				}
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
-				v.muActive.Lock()
-				for _, f := range node.Fragments {
-					if f.IsConditional && f.BranchID == id+":with" {
-						v.ActiveFragments[f] = true
-					}
-				}
-				v.muActive.Unlock()
 				subCtx := &index.EvaluationContext{
 					Variables: map[string]parser.Value{d.BindName: val},
 					Parent:    ed.Ctx,
 					Tree:      v.Tree,
 				}
-				processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+				v.muActive.Lock()
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":with" {
+						v.ActiveFragments[f] = true
+						if f.EvalCtx == nil {
+							// Body definitions evaluate against the
+							// document binding on later passes.
+							f.EvalCtx = subCtx
+						}
+					}
+				}
+				v.muActive.Unlock()
+				// The with block always loads its document: the body's
+				// definitions are unconditional.
+				processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, true)
 			case *parser.TemplateDefinition:
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 				v.muActive.Lock()
@@ -327,21 +348,26 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 				}
 				v.muActive.Unlock()
-				processEval(v.Tree.EvaluateDefinitions(d.Body, ed.Ctx, ed.File), node)
+				processEval(v.Tree.EvaluateDefinitions(d.Body, ed.Ctx, ed.File), node, forceUncond)
 			}
 		}
 	}
 
-	processEval(evaluated, node)
+	processEval(evaluated, node, forceUncond)
 
 	for name, child := range node.Children {
 		if !written[name] && !child.IsConditional {
-			v.collectActiveNodes(ctx, child, evalCtx)
+			v.collectActiveNodes(ctx, child, evalCtx, forceUncond)
 		}
 	}
 }
 
-func (v *Validator) ValidateProject(ctx context.Context) {
+// Activate materializes the active tree: loop iterations, template
+// instantiations and with-block bodies are expanded, and active fields
+// and references are resolved. It produces no diagnostics and is cheap
+// relative to full validation, so callers (e.g. the LSP) can run it
+// eagerly to make a tree self-consistent for navigation.
+func (v *Validator) Activate(ctx context.Context) {
 	if v.Tree == nil {
 		return
 	}
@@ -380,10 +406,10 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 
 		prevCount := len(v.ActiveFragments)
 		if v.Tree.Root != nil {
-			v.collectActiveNodes(ctx, v.Tree.Root, evalCtx)
+			v.collectActiveNodes(ctx, v.Tree.Root, evalCtx, false)
 		}
 		for _, node := range v.Tree.IsolatedFiles {
-			v.collectActiveNodes(ctx, node, evalCtx)
+			v.collectActiveNodes(ctx, node, evalCtx, false)
 		}
 
 		// Re-resolve only active things after activation pass
@@ -393,6 +419,16 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 		if len(v.ActiveFragments) == prevCount {
 			break
 		}
+	}
+}
+
+func (v *Validator) ValidateProject(ctx context.Context) {
+	if v.Tree == nil {
+		return
+	}
+	v.Activate(ctx)
+	if ctx.Err() != nil {
+		return
 	}
 
 	evalCtx := &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
@@ -557,21 +593,17 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 
 	// 2. Check for mandatory Class if it's an object node (+/$)
 	className := ""
-	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') && !v.Tree.IsSignal(node) {
-		if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
-			className = v.getFieldValue(classFields[0], node)
-		}
+	if classFields, ok := fields["Class"]; ok && len(classFields) > 0 {
+		className = v.getFieldValue(classFields[0], node)
+	}
 
+	if node.RealName != "" && (node.RealName[0] == '+' || node.RealName[0] == '$') && !v.Tree.IsSignal(node) {
 		if className == "" {
 			pos := v.getNodePosition(node)
 			file := v.getNodeFile(node)
 			v.report(node, "missing_class", LevelError,
 				fmt.Sprintf("Node %s is an object and must contain a 'Class' field", node.RealName),
 				pos, file)
-		}
-
-		if className == "RealTimeThread" {
-			v.checkFunctionsArray(node, fields)
 		}
 	} else if v.Tree.IsSignal(node) {
 		// Signals (no + prefix) must have Type
@@ -587,6 +619,12 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 	// 4. Signal Validation (for DataSource signals)
 	if v.Tree.IsSignal(node) {
 		v.validateSignal(node, fields)
+	}
+
+	// RealTimeThread function lists are checked by class, whether or not
+	// the node carries a '+'/'$' prefix.
+	if className == "RealTimeThread" {
+		v.checkFunctionsArray(node, fields)
 	}
 
 	// 5. GAM Validation (Signal references)
@@ -1185,15 +1223,9 @@ func (v *Validator) loadStructured(path, format string) (parser.Value, error) {
 // activeConditionalBranch returns the value list of the first branch whose
 // condition evaluates to true, falling back to the #else branch.
 func (v *Validator) activeConditionalBranch(cae *parser.ConditionalArrayElements, ctx *index.ProjectNode) []parser.Value {
-	if v.Tree.IsTrue(v.Tree.Evaluate(cae.Condition, ctx)) {
-		return cae.Then
-	}
-	for _, ei := range cae.ElseIf {
-		if v.Tree.IsTrue(v.Tree.Evaluate(ei.Condition, ctx)) {
-			return ei.Body
-		}
-	}
-	return cae.Else
+	return index.ActiveBranch(cae, func(val parser.Value) bool {
+		return v.Tree.IsTrue(v.Tree.Evaluate(val, ctx))
+	})
 }
 
 func (v *Validator) evaluateBinary(left interface{}, op parser.TokenType, right interface{}) interface{} {

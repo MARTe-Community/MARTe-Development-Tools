@@ -48,17 +48,6 @@ func LoadJSON(path string) (map[string]string, error) {
 	return out, nil
 }
 
-// SortedNames returns the variable names of a set of overrides, sorted.
-// Useful for deterministic diagnostics.
-func SortedNames(m map[string]string) []string {
-	names := make([]string, 0, len(m))
-	for k := range m {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	return names
-}
-
 func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

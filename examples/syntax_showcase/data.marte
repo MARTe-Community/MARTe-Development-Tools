@@ -5,13 +5,10 @@
 +Timer = {
   Class = LinuxTimer
   Signals = {
-    Counter = {
-      Type = uint32
-    }
+    //# Signal definition sugar: Name: Type (= { extra fields } optional).
+    Counter: uint32
     //! unused: Time is produced for completeness but not consumed.
-    Time = {
-      Type = uint32
-    }
+    Time: uint32
   }
 }
 
@@ -21,9 +18,7 @@
 +DDB1 = {
   Class = GAMDataSource
   Signals = {
-    CounterCopy = {
-      Type = uint32
-    }
+    CounterCopy: uint32
   }
 }
 
@@ -31,8 +26,6 @@
 +Logger = {
   Class = LoggerDataSource
   Signals = {
-    CounterOut = {
-      Type = uint32
-    }
+    CounterOut: uint32
   }
 }

@@ -8,18 +8,54 @@
 //# list, number → int/float, string → string, bool → bool, null → omitted.
 #package Showcase
 
-//! allow(unused): entries are consumed by the runtime, not in this file.
-with json("data/epics_cfg.json") as epics_cfg begin
-  +EpicsSignals = {
++RTApp = {
+  Class = RealTimeApplication
+  Data = {
     Class = ReferenceContainer
-    Signals = {
-      //# Two-variable foreach over a dict binds key and value.
-      foreach name, object in @epics_cfg.signals do
-        @name = {
-          Type = @object.Type
-          PVName = @object.PVName
+    //! allow(unused): entries are consumed by the runtime, not in this file.
+    with json("data/epics_cfg.json") as epics_cfg begin
+      +EpicsSignals = {
+        Class = EPICSCAInput
+        Signals = {
+          //# Two-variable foreach over a dict binds key and value.
+          #foreach name, object in @epics_cfg.signals
+            @name = {
+              Type = @object.Type
+              PVName = @object.PVName
+            }
+          #end
         }
-      end
+      }
+    end
+    DefaultDataSource = DDB
+    DDB = {
+      Class = GAMDataSource
+      Signals = {
+        T: uint32
+        Data: float64
+      }
+    }
+    Timing = {
+      Class = TimingDataSource
     }
   }
-end
+  Functions = {
+    Class = ReferenceContainer
+    GAM = {
+      Class = IOGAM
+      InputSignals = {
+        EpicsSignals::Stat
+      }
+      OutputSignals = {
+        DDB::T
+      }
+    }
+  }
+  States = {
+    Class = ReferenceContainer
+  }
+  Scheduler = {
+    Class = GAMScheduler
+    TimingDataSource = Timing
+  }
+}

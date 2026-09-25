@@ -131,10 +131,21 @@ func TestStringEscapes(t *testing.T) {
   T = "n\tt"
 }`
 	res := buildTemp(t, src)
-	for _, want := range []string{`Q = "a"b"`, `B = "x\y"`, "T = \"n\tt\""} {
+	// Output must be re-escaped so it stays valid configuration text.
+	for _, want := range []string{`Q = "a\"b"`, `B = "x\\y"`, `T = "n\tt"`} {
 		if !strings.Contains(res, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, res)
 		}
+	}
+	// The emitted text must parse back to the same values.
+	rt := validateTemp(t, res)
+	for _, d := range rt {
+		if d.Level == validator.LevelError {
+			t.Errorf("re-parsing the built output failed: %s", d.Message)
+		}
+	}
+	if got := buildTemp(t, res); !strings.Contains(got, `Q = "a\"b"`) {
+		t.Errorf("escapes did not round-trip, got:\n%s", got)
 	}
 }
 
@@ -179,6 +190,8 @@ var b: [int] = { 1, 2 }
 var c: [int] = { 5 }
 var d: GAM = "SomeGAM"
 var e: string =~ "^localhost" = "localhost:9"
+var f: int|uint = 4
+var g: float64 = 1.5
 +O = {
   Class = ReferenceContainer
   R = @d
@@ -207,5 +220,28 @@ var host: string =~ "^localhost" = "remote:1"
 	}
 	if !found {
 		t.Error("expected value mismatch for regex-constrained variable with non-matching value")
+	}
+}
+
+// One-word #elseif must also work inside array literals.
+func TestElseIfInArrayLiteral(t *testing.T) {
+	res := buildTemp(t, `#package T
+var mode: int = 2
++O = {
+  Class = ReferenceContainer
+  List = {
+    A,
+    #if (@mode == 1)
+      B,
+    #elseif (@mode == 2)
+      C,
+    #else
+      D,
+    #end
+    E,
+  }
+}`)
+	if !strings.Contains(res, "List = { A C E }") {
+		t.Errorf("expected the elseif branch to be active (A C E), got:\n%s", res)
 	}
 }

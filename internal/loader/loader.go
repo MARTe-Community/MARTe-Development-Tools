@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/marte-community/marte-dev-tools/internal/parser"
@@ -142,13 +141,4 @@ func loadCSV(path string) (parser.Value, error) {
 		arr.Elements = append(arr.Elements, parser.NewMapValue(parser.Position{}, values))
 	}
 	return arr, nil
-}
-
-// SortedKeys returns the keys of a MapValue, sorted. Loader-produced
-// maps are already sorted; this is a convenience for iteration sites.
-func SortedKeys(m *parser.MapValue) []string {
-	keys := make([]string, len(m.Keys))
-	copy(keys, m.Keys)
-	sort.Strings(keys)
-	return keys
 }

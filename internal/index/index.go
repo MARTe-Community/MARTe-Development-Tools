@@ -27,15 +27,63 @@ type ProjectTree struct {
 	NodeMap        map[string][]*ProjectNode
 	Templates      map[string]*parser.TemplateDefinition
 	TemplateFiles  map[string]string // Maps template name to the file it came from
-	mu             sync.RWMutex
+	// knownFiles tracks which files already contribute to the tree. A file
+	// that is not in here has nothing to remove, so AddFile can skip the
+	// tree-wide removal walks. Without it, adding N files costs O(N x nodes)
+	// -- a 1200-file workspace took 3.4s to index, quadratically worse on
+	// bigger trees, which clients see as a request timeout during initialize.
+	knownFiles map[string]struct{}
+	mu         sync.RWMutex
+}
+
+// scanSkipDirs are directory names that never hold project sources: dependency
+// trees, package caches and build outputs. Hidden directories (.git, .cache,
+// .local, ...) are skipped too. Between them they keep the workspace scan
+// proportional to the project rather than to the disk -- a home directory can
+// hold millions of entries, and walking them made `initialize` take minutes.
+var scanSkipDirs = map[string]bool{
+	"node_modules":     true,
+	"bower_components": true,
+	"vendor":           true,
+	"__pycache__":      true,
+	"site-packages":    true,
+	"target":           true,
+	"dist":             true,
+	"venv":             true,
+	".venv":            true,
+}
+
+// defaultMaxScanEntries bounds the workspace walk. Reaching it stops the scan
+// (with a warning) instead of letting a pathological tree hang the server.
+const defaultMaxScanEntries = 200000
+
+func maxScanEntries() int {
+	if v := strings.TrimSpace(os.Getenv("MDT_MAX_SCAN_ENTRIES")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxScanEntries
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 	var files []string
 	visited := make(map[string]struct{})
+	if abs, err := filepath.Abs(rootPath); err == nil {
+		rootPath = abs
+	}
+	limit := maxScanEntries()
+	entries := 0
+	truncated := false
 
 	var walk func(string) error
 	walk = func(path string) error {
+		if entries >= limit {
+			truncated = true
+			return nil
+		}
+		entries++
+
 		info, err := os.Lstat(path)
 		if err != nil {
 			return nil
@@ -66,12 +114,16 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 		visited[absPath] = struct{}{}
 
 		if info.IsDir() {
-			entries, err := os.ReadDir(path)
+			dirEntries, err := os.ReadDir(path)
 			if err != nil {
 				return nil
 			}
-			for _, e := range entries {
-				walk(filepath.Join(path, e.Name()))
+			for _, e := range dirEntries {
+				name := e.Name()
+				if skipWorkspaceDir(name) {
+					continue
+				}
+				walk(filepath.Join(path, name))
 			}
 		} else {
 			if strings.HasSuffix(info.Name(), ".marte") {
@@ -84,6 +136,9 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 	err := walk(rootPath)
 	if err != nil {
 		return err
+	}
+	if truncated {
+		logger.Warningf("workspace scan of %s stopped after %d entries; only part of the tree is indexed (open a project directory for full indexing, or raise MDT_MAX_SCAN_ENTRIES)", rootPath, limit)
 	}
 
 	type result struct {
@@ -106,7 +161,7 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			logger.Printf("indexing: %s [%s]\n", filepath.Base(path), path)
+			logger.Debugf("indexing: %s [%s]", filepath.Base(path), path)
 			content, err := os.ReadFile(path)
 			if err != nil {
 				logger.Printf("[ERROR] reading %s: %v", path, err)
@@ -132,6 +187,17 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 		pt.AddFile(res.path, res.config)
 	}
 	return nil
+}
+
+// skipWorkspaceDir reports whether a directory entry should be left out of the
+// workspace scan. Hidden directories (caches, .git, tool state) are skipped;
+// the scan root itself is never filtered, so pointing the workspace at a
+// dot-directory still works.
+func skipWorkspaceDir(name string) bool {
+	if scanSkipDirs[name] {
+		return true
+	}
+	return strings.HasPrefix(name, ".") && name != "." && name != ".."
 }
 
 type Reference struct {
@@ -224,6 +290,7 @@ func NewProjectTree() *ProjectTree {
 		FileReferences: make(map[string][]Reference),
 		Templates:      make(map[string]*parser.TemplateDefinition),
 		TemplateFiles:  make(map[string]string),
+		knownFiles:     make(map[string]struct{}),
 	}
 }
 
@@ -239,6 +306,7 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	defer pt.mu.Unlock()
 	// Remove references for this file
 	delete(pt.FileReferences, file)
+	delete(pt.knownFiles, file)
 
 	// Rebuild legacy References slice (if needed, or deprecate usage)
 	pt.rebuildLegacyReferences()
@@ -248,8 +316,9 @@ func (pt *ProjectTree) RemoveFile(file string) {
 		delete(pt.IsolatedFiles, file)
 	}
 	delete(pt.GlobalPragmas, file)
+	// Drops this file's fragments from shared nodes and prunes what became
+	// empty. Nodes other files still contribute to survive.
 	pt.removeFileFromNode(pt.Root, file)
-	pt.removeChildrenOwnedByFile(pt.Root, file)
 
 	// Remove templates that belong to this file
 	for name, f := range pt.TemplateFiles {
@@ -264,21 +333,6 @@ func (pt *ProjectTree) removeNodeTreeFromMap(node *ProjectNode) {
 	pt.removeFromNodeMap(node)
 	for _, child := range node.Children {
 		pt.removeNodeTreeFromMap(child)
-	}
-}
-
-func (pt *ProjectTree) removeChildrenOwnedByFile(node *ProjectNode, file string) {
-	var toRemove []string
-	for name, child := range node.Children {
-		if child.File == file {
-			toRemove = append(toRemove, name)
-		} else {
-			pt.removeChildrenOwnedByFile(child, file)
-		}
-	}
-	for _, name := range toRemove {
-		pt.removeNodeTreeFromMap(node.Children[name])
-		delete(node.Children, name)
 	}
 }
 
@@ -451,21 +505,23 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	// We call internal removeFile (without lock, as we hold it)
-	// But RemoveFile is public and locks.
-	// We should split RemoveFile into internal/external.
-	// Refactoring to avoid double lock or code dup.
-	// For now, let's copy body of RemoveFile logic or use a helper.
-
-	// RE-IMPLEMENTATION of RemoveFile logic inline to avoid deadlock
-	delete(pt.FileReferences, file)
-	if iso, ok := pt.IsolatedFiles[file]; ok {
-		pt.removeNodeTreeFromMap(iso)
-		delete(pt.IsolatedFiles, file)
+	// Re-adding a file replaces its previous content, so the old fragments
+	// have to be removed first (removeFileFromNode re-aggregates each node
+	// from its remaining fragments and prunes what became empty). That walk
+	// traverses the whole tree, so it only runs when the file is actually
+	// part of it.
+	if _, known := pt.knownFiles[file]; known {
+		delete(pt.FileReferences, file)
+		if iso, ok := pt.IsolatedFiles[file]; ok {
+			pt.removeNodeTreeFromMap(iso)
+			delete(pt.IsolatedFiles, file)
+		}
+		delete(pt.GlobalPragmas, file)
+		pt.removeFileFromNode(pt.Root, file)
+	} else {
+		delete(pt.FileReferences, file)
 	}
-	delete(pt.GlobalPragmas, file)
-	pt.removeFileFromNode(pt.Root, file)
-	pt.removeChildrenOwnedByFile(pt.Root, file)
+	pt.knownFiles[file] = struct{}{}
 
 	// Collect global pragmas
 	for _, p := range config.Pragmas {
@@ -906,13 +962,17 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 	// as a proper reference to the DataSource node, instead of falling
 	// through to queryNode's field-matching (which would spuriously match
 	// against this synthetic "DataSource" field's name/length instead).
-	dsVal := &parser.ReferenceValue{Position: d.Position, Value: d.DataSource}
-	dsField := &parser.Field{Position: d.Position, Name: "DataSource", Value: dsVal}
-	frag.Definitions = append(frag.Definitions, dsField)
-	frag.DefinitionDocs[dsField] = ""
-	pt.extractFieldMetadata(child, dsField)
-	child.Fields["DataSource"] = append(child.Fields["DataSource"], EvaluatedField{Raw: dsField, Value: dsVal, File: file})
-	pt.IndexValue(file, dsVal)
+	// Definition-form sugar (`Name: Type` inside a Signals block) has no
+	// datasource part, so the field is omitted.
+	if d.DataSource != "" {
+		dsVal := &parser.ReferenceValue{Position: d.Position, Value: d.DataSource}
+		dsField := &parser.Field{Position: d.Position, Name: "DataSource", Value: dsVal}
+		frag.Definitions = append(frag.Definitions, dsField)
+		frag.DefinitionDocs[dsField] = ""
+		pt.extractFieldMetadata(child, dsField)
+		child.Fields["DataSource"] = append(child.Fields["DataSource"], EvaluatedField{Raw: dsField, Value: dsVal, File: file})
+		pt.IndexValue(file, dsVal)
+	}
 
 	// When "as <NAME>" was used, inject Alias = SignalName.
 	if d.AliasName != "" {
@@ -1257,10 +1317,14 @@ func (pt *ProjectTree) ResolveReferences(activeFragments map[*Fragment]bool) {
 	// Iterate map
 	pt.References = nil // Clear legacy slice to rebuild it consistent with map
 
+	// Container lookup runs once per reference; index the spans first so it
+	// does not walk the whole tree every time.
+	containers := pt.buildContainerIndex()
+
 	for _, refs := range pt.FileReferences {
 		for i := range refs {
 			ref := &refs[i]
-			container := pt.getNodeContaining(ref.File, ref.Position)
+			container := containers.containing(ref.File, ref.Position)
 
 			if activeFragments != nil {
 				// Find which fragment this reference belongs to
@@ -1576,11 +1640,9 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 		var newElems []parser.Value
 		for _, e := range v.Elements {
 			if cae, ok := e.(*parser.ConditionalArrayElements); ok {
-				cond := pt.EvaluateValue(cae.Condition, ctx)
-				branch := cae.Else
-				if pt.IsTrue(cond) {
-					branch = cae.Then
-				}
+				branch := ActiveBranch(cae, func(v parser.Value) bool {
+					return pt.IsTrue(pt.EvaluateValue(v, ctx))
+				})
 				for _, be := range branch {
 					newElems = append(newElems, pt.EvaluateValue(be, ctx))
 				}
@@ -1595,6 +1657,21 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 		}
 	}
 	return val
+}
+
+// activeBranch returns the elements of the first branch of a conditional
+// array element (#if/#elseif/#else) whose condition holds, falling back
+// to the #else branch. eval reports whether a condition value is true.
+func ActiveBranch(cae *parser.ConditionalArrayElements, eval func(parser.Value) bool) []parser.Value {
+	if eval(cae.Condition) {
+		return cae.Then
+	}
+	for _, ei := range cae.ElseIf {
+		if eval(ei.Condition) {
+			return ei.Body
+		}
+	}
+	return cae.Else
 }
 
 func (pt *ProjectTree) IsTrue(val parser.Value) bool {
@@ -1724,10 +1801,50 @@ func (pt *ProjectTree) Query(file string, line, col int) *QueryResult {
 	return pt.queryNode(pt.Root, file, line, col)
 }
 
+// Walk visits every node of the tree. The visitor runs while the read lock is
+// held, so it MUST NOT call other locking methods on this tree: the read lock
+// is not reentrant when a writer is queued, and the nested acquisition then
+// waits for that writer while the writer waits for this visitor to finish --
+// a deadlock. Use Nodes() instead when the visitor needs to query the tree.
 func (pt *ProjectTree) Walk(visitor func(*ProjectNode)) {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
 	pt.walk(visitor)
+}
+
+// Nodes returns a snapshot of every node in the tree. Unlike Walk it takes no
+// lock while the caller iterates, so callers may freely call tree getters
+// (FindNode, Query, ResolveName, GetSignalInfo, ...) for each node. The nodes
+// themselves are live objects; the tree structure may change underneath, so
+// treat the slice as a one-shot view.
+func (pt *ProjectTree) Nodes() []*ProjectNode {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+
+	count := len(pt.NodeMap)
+	nodes := make([]*ProjectNode, 0, count)
+	seen := make(map[*ProjectNode]struct{}, count)
+	var collect func(*ProjectNode)
+	collect = func(n *ProjectNode) {
+		if n == nil {
+			return
+		}
+		if _, ok := seen[n]; ok {
+			return
+		}
+		seen[n] = struct{}{}
+		nodes = append(nodes, n)
+		for _, child := range n.Children {
+			collect(child)
+		}
+	}
+	if pt.Root != nil {
+		collect(pt.Root)
+	}
+	for _, node := range pt.IsolatedFiles {
+		collect(node)
+	}
+	return nodes
 }
 
 func (pt *ProjectTree) walk(visitor func(*ProjectNode)) {
@@ -1775,6 +1892,103 @@ func (pt *ProjectTree) queryNode(node *ProjectNode, file string, line, col int) 
 		if res := pt.queryNode(child, file, line, col); res != nil {
 			return res
 		}
+	}
+	return nil
+}
+
+// spanEntry is one object fragment's source span inside a file.
+type spanEntry struct {
+	start, end parser.Position
+	node       *ProjectNode
+}
+
+// containerIndex answers "which node contains this position in this file?"
+// for every file of a tree at once.
+//
+// ResolveReferences asks that question once per reference; walking the whole
+// tree for each of them made every edit O(references x nodes), which showed up
+// as ~400ms per keystroke on a 36-file project. The index groups object spans
+// by file so a lookup only scans the fragments of that one file.
+type containerIndex struct {
+	byFile    map[string][]spanEntry
+	fileLevel map[string]*levelEntry
+}
+
+func (pt *ProjectTree) buildContainerIndex() *containerIndex {
+	idx := &containerIndex{
+		byFile:    make(map[string][]spanEntry),
+		fileLevel: make(map[string]*levelEntry),
+	}
+	roots := make([]*ProjectNode, 0, len(pt.IsolatedFiles)+1)
+	if pt.Root != nil {
+		roots = append(roots, pt.Root)
+	}
+	for _, n := range pt.IsolatedFiles {
+		roots = append(roots, n)
+	}
+	for _, root := range roots {
+		pt.indexNode(idx, root, 0)
+	}
+	return idx
+}
+
+func (pt *ProjectTree) indexNode(idx *containerIndex, node *ProjectNode, depth int) {
+	if node == nil {
+		return
+	}
+	for _, frag := range node.Fragments {
+		if frag.IsObject {
+			idx.byFile[frag.File] = append(idx.byFile[frag.File], spanEntry{
+				start: frag.ObjectPos,
+				end:   frag.EndPos,
+				node:  node,
+			})
+			continue
+		}
+		if frag.IsConditional || frag.BranchID != "" {
+			continue
+		}
+		// File-level fragment: the node owning it is the fallback container
+		// for positions outside every object. Prefer the shallowest (and,
+		// for ties, the lowest name) so the answer is deterministic.
+		prev, ok := idx.fileLevel[frag.File]
+		if !ok || depth < prev.depth || (depth == prev.depth && node.Name < prev.node.Name) {
+			idx.fileLevel[frag.File] = &levelEntry{node: node, depth: depth}
+		}
+	}
+	for _, child := range node.Children {
+		pt.indexNode(idx, child, depth+1)
+	}
+}
+
+type levelEntry struct {
+	node  *ProjectNode
+	depth int
+}
+
+// containing returns the innermost object whose span covers pos, falling back
+// to the file-level container. It mirrors findNodeContaining's behaviour
+// (children win over their parent) without visiting unrelated nodes.
+func (idx *containerIndex) containing(file string, pos parser.Position) *ProjectNode {
+	var best *ProjectNode
+	var bestStart parser.Position
+	for _, e := range idx.byFile[file] {
+		if pos.Line < e.start.Line || (pos.Line == e.start.Line && pos.Column < e.start.Column) {
+			continue
+		}
+		if pos.Line > e.end.Line || (pos.Line == e.end.Line && pos.Column > e.end.Column) {
+			continue
+		}
+		if best == nil || e.start.Line > bestStart.Line ||
+			(e.start.Line == bestStart.Line && e.start.Column >= bestStart.Column) {
+			best, bestStart = e.node, e.start
+		}
+	}
+	if best != nil {
+		return best
+	}
+	if lvl, ok := idx.fileLevel[file]; ok {
+		return lvl.node
 	}
 	return nil
 }
@@ -1860,6 +2074,24 @@ func (pt *ProjectTree) resolveName(ctx *ProjectNode, name string, predicate func
 	return nil
 }
 
+// ResolveFieldValue evaluates a field's value, preferring the evaluation
+// context of the fragment that owns it (loop iterations, template
+// parameters, with-block bindings) and falling back to the node scope.
+func (pt *ProjectTree) ResolveFieldValue(f EvaluatedField, node *ProjectNode) parser.Value {
+	for _, frag := range node.Fragments {
+		for _, def := range frag.Definitions {
+			if def != f.Raw {
+				continue
+			}
+			if frag.EvalCtx != nil {
+				return pt.EvaluateValue(f.Value, frag.EvalCtx)
+			}
+			return pt.Evaluate(f.Value, node)
+		}
+	}
+	return f.Value
+}
+
 func (pt *ProjectTree) ResolveVariable(ctx *ProjectNode, name string) *VariableInfo {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
@@ -1934,11 +2166,9 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		var newElems []parser.Value
 		for _, e := range v.Elements {
 			if cae, ok := e.(*parser.ConditionalArrayElements); ok {
-				cond := pt.evaluate(cae.Condition, ctx)
-				branch := cae.Else
-				if pt.IsTrue(cond) {
-					branch = cae.Then
-				}
+				branch := ActiveBranch(cae, func(v parser.Value) bool {
+					return pt.IsTrue(pt.evaluate(v, ctx))
+				})
 				for _, be := range branch {
 					newElems = append(newElems, pt.evaluate(be, ctx))
 				}
@@ -2010,6 +2240,13 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	// Clone TemplateFiles
 	for k, v := range pt.TemplateFiles {
 		newPT.TemplateFiles[k] = v
+	}
+
+	// Clone knownFiles: without it the clone would believe it holds no files
+	// and skip the removal walks when re-adding an existing file, leaving
+	// stale fragments behind.
+	for k := range pt.knownFiles {
+		newPT.knownFiles[k] = struct{}{}
 	}
 
 	// Clone FileReferences
@@ -2334,9 +2571,12 @@ func (pt *ProjectTree) EvaluateValueWithGlobalVars(val parser.Value) parser.Valu
 }
 
 func (pt *ProjectTree) IsGAM(node *ProjectNode) bool {
-	if node.RealName == "" || (node.RealName[0] != '+' && node.RealName[0] != '$') {
+	if node.RealName == "" {
 		return false
 	}
+	// Structural detection: nodes declaring input or output signals are
+	// GAMs, whether or not they carry a '+'/'$' prefix (unprefixed
+	// object definitions are common in real configurations).
 	_, hasInput := node.Children["InputSignals"]
 	_, hasOutput := node.Children["OutputSignals"]
 	return hasInput || hasOutput
@@ -2376,6 +2616,16 @@ func (pt *ProjectTree) GetSignalInfo(node *ProjectNode) (*ProjectNode, string) {
 	if (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") && pt.IsGAM(node.Parent.Parent) {
 		dsName := ""
 		sigName := node.RealName
+
+		// Signal shorthand (DataSource::Signal ...) carries the
+		// datasource and signal name in the AST rather than as fields.
+		for _, frag := range node.Fragments {
+			if sh, ok := frag.Source.(*parser.SignalShorthand); ok {
+				dsName = sh.DataSource
+				sigName = sh.SignalName
+				break
+			}
+		}
 
 		// Scan fields
 		for _, frag := range node.Fragments {

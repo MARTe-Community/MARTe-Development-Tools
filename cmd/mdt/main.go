@@ -17,12 +17,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
 	"github.com/marte-community/marte-dev-tools/internal/varsfile"
-)
-
-var (
-	Version = "v0.1.0"
-	Commit  = "none"
-	Date    = "unknown"
+	"github.com/marte-community/marte-dev-tools/internal/version"
 )
 
 const helpGeneral = `mdt — MARTe2 Developer Tools
@@ -627,7 +622,8 @@ fmt:
 }
 
 func runVersion() {
-	fmt.Printf("mdt %s\n", Version)
-	fmt.Printf("commit: %s\n", Commit)
-	fmt.Printf("build date: %s\n", Date)
+	info := version.Get()
+	fmt.Printf("mdt %s\n", info.Version)
+	fmt.Printf("commit: %s\n", info.Commit)
+	fmt.Printf("build date: %s\n", info.Date)
 }

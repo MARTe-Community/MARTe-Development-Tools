@@ -12,6 +12,9 @@ type Parser struct {
 	comments []Comment
 	pragmas  []Pragma
 	errors   []error
+	// signalsDepth counts how many "Signals = { … }" bodies we are
+	// inside. Signal definition sugar (`Name: Type`) is only valid there.
+	signalsDepth int
 }
 
 func NewParser(input string) *Parser {
@@ -131,12 +134,23 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			return p.parseSignalShorthand(tok, name)
 		}
 
+		// Signal definition sugar inside a Signals block: `Name: Type[Dim] [= { … }]`
+		if p.peek().Type == TokenColon && p.signalsDepth > 0 {
+			return p.parseSignalDefinition(tok, name)
+		}
+
 		// If followed by =, it's a definition
 		if p.peek().Type == TokenEqual {
 			p.next() // consume =
 
 			if p.peek().Type == TokenLBrace && p.isSubnodeLookahead() {
+				if name == "Signals" {
+					p.signalsDepth++
+				}
 				sub, ok := p.parseSubnodeConcat()
+				if name == "Signals" {
+					p.signalsDepth--
+				}
 				if !ok {
 					return nil, false
 				}
@@ -395,6 +409,61 @@ func (p *Parser) parseIf(startTok Token) (Definition, bool) {
 		ElseIf:      elseIfBranches,
 		Else:        elseBody,
 	}, true
+}
+
+// parseSignalDefinition parses the DataSource signal definition sugar:
+//
+//	Name: Type
+//	Name: Type[Dim]
+//	Name: Type = { Extra = 1 … }
+//
+// The caller has consumed the name token and verified the ':' and that
+// we are inside a Signals block.
+func (p *Parser) parseSignalDefinition(nameTok Token, name string) (Definition, bool) {
+	p.next() // consume ':'
+	typeTok := p.next()
+	if typeTok.Type != TokenIdentifier {
+		p.addError(typeTok.Position, "expected signal type after ':'")
+		return nil, false
+	}
+	sh := &SignalShorthand{
+		Position:           nameTok.Position,
+		EndPosition:        typeTok.Position,
+		SignalNamePosition: nameTok.Position,
+		SignalName:         name,
+		Type:               typeTok.Value,
+	}
+
+	if p.peek().Type == TokenLBracket {
+		p.next() // consume '['
+		dim, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+		sh.NumElements = dim
+		sh.EndPosition = dim.End()
+		if p.next().Type != TokenRBracket {
+			p.addError(p.peek().Position, "expected ']'")
+			return nil, false
+		}
+	}
+
+	if p.peek().Type == TokenEqual {
+		p.next() // consume '='
+		if p.peek().Type != TokenLBrace {
+			p.addError(p.peek().Position, "expected '{' after '='")
+			return nil, false
+		}
+		sub, ok := p.parseSubnodeConcat()
+		if !ok {
+			return nil, false
+		}
+		sh.ExtraFields = sub
+		sh.HasExtraFields = true
+		sh.EndPosition = sub.EndPosition
+	}
+
+	return sh, true
 }
 
 // parseConditionalArrayElements parses a #if block that appears inside an array:
@@ -740,6 +809,10 @@ func (p *Parser) isSubnodeLookahead() bool {
 		// If followed by '=', it's a definition -> Subnode.
 		t2 := p.peekN(2)
 		if t2.Type == TokenEqual {
+			return true
+		}
+		// "Name: Type" — signal definition sugar -> Subnode.
+		if t2.Type == TokenColon {
 			return true
 		}
 		// Identifier alone or followed by something else -> Reference/Value -> Array
@@ -1178,6 +1251,11 @@ func (p *Parser) parseWith(startTok Token) (Definition, bool) {
 		p.addError(bindTok.Position, "expected binding name after 'as'")
 		return nil, false
 	}
+	switch bindTok.Value {
+	case "begin", "end", "do", "in", "as":
+		p.addError(bindTok.Position, fmt.Sprintf("invalid binding name %q after 'as'", bindTok.Value))
+		return nil, false
+	}
 	// Optional `begin` or `{` opens the body.
 	if p.peek().Type == TokenLBrace {
 		p.next()
@@ -1203,6 +1281,34 @@ func (p *Parser) parseWith(startTok Token) (Definition, bool) {
 
 func (p *Parser) Errors() []error {
 	return p.errors
+}
+
+// EscapeString renders s as the body of a string literal, escaping the
+// characters the lexer understands (\, ", \n, \t, \r). It is the
+// inverse of unescapeString.
+func EscapeString(s string) string {
+	if !strings.ContainsAny(s, "\\\"\n\t\r") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString("\\\\")
+		case '"':
+			b.WriteString("\\\"")
+		case '\n':
+			b.WriteString("\\n")
+		case '\t':
+			b.WriteString("\\t")
+		case '\r':
+			b.WriteString("\\r")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // unescapeString resolves backslash escapes in a string literal body.

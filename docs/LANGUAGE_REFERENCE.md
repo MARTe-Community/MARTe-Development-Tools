@@ -279,6 +279,34 @@ Full form: `DataSource::Signal [: Type [Dim]] [as Alias] [= { extra fields }]`
 - `as Alias` — local rename of the signal.
 - `= { … }` — additional signal properties (`Frequency`, `Gain`, `Value`, …).
 
+### 10.1 DataSource signal definition sugar
+
+Inside a data source's `Signals` block, a signal may be declared with the
+same `Name: Type` form instead of a nested `Type = …` object:
+
+```marte
++DDB1 = {
+  Class = GAMDataSource
+  Signals = {
+    CounterCopy: uint32
+    Waveform: float32[4]
+    Timed: uint32 = {
+      Frequency = 100
+      IPName = "IP"
+    }
+  }
+}
+```
+
+- `Name: Type` is equivalent to `Name = { Type = Type }`.
+- `Name: Type[Dim]` adds `NumberOfElements = Dim`.
+- `= { … }` is optional and only needed for additional fields
+  (`Frequency`, `IPName`, …); its fields are merged into the signal.
+- The sugar is only accepted inside `Signals` blocks; elsewhere
+  `Name: Type` is a syntax error.
+- Build output always uses the expanded `Name = { Type = … }` form, and
+  `mdt fmt` round-trips the sugar unchanged.
+
 ## 11. Comments, docstrings and pragmas
 
 ```marte
@@ -327,7 +355,7 @@ Full form: `DataSource::Signal [: Type [Dim]] [as Alias] [= { extra fields }]`
 
 | Example                                      | Command                                                                       | Result                        |
 | -------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------- |
-| `examples/syntax_showcase` (whole directory) | `mdt check -P .`                    | clean (incl. `-v` overrides) |
+| `examples/syntax_showcase` (whole directory) | `mdt check -P .`                    | 1 expected error: `external.marte` deliberately mismatches IOGAM input/output signal sizes |
 | `examples/syntax_showcase/loops.marte`       | `mdt check loops.marte`             | 1 expected single-file diagnostic (cross-file `@NumChannels`) |
 | `examples/simple/main.marte`                 | `mdt check main.marte`              | 1 implicit-signal warning    |
 | `examples/complex_func_list`                 | `mdt check app.marte functions.marte states.marte` | 2 implicit-signal warnings |
@@ -376,6 +404,18 @@ end
   render as `{ key = value … }` blocks in build output.
 - A missing or malformed file is reported as
   `with <format>("path"): …` at the block position.
+
+- **Editor support**: hovering a signal usage such as `EpicsSignals::Stat`
+  shows the datasource, the signal type and its extra properties (e.g.
+  `PVName`) even when they come from the loaded document, and
+  go-to-definition jumps to the signal's definition site. This works
+  immediately after a document is opened (expansions are part of the
+  editor's snapshot, not delayed until validation). Inlay hints for a
+  shorthand show only the resolved type — the datasource is already
+  written in `DS::Signal`, so it is not repeated as a hint.
+- Objects may be declared with or without a `+`/`$` prefix
+  (`GAM = { … }` is equivalent to `+GAM = { … }` for structural
+  detection like GAM/datasource classification).
 
 A validated example lives in `examples/syntax_showcase/external.marte`
 (with `data/epics_cfg.json`).

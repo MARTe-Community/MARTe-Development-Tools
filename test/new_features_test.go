@@ -86,6 +86,13 @@ func TestNewFeatures(t *testing.T) {
 	if !strings.Contains(res, "+Instance_1 = {") || !strings.Contains(res, "Type = \"Default\"") {
 		t.Error("Expected template instance 1 with Default type")
 	}
+	// Template expansions are flattened: the instance name must not
+	// become a wrapper object.
+	for _, wrapper := range []string{"Instance10 = {", "Instance1 = {"} {
+		if strings.Contains(res, wrapper) {
+			t.Errorf("template instance name must not create a wrapper node, got:\n%s", res)
+		}
+	}
 	if !strings.Contains(res, "ExtraField = \"Greater than 1\"") {
 		t.Error("Expected ExtraField = \"Greater than 1\" for instance 10")
 	}

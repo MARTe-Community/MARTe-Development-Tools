@@ -41,7 +41,7 @@ func NewBuilder(files []string, overrides map[string]string) *Builder {
 	}
 }
 
-func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.EvaluationContext) {
+func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
 	b.activeNodes[node] = true
 	for _, frag := range node.Fragments {
 		if !frag.IsConditional {
@@ -57,8 +57,10 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 	}
 
 	written := make(map[string]bool)
-	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode)
-	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode) {
+	// forceUncond: definitions in this expansion are unconditional
+	// (true inside `with` blocks, which always load their document).
+	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode, bool)
+	processEval = func(evaluated []index.EvaluatedDefinition, node *index.ProjectNode, forceUncond bool) {
 		for _, ed := range evaluated {
 			switch d := ed.Def.(type) {
 			case *parser.SignalShorthand:
@@ -78,11 +80,17 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 							break
 						}
 					}
-					b.collectActiveNodes(child, ed.Ctx)
+					b.collectActiveNodes(child, ed.Ctx, forceUncond)
 					written[norm] = true
 				}
 			case *parser.ObjectNode:
 				objName := b.tree.ValueToString(b.tree.EvaluateValue(d.Name, ed.Ctx))
+				if strings.Contains(objName, "@") || objName == "" {
+					// Unresolvable at this stage: the bound expansion
+					// (loop iteration / with binding) creates the real
+					// object; skip the raw residual here.
+					continue
+				}
 				norm := index.NormalizeName(objName)
 
 				// Find or create the child node
@@ -96,10 +104,16 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						Metadata:      make(map[string]string),
 						Variables:     make(map[string]index.VariableInfo),
 						Fields:        make(map[string][]index.EvaluatedField),
-						IsConditional: false, // It's active now
+						IsConditional: !forceUncond, // It's active now
 					}
 					node.Children[norm] = child
 					b.tree.AddToNodeMap(child)
+				}
+				if forceUncond {
+					// E.g. materialized inside a `with` block: the
+					// block always loads, so the child is not
+					// conditional even if an earlier pass marked it.
+					child.IsConditional = false
 				}
 
 				// Ensure this fragment is present and active
@@ -115,7 +129,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					}
 				}
 				if !found {
-					b.tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, true)
+					b.tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, !forceUncond)
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							b.activeFragments[f] = true
@@ -128,7 +142,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				}
 
 				if !written[norm] {
-					b.collectActiveNodes(child, ed.Ctx)
+					b.collectActiveNodes(child, ed.Ctx, forceUncond)
 					written[norm] = true
 				}
 			case *parser.IfBlock:
@@ -142,7 +156,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 							b.activeFragments[f] = false
 						}
 					}
-					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node)
+					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node, false)
 				} else {
 					matched := false
 					for i, ei := range d.ElseIf {
@@ -154,7 +168,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 									b.activeFragments[f] = true
 								}
 							}
-							processEval(b.tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node)
+							processEval(b.tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node, false)
 							matched = true
 							break
 						}
@@ -165,7 +179,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 								b.activeFragments[f] = true
 							}
 						}
-						processEval(b.tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node)
+						processEval(b.tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node, false)
 					}
 				}
 			case *parser.ForeachBlock:
@@ -191,7 +205,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = m.Values[key]
 						}
-						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				}
 				if arr, ok := iterable.(*parser.ArrayValue); ok {
@@ -212,7 +226,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
 						}
-						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				}
 			case *parser.WithBlock:
@@ -233,7 +247,9 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					Parent:    ed.Ctx,
 					Tree:      b.tree,
 				}
-				processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node)
+				// The with block always loads its document: the body's
+				// definitions are unconditional.
+				processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, true)
 			case *parser.TemplateDefinition:
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 				for _, f := range node.Fragments {
@@ -241,16 +257,16 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						b.activeFragments[f] = true
 					}
 				}
-				processEval(b.tree.EvaluateDefinitions(d.Body, ed.Ctx, ed.File), node)
+				processEval(b.tree.EvaluateDefinitions(d.Body, ed.Ctx, ed.File), node, forceUncond)
 			}
 		}
 	}
 
-	processEval(evaluated, node)
+	processEval(evaluated, node, forceUncond)
 
 	for name, child := range node.Children {
 		if !written[name] && !child.IsConditional {
-			b.collectActiveNodes(child, evalCtx)
+			b.collectActiveNodes(child, evalCtx, forceUncond)
 		}
 	}
 }
@@ -317,9 +333,9 @@ func (b *Builder) Build(f *os.File) error {
 		b.collectVariables(tree) // This re-parses overrides
 
 		prevCount := len(b.activeFragments)
-		b.collectActiveNodes(tree.Root, evalCtx)
+		b.collectActiveNodes(tree.Root, evalCtx, false)
 		for _, node := range tree.IsolatedFiles {
-			b.collectActiveNodes(node, evalCtx)
+			b.collectActiveNodes(node, evalCtx, false)
 		}
 
 		// Re-resolve only active things after activation pass
@@ -396,6 +412,18 @@ func (b *Builder) Build(f *os.File) error {
 	b.writeNodeBody(f, rootNode, 0, nil)
 
 	return nil
+}
+
+// childHasActiveFragment reports whether any fragment of the node is
+// active. Such nodes are real runtime objects even when they were
+// indexed as conditional.
+func (b *Builder) childHasActiveFragment(node *index.ProjectNode) bool {
+	for _, frag := range node.Fragments {
+		if b.activeFragments[frag] {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Builder) writeNodeContent(f *os.File, node *index.ProjectNode, indent int, ctx *index.EvaluationContext) {
@@ -523,7 +551,7 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 	for _, name := range childNames {
 		if !written[name] {
 			child := node.Children[name]
-			if child.IsConditional {
+			if child.IsConditional && !b.childHasActiveFragment(child) {
 				continue
 			}
 			if strings.Contains(child.RealName, "@") {
@@ -636,7 +664,9 @@ func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.Evalua
 
 		// Fallback: write directly from shorthand fields.
 		fmt.Fprintf(f, "%s%s = {\n", indentStr, nodeName)
-		fmt.Fprintf(f, "%s  DataSource = %s\n", indentStr, d.DataSource)
+		if d.DataSource != "" {
+			fmt.Fprintf(f, "%s  DataSource = %s\n", indentStr, d.DataSource)
+		}
 		if d.AliasName != "" {
 			fmt.Fprintf(f, "%s  Alias = %s\n", indentStr, d.SignalName)
 		}
@@ -678,7 +708,7 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 	switch v := val.(type) {
 	case *parser.StringValue:
 		if v.Quoted {
-			return fmt.Sprintf("\"%s\"", v.Value)
+			return fmt.Sprintf("\"%s\"", parser.EscapeString(v.Value))
 		}
 		return v.Value
 	case *parser.IntValue:

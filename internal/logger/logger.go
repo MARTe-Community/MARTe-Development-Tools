@@ -4,6 +4,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 )
 
 // ANSI escape codes for coloring terminal output.
@@ -20,7 +21,45 @@ var (
 	std = log.New(os.Stderr, "[mdt] ", log.LstdFlags)
 	// EnableColors controls whether to use ANSI escape codes.
 	EnableColors = checkTerminal(os.Stderr)
+	// verbose enables Debug/Debugf output. Off by default so that
+	// editors do not surface routine progress as errors.
+	verbose = envTruthy("MDT_DEBUG") || envTruthy("MDT_VERBOSE") || envTruthy("MDT_LOG")
 )
+
+func envTruthy(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "", "0", "false", "no", "off", "quiet", "warn", "warning", "error":
+		return false
+	}
+	return true
+}
+
+// SetVerbose turns debug logging on or off.
+func SetVerbose(on bool) {
+	verbose = on
+}
+
+// Verbose reports whether debug logging is enabled.
+func Verbose() bool {
+	return verbose
+}
+
+// Debug logs a message only when debug logging is enabled. Use it for
+// routine progress that would otherwise spam an editor's output panel.
+func Debug(v ...interface{}) {
+	if !verbose {
+		return
+	}
+	std.Println(v...)
+}
+
+// Debugf logs a formatted message only when debug logging is enabled.
+func Debugf(format string, v ...interface{}) {
+	if !verbose {
+		return
+	}
+	std.Printf(format, v...)
+}
 
 func checkTerminal(w io.Writer) bool {
 	// Respect NO_COLOR standard

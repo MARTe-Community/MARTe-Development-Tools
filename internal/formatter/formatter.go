@@ -81,7 +81,12 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 	switch d := def.(type) {
 	case *parser.SignalShorthand:
 		// Emit the shorthand syntax: DS::Signal [: Type[Dim]] [as Name] [= { … }]
-		fmt.Fprintf(f.writer, "%s%s::%s", indentStr, d.DataSource, d.SignalName)
+		// or, for a definition-form sugar, Name: Type[Dim] [= { … }].
+		if d.DataSource == "" {
+			fmt.Fprintf(f.writer, "%s%s", indentStr, d.SignalName)
+		} else {
+			fmt.Fprintf(f.writer, "%s%s::%s", indentStr, d.DataSource, d.SignalName)
+		}
 		if d.Type != "" {
 			fmt.Fprintf(f.writer, ": %s", d.Type)
 			if d.NumElements != nil {
@@ -241,7 +246,7 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 	switch v := val.(type) {
 	case *parser.StringValue:
 		if v.Quoted {
-			fmt.Fprintf(f.writer, "\"%s\"", v.Value)
+			fmt.Fprintf(f.writer, "\"%s\"", parser.EscapeString(v.Value))
 		} else {
 			// Should strictly parse unquoted as ReferenceValue or identifiers, but fallback here
 			fmt.Fprint(f.writer, v.Value)

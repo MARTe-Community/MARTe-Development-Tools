@@ -332,16 +332,98 @@ var PublishDiagnosticsFn func(ctx context.Context, fileURI string, diags []LSPDi
 var GraphNotifyFn func(event, data string)
 
 var (
-	valMu       sync.Mutex
-	valCancels  = make(map[string]context.CancelFunc)
-	valTimers   = make(map[string]*time.Timer)
-	valGen      = make(map[string]int)
+	valMu      sync.Mutex
+	valCancels = make(map[string]context.CancelFunc)
+	valTimers  = make(map[string]*time.Timer)
+	valGen     = make(map[string]int)
+)
 
+// Slow-operation reporting. An editor only reports "request timed out"; it
+// does not say which request hung, and routine logging is off by default, so
+// the server has to speak up about its own overruns. Thresholds are tunable
+// for diagnosis (MDT_SLOW_REQUEST_MS=0 logs every request).
+var (
+	slowRequestWarn = envDuration("MDT_SLOW_REQUEST_MS", 500*time.Millisecond)
+	requestWatchdog = envDuration("MDT_REQUEST_WATCHDOG_MS", 3*time.Second)
+	slowScanWarn    = envDuration("MDT_SLOW_SCAN_MS", 2*time.Second)
+)
+
+func envDuration(name string, def time.Duration) time.Duration {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return def
+}
+
+// watchRequest is deferred by every request and notification handler: it warns
+// once while the call is still running past the watchdog, and again with the
+// total duration when it finally returns.
+func watchRequest(method string) func() {
+	start := time.Now()
+	var mu sync.Mutex
+	stillRunning := false
+	timer := time.AfterFunc(requestWatchdog, func() {
+		mu.Lock()
+		stillRunning = true
+		mu.Unlock()
+		logger.Warningf("request %s still running after %v", method, requestWatchdog)
+	})
+	return func() {
+		timer.Stop()
+		elapsed := time.Since(start)
+		mu.Lock()
+		hung := stillRunning
+		mu.Unlock()
+		switch {
+		case hung:
+			logger.Warningf("request %s finished after %v", method, elapsed)
+		case elapsed >= slowRequestWarn:
+			logger.Warningf("slow request %s: %v", method, elapsed)
+		}
+	}
+}
+
+// watchOperation is watchRequest for work that is not a request of its own
+// (e.g. the initial workspace scan). It returns the elapsed duration and
+// reports it when it exceeded the scan threshold.
+func watchOperation(what string) func() {
+	start := time.Now()
+	var mu sync.Mutex
+	stillRunning := false
+	timer := time.AfterFunc(slowScanWarn, func() {
+		mu.Lock()
+		stillRunning = true
+		mu.Unlock()
+		logger.Warningf("%s still running after %v", what, slowScanWarn)
+	})
+	return func() {
+		timer.Stop()
+		elapsed := time.Since(start)
+		mu.Lock()
+		slow := stillRunning
+		mu.Unlock()
+		if slow {
+			logger.Warningf("%s finished after %v", what, elapsed)
+		}
+	}
+}
+
+// validationDebounce delays semantic+parser validation until typing pauses.
+// Short enough to feel immediate, long enough to skip most intermediate
+// keystrokes.
+const validationDebounce = 250 * time.Millisecond
+
+var (
 	diagMu        sync.Mutex
 	lastPublished = make(map[string]string) // URI -> Hash of diagnostics
 )
 
 func publishDiagnosticsForFile(ctx context.Context, fileURI string, diags []LSPDiagnostic) {
+	for i := range diags {
+		diags[i].Range = clampRange(diags[i].Range)
+	}
 	if PublishDiagnosticsFn != nil {
 		PublishDiagnosticsFn(ctx, fileURI, diags)
 		return
@@ -373,14 +455,14 @@ func triggerValidation(uri string) {
 		timer.Stop()
 	}
 
-	valTimers[uri] = time.AfterFunc(1000*time.Millisecond, func() {
+	valTimers[uri] = time.AfterFunc(validationDebounce, func() {
 		// This closure runs on its own goroutine (time.AfterFunc), so a panic
 		// here would otherwise crash the whole LSP process -- recover() only
 		// protects the goroutine it's declared in, it is not inherited from
 		// any caller.
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Printf("[ERROR] panic in debounced validation for %s: %v", uri, r)
+				logger.Errorf("panic in debounced validation for %s: %v", uri, r)
 			}
 		}()
 
@@ -401,6 +483,48 @@ func triggerValidation(uri string) {
 			runValidation(ctx, uri, view.Snapshot())
 		}
 	})
+}
+
+// stopAllValidations cancels pending debounce timers and in-flight validation
+// so the server can shut down without work still running against a session
+// that is going away.
+func stopAllValidations() {
+	valMu.Lock()
+	defer valMu.Unlock()
+	for uri, timer := range valTimers {
+		timer.Stop()
+		delete(valTimers, uri)
+	}
+	for uri, cancel := range valCancels {
+		cancel()
+		delete(valCancels, uri)
+	}
+}
+
+// clampRange keeps a diagnostic range inside the document. LSP line and
+// character numbers are unsigned, and clients reject the whole
+// publishDiagnostics notification (silently, logging only a protocol error)
+// when any position is negative. Parser and validator diagnostics can carry
+// line 0 when a diagnostic has no source position of its own -- generated
+// nodes, schema errors -- which would otherwise turn every diagnostic for
+// that file into poison.
+func clampRange(r Range) Range {
+	if r.Start.Line < 0 {
+		r.Start.Line = 0
+	}
+	if r.Start.Character < 0 {
+		r.Start.Character = 0
+	}
+	if r.End.Line < 0 {
+		r.End.Line = 0
+	}
+	if r.End.Character < 0 {
+		r.End.Character = 0
+	}
+	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Character < r.Start.Character) {
+		r.End = r.Start
+	}
+	return r
 }
 
 func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
@@ -437,7 +561,7 @@ func readMessage(reader *bufio.Reader) (*JsonRpcMessage, error) {
 func HandleMessage(msg *JsonRpcMessage) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Printf("Panic in HandleMessage: %v", r)
+			logger.Errorf("panic in HandleMessage: %v", r)
 		}
 	}()
 
@@ -459,17 +583,20 @@ func HandleMessage(msg *JsonRpcMessage) {
 				view := GlobalSession.CreateView("main", root)
 				snap := view.Snapshot()
 
-				logger.Printf("Scanning workspace: %s\n", root)
+				logger.Debugf("Scanning workspace: %s", root)
+				done := watchOperation("workspace scan of " + root)
 				if err := snap.Tree().ScanDirectory(root); err != nil {
-					logger.Printf("ScanDirectory failed: %v\n", err)
+					logger.Debugf("ScanDirectory failed: %v", err)
 				}
-				logger.Printf("Scan done")
+				logger.Debugf("Scan done")
 				snap.Tree().ResolveReferences(nil)
 				snap.Tree().ResolveFields(nil)
-				logger.Printf("Resolve done")
+				activateSnapshot(view, snap)
+				logger.Debugf("Resolve done")
 				view.SetSnapshot(snap)
 				GlobalSchema = schema.LoadFullSchema(root)
-				logger.Printf("Schema done")
+				done()
+				logger.Debugf("Schema done")
 			}
 		}
 
@@ -511,16 +638,16 @@ func HandleMessage(msg *JsonRpcMessage) {
 	case "textDocument/hover":
 		var params HoverParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil {
-			logger.Printf("Hover: %s:%d", params.TextDocument.URI, params.Position.Line)
+			logger.Debugf("Hover: %s:%d", params.TextDocument.URI, params.Position.Line)
 			res := HandleHover(params)
 			if res != nil {
-				logger.Printf("Res: %v", res.Contents)
+				logger.Debugf("Res: %v", res.Contents)
 			} else {
-				logger.Printf("Res: NIL")
+				logger.Debugf("Res: NIL")
 			}
 			respond(msg.ID, res)
 		} else {
-			logger.Printf("not recovered hover parameters")
+			logger.Debugf("not recovered hover parameters")
 			respond(msg.ID, nil)
 		}
 	case "textDocument/definition":
@@ -596,6 +723,18 @@ func uriToPath(uri string) string {
 	return strings.TrimPrefix(uri, "file://")
 }
 
+// activateSnapshot materializes loop/template/with expansions in the
+// snapshot's tree so navigation features (hover, go-to-definition, inlay
+// hints) see the same tree validation does, without waiting for the
+// debounced validation pass.
+func activateSnapshot(view *cache.View, snap *cache.Snapshot) {
+	if view == nil || snap == nil || snap.Tree() == nil {
+		return
+	}
+	v := validator.NewValidator(snap.Tree(), view.Root(), nil)
+	v.Activate(context.Background())
+}
+
 func HandleDidOpen(params DidOpenTextDocumentParams) {
 	if GlobalSession == nil {
 		GlobalSession = cache.NewSession("default")
@@ -636,6 +775,7 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences(nil)
 		newSnap.Tree().ResolveFields(nil)
+		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	} else {
@@ -643,6 +783,7 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		// unresolved (Reference.Target still points at the OLD tree's now
 		// stale nodes) -- resolve them against the clone before publishing it.
 		newSnap.Tree().ResolveReferences(nil)
+		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	}
@@ -660,7 +801,7 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 
 	text, ok := newSnap.Documents()[uri]
 	if !ok {
-		logger.Printf("[ERROR] document %s not found\n", uri)
+		logger.Errorf("document %s not found", uri)
 		return
 	}
 
@@ -678,15 +819,17 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	config, _ := p.Parse()
 	newSnap.ParserErrors()[uri] = p.Errors()
 
-	// Immediately publish parser errors
-	publishImmediateDiagnostics(uri, newSnap)
-
-	// Parser errors are now handled in runValidation to avoid blinking
+	// Parser errors are deliberately NOT published here. Half-typed input is
+	// broken by construction ("F:" mid-word), and pushing those transient
+	// errors made editors flash diagnostics that the debounced validation then
+	// had to clear a second later. runValidation publishes the complete,
+	// authoritative set (parser + semantic) once typing pauses.
 
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences(nil)
 		newSnap.Tree().ResolveFields(nil)
+		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
 	} else {
@@ -694,6 +837,7 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		// unresolved (Reference.Target still points at the OLD tree's now
 		// stale nodes) -- resolve them against the clone before publishing it.
 		newSnap.Tree().ResolveReferences(nil)
+		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri) // Still trigger validation to show parser errors
 	}
@@ -861,7 +1005,7 @@ func publishImmediateDiagnostics(uri string, snap *cache.Snapshot) {
 }
 
 func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
-	logger.Printf("Running validation (Sync=%v)", SynchronousValidation)
+	logger.Debugf("Running validation (Sync=%v)", SynchronousValidation)
 	if snap.Tree() == nil || snap.Tree().Root == nil {
 		return
 	}
@@ -919,7 +1063,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	v.ValidateProject(ctx)
 
 	if ctx.Err() != nil {
-		logger.Printf("Validation canceled")
+		logger.Debugf("Validation canceled")
 		return
 	}
 
@@ -986,7 +1130,7 @@ func collectFiles(node *index.ProjectNode, files map[string]bool) {
 func mustMarshal(v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	if err != nil {
-		logger.Printf("[ERROR] mustMarshal: %v", err)
+		logger.Errorf("mustMarshal: %v", err)
 	}
 	return b
 }
@@ -1005,7 +1149,7 @@ func HandleHover(params HoverParams) *Hover {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
-		logger.Printf("No object/node/reference found")
+		logger.Debugf("No object/node/reference found")
 		return nil
 	}
 
@@ -1090,7 +1234,7 @@ func HandleHover(params HoverParams) *Hover {
 			}
 			fullInfo = fmt.Sprintf("**Template**: `#template %s(%s)`", t.Name, strings.Join(params, ", "))
 			// Find doc for template
-			tree.Walk(func(n *index.ProjectNode) {
+			visit := func(n *index.ProjectNode) {
 				if targetDoc != "" {
 					return
 				}
@@ -1100,7 +1244,10 @@ func HandleHover(params HoverParams) *Hover {
 						return
 					}
 				}
-			})
+			}
+			for _, n := range tree.Nodes() {
+				visit(n)
+			}
 		}
 
 		content = fmt.Sprintf("**Reference**: `%s` -> `%s`", res.Reference.Name, targetName)
@@ -1121,6 +1268,20 @@ func HandleHover(params HoverParams) *Hover {
 			Value: content,
 		},
 	}
+}
+
+// fieldValueString renders a field's value, honouring the evaluation
+// bindings of the fragment that owns it (loop iterations, template
+// parameters, with-block documents).
+func fieldValueString(tree *index.ProjectTree, f *parser.Field, frag *index.Fragment, node *index.ProjectNode) string {
+	if frag != nil && frag.EvalCtx != nil {
+		res := tree.EvaluateValue(f.Value, frag.EvalCtx)
+		if sv, ok := res.(*parser.StringValue); ok && sv.Quoted {
+			return fmt.Sprintf("\"%s\"", parser.EscapeString(sv.Value))
+		}
+		return tree.ValueToString(res)
+	}
+	return valueToString(tree, f.Value, node)
 }
 
 func valueToString(tree *index.ProjectTree, val parser.Value, ctx *index.ProjectNode) string {
@@ -1342,11 +1503,14 @@ func suggestSignalsForDS(tree *index.ProjectTree, dsName string, context *index.
 	if dsNode == nil {
 		// Fall back to a global walk.
 		norm := index.NormalizeName(dsName)
-		tree.Walk(func(n *index.ProjectNode) {
+		visit := func(n *index.ProjectNode) {
 			if dsNode == nil && n.Name == norm && tree.IsDataSource(n) {
 				dsNode = n
 			}
-		})
+		}
+		for _, n := range tree.Nodes() {
+			visit(n)
+		}
 	}
 	if dsNode == nil {
 		return nil
@@ -1591,7 +1755,7 @@ func suggestCUEEnums(container *index.ProjectNode, field string) *CompletionList
 
 		// Ensure strings are quoted
 		if v.Kind() == cue.StringKind && !strings.HasPrefix(str, "\"") {
-			str = fmt.Sprintf("\"%s\"", str)
+			str = fmt.Sprintf("\"%s\"", parser.EscapeString(str))
 		}
 
 		items = append(items, CompletionItem{
@@ -1807,7 +1971,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		if t, ok := tree.Templates[class]; ok {
 			// Find which file contains this template
 			var templateFile string
-			tree.Walk(func(n *index.ProjectNode) {
+			visit := func(n *index.ProjectNode) {
 				if templateFile != "" {
 					return
 				}
@@ -1819,7 +1983,10 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 						}
 					}
 				}
-			})
+			}
+			for _, n := range tree.Nodes() {
+				visit(n)
+			}
 			if templateFile != "" {
 				return []Location{{
 					URI: "file://" + templateFile,
@@ -1841,7 +2008,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		}
 		// Search globally for $class style template
 		var found *index.ProjectNode
-		tree.Walk(func(n *index.ProjectNode) {
+		visit := func(n *index.ProjectNode) {
 			if found != nil {
 				return
 			}
@@ -1849,7 +2016,10 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 			if index.NormalizeName(n.RealName) == normalizedClass {
 				found = n
 			}
-		})
+		}
+		for _, n := range tree.Nodes() {
+			visit(n)
+		}
 		if found != nil {
 			return nodeToLocations(found)
 		}
@@ -1867,7 +2037,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		if t, ok := tree.Templates[templateName]; ok {
 			// Find which file contains this template
 			var templateFile string
-			tree.Walk(func(n *index.ProjectNode) {
+			visit := func(n *index.ProjectNode) {
 				if templateFile != "" {
 					return
 				}
@@ -1879,7 +2049,10 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 						}
 					}
 				}
-			})
+			}
+			for _, n := range tree.Nodes() {
+				visit(n)
+			}
 			if templateFile != "" {
 				return []Location{{
 					URI: "file://" + templateFile,
@@ -1899,14 +2072,17 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 		}
 		// Search globally for $style template
 		var found *index.ProjectNode
-		tree.Walk(func(n *index.ProjectNode) {
+		visit := func(n *index.ProjectNode) {
 			if found != nil {
 				return
 			}
 			if index.NormalizeName(n.RealName) == templateName {
 				found = n
 			}
-		})
+		}
+		for _, n := range tree.Nodes() {
+			visit(n)
+		}
 		if found != nil {
 			return nodeToLocations(found)
 		}
@@ -2094,11 +2270,14 @@ func HandleIncomingCalls(params CallHierarchyIncomingCallsParams) []CallHierarch
 
 	// Resolve the node globally by name (simplification)
 	var node *index.ProjectNode
-	tree.Walk(func(n *index.ProjectNode) {
+	visit := func(n *index.ProjectNode) {
 		if n.RealName == nodeName {
 			node = n
 		}
-	})
+	}
+	for _, n := range tree.Nodes() {
+		visit(n)
+	}
 
 	if node == nil {
 		return nil
@@ -2149,11 +2328,14 @@ func HandleOutgoingCalls(params CallHierarchyOutgoingCallsParams) []CallHierarch
 	tree := snap.Tree()
 
 	var node *index.ProjectNode
-	tree.Walk(func(n *index.ProjectNode) {
+	visit := func(n *index.ProjectNode) {
 		if n.RealName == nodeName {
 			node = n
 		}
-	})
+	}
+	for _, n := range tree.Nodes() {
+		visit(n)
+	}
 
 	if node == nil {
 		return nil
@@ -2229,7 +2411,7 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 	}
 
 	var peers []*index.ProjectNode
-	tree.Walk(func(n *index.ProjectNode) {
+	visit := func(n *index.ProjectNode) {
 		if n.Parent == nil || n.Parent.Parent == nil {
 			return
 		}
@@ -2248,7 +2430,10 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 				peers = append(peers, n.Parent.Parent)
 			}
 		}
-	})
+	}
+	for _, n := range tree.Nodes() {
+		visit(n)
+	}
 	return peers
 }
 
@@ -2420,7 +2605,7 @@ func HandleReferences(params ReferenceParams) []Location {
 	}
 
 	// 2. References from Node Targets (Direct References)
-	tree.Walk(func(node *index.ProjectNode) {
+	visit := func(node *index.ProjectNode) {
 		if node.Target == canonical {
 			for _, frag := range node.Fragments {
 				if frag.IsObject {
@@ -2434,11 +2619,14 @@ func HandleReferences(params ReferenceParams) []Location {
 				}
 			}
 		}
-	})
+	}
+	for _, node := range tree.Nodes() {
+		visit(node)
+	}
 
 	// 3. String literal references (common for DataSources)
 	if tree.IsDataSource(canonical) {
-		tree.Walk(func(node *index.ProjectNode) {
+		visit := func(node *index.ProjectNode) {
 			for _, frag := range node.Fragments {
 				for _, def := range frag.Definitions {
 					if f, ok := def.(*parser.Field); ok {
@@ -2456,16 +2644,32 @@ func HandleReferences(params ReferenceParams) []Location {
 					}
 				}
 			}
-		})
+		}
+		for _, node := range tree.Nodes() {
+			visit(node)
+		}
 	}
 
 	return locations
 }
 
+// shorthandOf returns the SignalShorthand definition of a signal usage
+// node, when it was declared with the DataSource::Signal syntax.
+func shorthandOf(node *index.ProjectNode) (*parser.SignalShorthand, bool) {
+	for _, frag := range node.Fragments {
+		if sh, ok := frag.Source.(*parser.SignalShorthand); ok {
+			return sh, true
+		}
+	}
+	return nil, false
+}
+
 func getEvaluatedMetadata(tree *index.ProjectTree, node *index.ProjectNode, key string, container *index.ProjectNode) string {
 	f := tree.GetActiveField(node, key, container)
 	if f != nil {
-		return tree.ValueToString(tree.Evaluate(f.Value, node))
+		if s := tree.ValueToString(tree.ResolveFieldValue(*f, node)); s != "" {
+			return s
+		}
 	}
 	return node.Metadata[key]
 }
@@ -2491,6 +2695,38 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 				ds = node.Parent.Parent.Name
 			}
 		}
+	}
+
+	if sh, hasSh := shorthandOf(node); hasSh {
+		// Signal shorthand usage: type annotation first, then the
+		// datasource-side definition (which may come from a loaded
+		// document via `with json(...)`).
+		if typ == "" {
+			typ = sh.Type
+		}
+		if ds == "" {
+			ds = sh.DataSource
+		}
+		dsNode, shSig := tree.GetSignalInfo(node)
+		if dsNode != nil {
+			ds = strings.TrimLeft(dsNode.RealName, "+$")
+			defName := shSig
+			if defName == "" {
+				defName = sh.SignalName
+			}
+			if typ == "" {
+				sigs, okS := dsNode.Children["Signals"]
+				var defNode *index.ProjectNode
+				var okD bool
+				if okS {
+					defNode, okD = sigs.Children[index.NormalizeName(defName)]
+				}
+				if okD {
+					typ = getEvaluatedMetadata(tree, defNode, "Type", defNode.Parent)
+				}
+			}
+		}
+		_ = hasSh
 	}
 
 	if typ != "" || ds != "" {
@@ -2535,7 +2771,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 					if f, ok := def.(*parser.Field); ok {
 						key := f.Name
 						if key != "Type" && key != "NumberOfElements" && key != "NumberOfDimensions" && key != "Class" {
-							val := valueToString(tree, f.Value, defNode)
+							val := fieldValueString(tree, f, frag, defNode)
 							info += fmt.Sprintf("\n**%s**: `%s`", key, val)
 						}
 					}
@@ -2552,7 +2788,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 						if f, ok := def.(*parser.Field); ok {
 							key := f.Name
 							if key != "DataSource" && key != "Alias" && key != "Type" && key != "Class" && key != "NumberOfElements" && key != "NumberOfDimensions" {
-								val := valueToString(tree, f.Value, p)
+								val := fieldValueString(tree, f, frag, p)
 								extraInfo += fmt.Sprintf("\n- **%s** (%s): `%s`", key, gamName, val)
 							}
 						}
@@ -2649,7 +2885,7 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 	}
 
 	// 2. Check Direct Usages (Nodes targeting this node)
-	tree.Walk(func(n *index.ProjectNode) {
+	visit := func(n *index.ProjectNode) {
 		if n.Target == node {
 			if n.Parent != nil && (n.Parent.Name == "InputSignals" || n.Parent.Name == "OutputSignals") {
 				if n.Parent.Parent != nil && tree.IsGAM(n.Parent.Parent) {
@@ -2661,7 +2897,10 @@ func formatNodeInfo(tree *index.ProjectTree, node *index.ProjectNode, container 
 				}
 			}
 		}
-	})
+	}
+	for _, n := range tree.Nodes() {
+		visit(n)
+	}
 
 	if len(gams) > 0 {
 		uniqueGams := make(map[string]bool)
@@ -2726,7 +2965,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	if varName != "" {
 		// Rename variable definition(s) with this name
-		tree.Walk(func(n *index.ProjectNode) {
+		visit := func(n *index.ProjectNode) {
 			for name, vi := range n.Variables {
 				if name != varName || vi.Def == nil {
 					continue
@@ -2748,7 +2987,10 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 				}
 				addEdit(vi.File, rng, params.NewName)
 			}
-		})
+		}
+		for _, n := range tree.Nodes() {
+			visit(n)
+		}
 
 		// Rename all @varName reference sites
 		for _, ref := range tree.References {
@@ -2894,7 +3136,7 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 		}
 
 		// 3. Rename Implicit Node References (Signals in GAMs relying on name match)
-		tree.Walk(func(n *index.ProjectNode) {
+		visit := func(n *index.ProjectNode) {
 			if n.Target == targetNode {
 				hasAlias := false
 				for _, frag := range n.Fragments {
@@ -2917,7 +3159,10 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 					}
 				}
 			}
-		})
+		}
+		for _, n := range tree.Nodes() {
+			visit(n)
+		}
 
 		return &WorkspaceEdit{Changes: changes}
 	} else if targetField != nil {
@@ -3108,6 +3353,10 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 	isDataSource := func(n *index.ProjectNode) bool { return tree.IsDataSource(n) }
 	var hints []InlayHint
 	seenPositions := make(map[Position]bool)
+	// Shorthand "DS::Signal" usages: file|line -> column where the signal
+	// name starts. References before that column are the datasource part
+	// and get no class hint (the datasource is already written).
+	shorthandDS := make(map[string]int)
 
 	addHint := func(h InlayHint) {
 		if !seenPositions[h.Position] {
@@ -3116,7 +3365,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 		}
 	}
 
-	tree.Walk(func(node *index.ProjectNode) {
+	visit := func(node *index.ProjectNode) {
 		for _, frag := range node.Fragments {
 			if frag.File != path {
 				continue
@@ -3125,18 +3374,11 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 			// Signal Name Hint (::TYPE[SIZE])
 			if node.Parent != nil && (node.Parent.Name == "InputSignals" || node.Parent.Name == "OutputSignals") {
 				if sh, ok := frag.Source.(*parser.SignalShorthand); ok {
-					// Shorthand hint: single end-of-line hint combining DS class and
-					// resolved type (shown only when type is absent from the shorthand).
+					// Shorthand hint: type/size only. The datasource is
+					// already written as "DS::Signal", so repeating its
+					// class would be noise.
 					pos := frag.ObjectPos
-
-					var cls string
-					dsNode := tree.ResolveName(node, sh.DataSource, isDataSource)
-					if dsNode != nil {
-						cls = getEvaluatedMetadata(tree, dsNode, "Class", node)
-						if idx := strings.LastIndex(cls, "::"); idx != -1 {
-							cls = cls[idx+2:]
-						}
-					}
+					shorthandDS[frag.File+"|"+strconv.Itoa(sh.Position.Line)] = sh.SignalNamePosition.Column
 
 					var typeLabel string
 					if sh.Type == "" {
@@ -3150,7 +3392,7 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 						}
 					}
 
-					label := cls + typeLabel
+					label := strings.TrimPrefix(typeLabel, ": ")
 					if label != "" {
 						// 9999 anchors the hint to the end of the line in all LSP clients.
 						addHint(InlayHint{
@@ -3286,7 +3528,10 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 				}
 			}
 		}
-	})
+	}
+	for _, node := range tree.Nodes() {
+		visit(node)
+	}
 
 	// Add logic for general object references
 	for _, ref := range tree.References {
@@ -3317,6 +3562,11 @@ func HandleInlayHint(params InlayHintParams) []InlayHint {
 			}
 		}
 		if isClass {
+			continue
+		}
+
+		if sigCol, ok := shorthandDS[ref.File+"|"+strconv.Itoa(ref.Position.Line)]; ok && ref.Position.Column < sigCol {
+			// Datasource part of a "DS::Signal" shorthand.
 			continue
 		}
 
