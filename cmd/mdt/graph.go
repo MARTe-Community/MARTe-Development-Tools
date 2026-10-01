@@ -133,6 +133,7 @@ func runGraph(args []string) {
 		}
 
 		v := validator.NewValidator(tree, projectRoot, overrides)
+		v.MissingFilesAreWarnings = true
 		v.ValidateProject(context.Background())
 
 		nodeDiags := make(map[*index.ProjectNode][]graph.NodeDiag)
@@ -458,6 +459,7 @@ func runGraphLSP(port int) {
 		}
 
 		v := validator.NewValidator(tree, view.Root(), nil)
+		v.MissingFilesAreWarnings = true
 		v.ValidateProject(context.Background())
 
 		nodeDiags := make(map[*index.ProjectNode][]graph.NodeDiag)

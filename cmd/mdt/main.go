@@ -504,8 +504,8 @@ func runCheck(args []string) {
 	}
 
 	v := validator.NewValidator(tree, ".", overrides)
+	v.MissingFilesAreWarnings = true
 	v.ValidateProject(context.Background())
-
 	for _, diag := range v.Diagnostics {
 		level := logger.Colorize("ERROR", logger.ColorRed)
 		if diag.Level == validator.LevelWarning {

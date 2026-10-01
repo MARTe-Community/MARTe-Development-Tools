@@ -35,8 +35,10 @@ func Load(format, path string) (parser.Value, error) {
 		return loadJSON(path)
 	case "csv":
 		return loadCSV(path)
+	case "xlsx", "xls", "excel":
+		return loadXLSX(path)
 	default:
-		return nil, fmt.Errorf("unsupported structured format %q (supported: json, csv)", format)
+		return nil, fmt.Errorf("unsupported structured format %q (supported: json, csv, xlsx)", format)
 	}
 }
 

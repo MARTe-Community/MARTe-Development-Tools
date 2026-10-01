@@ -472,20 +472,23 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if valStr, ok := b.Overrides[vdef.Name]; ok {
 						if !vdef.IsConst {
-							// fmt.Printf("[DEBUG-BUILDER] Checking %s, type=%s, val=%s\n", vdef.Name, vdef.TypeExpr, valStr)
 							if shouldAutoQuoteWithDef(valStr, vdef) {
-								// fmt.Printf("[DEBUG-BUILDER] Auto-quoting %s\n", vdef.Name)
 								valStr = "\"" + valStr + "\""
 							}
-							p := parser.NewParser("Temp = " + valStr)
-							cfg, err := p.Parse()
-							if err != nil {
-								fmt.Fprintf(os.Stderr, "Warning: failed to parse variable override for %s: %v\n", vdef.Name, err)
-							} else if len(cfg.Definitions) > 0 {
-								if f, ok := cfg.Definitions[0].(*parser.Field); ok {
-									b.variables[vdef.Name] = f.Value
+							ovVal := parser.ParseValueOverride(valStr)
+							if ovVal == nil {
+								fmt.Fprintf(os.Stderr, "Warning: failed to parse variable override for %s: %q\n", vdef.Name, valStr)
+							} else {
+								// Structured types merge field-by-field, so
+								// `-vCFG='{ board_id = 2 }'` replaces only that
+								// field and keeps the rest of the default
+								// (which may reference other variables).
+								if merged, ok := tree.MergeStructOverride(vdef, ovVal); ok {
+									b.variables[vdef.Name] = merged
 									continue
 								}
+								b.variables[vdef.Name] = ovVal
+								continue
 							}
 						}
 					}

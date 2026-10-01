@@ -1,5 +1,9 @@
 //# Syntax Showcase — external structured data.
 //#
+//# The path may also come from a variable: `with json(@data_file) as …`.
+//# A missing file is a warning in editors and `mdt check`, and an error
+//# for `mdt build`.
+//#
 //# Loads data/epics_cfg.json and unrolls one signal entry per member of
 //# the "signals" object. Relative paths resolve against the directory
 //# of the file containing the `with` block.

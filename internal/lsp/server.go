@@ -732,6 +732,7 @@ func activateSnapshot(view *cache.View, snap *cache.Snapshot) {
 		return
 	}
 	v := validator.NewValidator(snap.Tree(), view.Root(), nil)
+	v.MissingFilesAreWarnings = true
 	v.Activate(context.Background())
 }
 
@@ -1060,6 +1061,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 
 	// Semantic Validation
 	v := validator.NewValidator(snap.Tree(), snap.View().Root(), nil)
+	v.MissingFilesAreWarnings = true
 	v.ValidateProject(ctx)
 
 	if ctx.Err() != nil {

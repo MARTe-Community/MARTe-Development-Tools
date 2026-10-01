@@ -125,6 +125,13 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 
 		fmt.Fprintf(f.writer, "%s}", indentStr)
 		return d.Subnode.EndPosition.Line
+	case *parser.TypeDefinition:
+		fmt.Fprintf(f.writer, "%stype %s {", indentStr, d.Name)
+		for _, field := range d.Fields {
+			fmt.Fprintf(f.writer, "\n%s  %s: %s,", indentStr, field.Name, field.TypeExpr)
+		}
+		fmt.Fprintf(f.writer, "\n%s}", indentStr)
+		return d.Position.Line
 	case *parser.VariableDefinition:
 		macro := "#var"
 		if d.IsConst {

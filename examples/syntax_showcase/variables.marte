@@ -27,3 +27,19 @@ let Period_us: float = (1.0e6 / @a_sci)
 //# work in field values and conditions, but not in variable initializers.)
 let WeightedSum: int = (2 + 3 * 4)
 
+// ---------------------------------------------------------------
+// Structured types (CUE-style): declare, instantiate, access.
+type ADCConf_T {
+  device_name: str,
+  board_id: uint8,
+  frequency: uint32
+}
+
+#var sample_freq: uint32 = 1000
+var ADC_A: ADCConf_T = {
+  device_name = "/dev/ttyX",
+  board_id = 3,
+  frequency = @sample_freq
+}
+// Override partially from the CLI:
+//   mdt build -vADC_A='{ board_id = 7 }'

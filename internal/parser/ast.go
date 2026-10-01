@@ -246,6 +246,54 @@ func (v *VariableDefinition) End() Position {
 }
 func (v *VariableDefinition) isDefinition() {}
 
+// TypeDefinition declares a named structured type:
+//
+//	type ADCConf_T {
+//	    device_name: str,
+//	    board_id: uint8,
+//	}
+//
+// Fields are name/type pairs. Type expressions use the same syntax as
+// variable types (scalars, lists, node references, regex constraints) plus
+// references to other declared types. Values of such variables are struct
+// literals (`{ field = value, ... }`) and are validated against the fields.
+type TypeDefinition struct {
+	Position Position
+	Name     string
+	Fields   []*TypeField
+}
+
+func (t *TypeDefinition) Pos() Position { return t.Position }
+func (t *TypeDefinition) End() Position {
+	if len(t.Fields) > 0 {
+		return t.Fields[len(t.Fields)-1].End()
+	}
+	return Position{Line: t.Position.Line, Column: t.Position.Column + len("type ") + len(t.Name)}
+}
+func (t *TypeDefinition) isDefinition() {}
+
+// Field returns the field declaration with the given name, or nil.
+func (t *TypeDefinition) Field(name string) *TypeField {
+	for _, f := range t.Fields {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// TypeField is one `name: type` entry of a structured type.
+type TypeField struct {
+	Position Position
+	Name     string
+	TypeExpr string
+}
+
+func (f *TypeField) Pos() Position { return f.Position }
+func (f *TypeField) End() Position {
+	return Position{Line: f.Position.Line, Column: f.Position.Column + len(f.Name) + 2 + len(f.TypeExpr)}
+}
+
 type VariableReferenceValue struct {
 	Position Position
 	Name     string

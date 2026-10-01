@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ type ProjectTree struct {
 	NodeMap        map[string][]*ProjectNode
 	Templates      map[string]*parser.TemplateDefinition
 	TemplateFiles  map[string]string // Maps template name to the file it came from
+	// Types holds structured type declarations (`type Name { ... }`) by name.
+	Types map[string]*parser.TypeDefinition
 	// knownFiles tracks which files already contribute to the tree. A file
 	// that is not in here has nothing to remove, so AddFile can skip the
 	// tree-wide removal walks. Without it, adding N files costs O(N x nodes)
@@ -189,6 +192,74 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 	return nil
 }
 
+// MergeStructOverride merges a partial struct override into the default value
+// of a variable declared with a structured type:
+//
+//	-vADC_A='{ board_id = 2 }'
+//
+// Fields not present in the override keep their default (which may still be an
+// expression referencing other variables). Nested structured fields merge
+// recursively. It reports false when the variable is not struct-typed or the
+// override is not a struct literal, in which case callers keep their existing
+// whole-value replacement behaviour. Unknown fields are not rejected here;
+// validation flags them against the type.
+func (pt *ProjectTree) MergeStructOverride(vdef *parser.VariableDefinition, override parser.Value) (parser.Value, bool) {
+	if vdef == nil || override == nil {
+		return nil, false
+	}
+	typ, ok := pt.Types[strings.TrimSpace(vdef.TypeExpr)]
+	if !ok {
+		return nil, false
+	}
+	ov, ok := override.(*parser.MapValue)
+	if !ok {
+		return nil, false
+	}
+	return pt.mergeStructFields(typ, vdef.DefaultValue, ov), true
+}
+
+// mergeStructFields overlays the override's fields onto the default struct,
+// recursing into fields declared with a structured type.
+func (pt *ProjectTree) mergeStructFields(typ *parser.TypeDefinition, def parser.Value, ov *parser.MapValue) *parser.MapValue {
+	defMap, _ := def.(*parser.MapValue)
+
+	out := &parser.MapValue{
+		Position: ov.Position,
+		Keys:     []string{},
+		Values:   make(map[string]parser.Value),
+	}
+	if defMap != nil {
+		for _, k := range defMap.Keys {
+			out.Keys = append(out.Keys, k)
+			out.Values[k] = defMap.Values[k]
+		}
+	}
+
+	for _, k := range ov.Keys {
+		ovVal := ov.Values[k]
+		field := typ.Field(k)
+		if field != nil {
+			if nested, isType := pt.Types[strings.TrimSpace(field.TypeExpr)]; isType {
+				if ovSub, isMap := ovVal.(*parser.MapValue); isMap {
+					out.Values[k] = pt.mergeStructFields(nested, out.Values[k], ovSub)
+					continue
+				}
+			}
+		}
+		out.Values[k] = ovVal
+	}
+
+	// Rebuild the key list from the final values so override-only fields are
+	// kept, and sort for deterministic rendering.
+	keys := make([]string, 0, len(out.Values))
+	for k := range out.Values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out.Keys = keys
+	return out
+}
+
 // skipWorkspaceDir reports whether a directory entry should be left out of the
 // workspace scan. Hidden directories (caches, .git, tool state) are skipped;
 // the scan root itself is never filtered, so pointing the workspace at a
@@ -290,6 +361,7 @@ func NewProjectTree() *ProjectTree {
 		FileReferences: make(map[string][]Reference),
 		Templates:      make(map[string]*parser.TemplateDefinition),
 		TemplateFiles:  make(map[string]string),
+		Types:          make(map[string]*parser.TypeDefinition),
 		knownFiles:     make(map[string]struct{}),
 	}
 }
@@ -699,6 +771,9 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 				}
 			}
 			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas, true, id+":body")
+		case *parser.TypeDefinition:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.Types[d.Name] = d
 		case *parser.TemplateDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Templates[d.Name] = d
@@ -854,6 +929,9 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 				}
 			}
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":body")
+		case *parser.TypeDefinition:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.Types[d.Name] = d
 		case *parser.TemplateDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Templates[d.Name] = d
@@ -1120,20 +1198,12 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 				}
 			}
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":body")
+		case *parser.TypeDefinition:
+			// Type declarations carry no runtime value; the definition is
+			// already registered in pt.Types during indexing.
 		case *parser.TemplateDefinition:
 			pt.Templates[d.Name] = d
 			pt.TemplateFiles[d.Name] = file
-			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
-			for _, p := range d.Parameters {
-				node.Variables[p.Name] = VariableInfo{
-					Def:  &parser.VariableDefinition{Name: p.Name, Position: d.Position, TypeExpr: "template parameter: " + p.TypeExpr},
-					File: file,
-				}
-				if p.DefaultValue != nil {
-					pt.IndexValue(file, p.DefaultValue)
-				}
-			}
-			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":template")
 		case *parser.WithBlock:
 			id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 			node.Variables[d.BindName] = VariableInfo{
@@ -1630,7 +1700,7 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 		base := pt.EvaluateValue(v.Base, ctx)
 		if m, ok := base.(*parser.MapValue); ok {
 			if val, found := m.Lookup(v.Member); found {
-				return val
+				return pt.EvaluateValue(val, ctx)
 			}
 		}
 		return nil
@@ -2134,7 +2204,9 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		base := pt.evaluate(v.Base, ctx)
 		if m, ok := base.(*parser.MapValue); ok {
 			if val, found := m.Lookup(v.Member); found {
-				return val
+				// The field may itself be a variable reference or an
+				// expression; evaluate it in the same context.
+				return pt.evaluate(val, ctx)
 			}
 		}
 		// Unresolvable: return the access node itself so callers can
@@ -2240,6 +2312,11 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	// Clone TemplateFiles
 	for k, v := range pt.TemplateFiles {
 		newPT.TemplateFiles[k] = v
+	}
+
+	// Clone Types
+	for k, v := range pt.Types {
+		newPT.Types[k] = v
 	}
 
 	// Clone knownFiles: without it the clone would believe it holds no files

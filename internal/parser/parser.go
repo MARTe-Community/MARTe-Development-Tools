@@ -124,6 +124,12 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 		p.next()
 		name := tok.Value
 
+		// `type Name { field: type, ... }` — parsed contextually (no keyword
+		// reservation) so existing configs using `type` as a name keep working.
+		if name == "type" && p.peek().Type == TokenIdentifier && p.peekN(1).Type == TokenLBrace {
+			return p.parseTypeDefinition(tok)
+		}
+
 		// `with json("file") as name begin … end`
 		if name == "with" && p.atWithLoader() {
 			return p.parseWith(tok)
@@ -1034,6 +1040,14 @@ func (p *Parser) parseAtom() (Value, bool) {
 		}
 		fallthrough
 	case TokenLBrace:
+		// Struct literal: `{ name = value, ... }`. A leading `identifier =`
+		// switches the brace from list to struct syntax; plain lists are
+		// unchanged.
+		if tok.Value == "{" || tok.Type == TokenLBrace {
+			if p.peek().Type == TokenIdentifier && p.peekN(1).Type == TokenEqual {
+				return p.parseStructLiteral(tok)
+			}
+		}
 		arr := &ArrayValue{Position: tok.Position}
 		for {
 			t := p.peek()
@@ -1121,6 +1135,165 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 	}, true
 }
 
+// parseTypeDefinition parses `type Name { field: type, ... }`. Fields are
+// separated by commas and/or newlines; a trailing comma is allowed.
+func (p *Parser) parseTypeDefinition(startTok Token) (Definition, bool) {
+	nameTok := p.next()
+	if nameTok.Type != TokenIdentifier {
+		p.addError(nameTok.Position, "expected type name")
+		return nil, false
+	}
+	if p.next().Type != TokenLBrace {
+		p.addError(nameTok.Position, "expected { after type name")
+		return nil, false
+	}
+
+	def := &TypeDefinition{Position: startTok.Position, Name: nameTok.Value}
+	seen := make(map[string]Token)
+
+	for {
+		tok := p.peek()
+		switch {
+		case tok.Type == TokenEOF:
+			p.addError(tok.Position, "unexpected EOF, expected } in type definition")
+			return nil, false
+		case tok.Type == TokenRBrace:
+			p.next()
+			if len(def.Fields) == 0 {
+				p.addError(tok.Position, fmt.Sprintf("type '%s' has no fields", def.Name))
+				return nil, false
+			}
+			return def, true
+		case tok.Type == TokenComma:
+			p.next()
+			continue
+		case tok.Type == TokenComment:
+			p.next()
+			continue
+		case tok.Type != TokenIdentifier:
+			p.addError(tok.Position, "expected field name in type definition")
+			return nil, false
+		}
+
+		fieldName := p.next()
+		if prev, dup := seen[fieldName.Value]; dup {
+			p.addError(fieldName.Position, fmt.Sprintf("duplicate field '%s' in type '%s' (first declared at %d:%d)", fieldName.Value, def.Name, prev.Position.Line, prev.Position.Column))
+			return nil, false
+		}
+		seen[fieldName.Value] = fieldName
+
+		if p.next().Type != TokenColon {
+			p.addError(fieldName.Position, "expected : after field name")
+			return nil, false
+		}
+
+		var typeTokens []Token
+		fieldLine := fieldName.Position.Line
+		for {
+			t := p.peek()
+			if t.Type == TokenEOF || t.Type == TokenComma || t.Type == TokenRBrace {
+				break
+			}
+			if t.Type == TokenComment {
+				break
+			}
+			if t.Position.Line > fieldLine {
+				break
+			}
+			if t.Type == TokenEqual && p.peekN(1).Type == TokenSymbol && p.peekN(1).Value == "~" {
+				p.next()
+				p.next()
+				typeTokens = append(typeTokens, Token{Type: TokenSymbol, Value: "=~", Position: t.Position})
+				continue
+			}
+			typeTokens = append(typeTokens, p.next())
+		}
+
+		if len(typeTokens) == 0 {
+			p.addError(fieldName.Position, fmt.Sprintf("expected a type after '%s:'", fieldName.Value))
+			return nil, false
+		}
+
+		def.Fields = append(def.Fields, &TypeField{
+			Position: fieldName.Position,
+			Name:     fieldName.Value,
+			TypeExpr: joinTypeTokens(typeTokens),
+		})
+	}
+}
+
+// parseStructLiteral parses `{ field = value, ... }` into a MapValue. Trailing
+// commas are allowed; values are full expressions (arithmetic, @references,
+// nested structs).
+func (p *Parser) parseStructLiteral(openTok Token) (Value, bool) {
+	values := make(map[string]Value)
+	seen := make(map[string]Token)
+
+	for {
+		tok := p.peek()
+		switch {
+		case tok.Type == TokenEOF:
+			p.addError(openTok.Position, "unexpected EOF, expected } in struct literal")
+			return nil, false
+		case tok.Type == TokenRBrace:
+			p.next() // consume }
+			return NewMapValue(openTok.Position, values), true
+		case tok.Type == TokenComma, tok.Type == TokenComment:
+			p.next()
+			continue
+		case tok.Type != TokenIdentifier:
+			// Newline-separated fields are fine: anything that is not a
+			// field name here (e.g. a stray token) is an error.
+			p.addError(tok.Position, "expected field name in struct literal")
+			return nil, false
+		}
+
+		key := p.next()
+		if prev, dup := seen[key.Value]; dup {
+			p.addError(key.Position, fmt.Sprintf("duplicate field '%s' in struct literal (first at %d:%d)", key.Value, prev.Position.Line, prev.Position.Column))
+			return nil, false
+		}
+		seen[key.Value] = key
+
+		eq := p.next()
+		if eq.Type != TokenEqual {
+			p.addError(key.Position, "expected = after field name in struct literal")
+			return nil, false
+		}
+
+		val, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+		values[key.Value] = val
+	}
+}
+
+// ParseValue parses src purely as a value expression -- scalars, lists, and
+// struct literals (`{ field = value, ... }`). Value context matters: the same
+// braces at statement level define an object instead.
+func ParseValue(src string) (Value, error) {
+	p := NewParser(src)
+	val, ok := p.parseValue()
+	if !ok {
+		if len(p.errors) > 0 {
+			return nil, p.errors[0]
+		}
+		return nil, fmt.Errorf("invalid value expression")
+	}
+	return val, nil
+}
+
+// ParseValueOverride parses a raw `-v` override value (scalar, list, or
+// struct literal) and returns it, or nil when it does not parse.
+func ParseValueOverride(src string) Value {
+	val, err := ParseValue(src)
+	if err != nil {
+		return nil
+	}
+	return val
+}
+
 // joinTypeTokens renders a sequence of type-expression tokens into a compact
 // string, e.g. "[&GAM]" rather than "[ & GAM ]". Tokens are space-separated by
 // default, except around bracket/paren/comma delimiters and after a leading
@@ -1204,12 +1377,21 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 	}, true
 }
 
+// withFormats are the structured loader formats accepted after `with`.
+var withFormats = map[string]bool{
+	"json":  true,
+	"csv":   true,
+	"xls":   true,
+	"xlsx":  true,
+	"excel": true,
+}
+
 // atWithLoader reports whether a `with <format>(` loader call follows.
 // Only then is `with` treated as a directive; `with = 3` remains a
 // plain field.
 func (p *Parser) atWithLoader() bool {
 	t1 := p.peek()
-	if t1.Type != TokenIdentifier || (t1.Value != "json" && t1.Value != "csv") {
+	if t1.Type != TokenIdentifier || !withFormats[t1.Value] {
 		return false
 	}
 	t2 := p.peekN(1)

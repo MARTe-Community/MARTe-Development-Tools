@@ -177,6 +177,52 @@ let Period_us: float = (1.0e6 / 1.0e6) // constant, requires a value
 - Command-line override: `mdt check -vName=value ...` rebinds a `var`
   before validation; `let` constants cannot be overridden.
 
+### 6.1 Structured types
+
+`type` declares a named structured type with CUE-style fields. Values of
+such variables are struct literals, fields are accessed with `.`:
+
+```marte
+type ADCConf_T {
+  device_name: str,
+  board_id: uint8,
+  frequency: uint32
+}
+
+var ADC_A: ADCConf_T = {
+  device_name = "/dev/tty0",
+  board_id = 3,
+  frequency = @sample_freq      // fields may reference other variables
+}
+
+Object = {
+  Class = ...
+  Frequency = @ADC_A.frequency   // member access resolves at build time
+}
+```
+
+- Field types use the same expressions as variables (scalars, lists,
+  `&Reference`, regex constraints) plus references to other declared
+  types; a fixed-width integer (`uint8`, `int16`, …) constrains the
+  value to its range.
+- Validation is closed: every declared field must be present with a
+  conforming value, and unknown fields are rejected (`device_name:
+  str` accepts `str` and `string`).
+- `type` is parsed contextually — `type` remains usable as an
+  identifier elsewhere.
+- Struct literals (`{ field = value, ... }`) are values: braces with a
+  leading `name =` become a struct, plain braces stay lists
+  (`{ 1, 2, 3 }`).
+- Command-line overrides merge field-by-field, so a partial override
+  keeps the remaining defaults:
+
+```marte
+mdt build -vADC_A='{ board_id = 7 }' config.marte
+```
+
+- Overrides are validated against the type (an unknown field or an
+  out-of-range value is an error).
+
 ## 7. Conditionals
 
 ```marte
@@ -388,9 +434,14 @@ with json("data/epics_cfg.json") as epics_cfg begin
 end
 ```
 
-- `with <format>("path") as <name>` — supported formats: `json`, `csv`.
-  The path expression may use variables and `..`; relative paths resolve
-  against the directory of the file containing the block.
+- `with <format>("path") as <name>` — supported formats: `json`, `csv`
+  and Excel workbooks (`xlsx`; `xls` and `excel` are aliases). The path
+  expression may use variables and `..`; relative paths resolve against
+  the directory of the file containing the block. Excel files are read
+  from their first worksheet like CSV: the first row names the columns
+  and every row becomes a dict of strings; shared strings, formula
+  results and gaps are handled. Legacy binary `.xls` files are not
+  supported — save the workbook as `.xlsx`.
 - `begin … end` and `{ … }` are both accepted as body delimiters.
 - JSON mapping: object → dict, array → list, integral number → int,
   other numbers → float, string → string, bool → bool, `null` → key
@@ -402,6 +453,12 @@ end
   `foreach key, value in @map do … end`). Keys iterate in sorted order.
 - The whole document or any member can be assigned to a field; dicts
   render as `{ key = value … }` blocks in build output.
+- **Variable paths**: the path may be any expression, including variable
+  references — `with json(@data_file) as cfg` (same for `csv`).
+- **Missing documents**: `mdt check` and editors report a **warning**
+  ("assuming the documented fields exist") and treat the binding as an
+  empty document, so references to it do not cascade into errors.
+  `mdt build` treats a missing document as an **error** and fails.
 - A missing or malformed file is reported as
   `with <format>("path"): …` at the block position.
 

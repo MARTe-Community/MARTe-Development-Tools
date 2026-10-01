@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/errors"
@@ -35,9 +36,17 @@ type Diagnostic struct {
 }
 
 type Validator struct {
-	Diagnostics     []Diagnostic
-	Tree            *index.ProjectTree
-	Schema          *schema.Schema
+	Diagnostics []Diagnostic
+	Tree        *index.ProjectTree
+	Schema      *schema.Schema
+	// MissingFilesAreWarnings makes a failed `with` document load a warning
+	// whose binding resolves to an empty document, instead of an error.
+	// Editors and `mdt check` set it; `mdt build` keeps the strict default so
+	// a missing file fails the build.
+	MissingFilesAreWarnings bool
+
+	reportedLoadFailures map[string]bool
+
 	Overrides       map[string]parser.Value
 	Variables       map[string]parser.Value
 	RawOverrides    map[string]string
@@ -64,14 +73,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	}
 
 	for name, valStr := range overrides {
-		p := parser.NewParser("Temp = " + valStr)
-		cfg, _ := p.Parse()
-		if cfg != nil && len(cfg.Definitions) > 0 {
-			if f, ok := cfg.Definitions[0].(*parser.Field); ok {
-				v.Overrides[name] = f.Value
-				v.Variables[name] = f.Value
-			}
-		}
+		v.setOverrideValue(name, valStr, nil)
 	}
 
 	// Also collect variables from Tree
@@ -82,16 +84,7 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 			}
 
 			if valStr, ok := overrides[k]; ok {
-				if shouldAutoQuoteWithDef(valStr, varInfo.Def) {
-					p := parser.NewParser("Temp = \"" + valStr + "\"")
-					cfg, _ := p.Parse()
-					if cfg != nil && len(cfg.Definitions) > 0 {
-						if f, ok := cfg.Definitions[0].(*parser.Field); ok {
-							v.Overrides[k] = f.Value
-							v.Variables[k] = f.Value
-						}
-					}
-				}
+				v.setOverrideValue(k, valStr, varInfo.Def)
 			}
 		}
 	})
@@ -313,10 +306,30 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 				resolved := loader.ResolvePath(ed.File, v.ValueToString(d.Path, ed.Ctx))
 				val, err := v.loadStructured(resolved, d.Format)
 				if err != nil {
-					v.report(node, "with_load_failed", LevelError,
-						fmt.Sprintf("with %s(%q): %v", d.Format, resolved, err),
-						d.Position, ed.File)
-					continue
+					if err == errAlreadyReported {
+						if v.MissingFilesAreWarnings {
+							val = parser.NewMapValue(d.Position, map[string]parser.Value{})
+						} else {
+							continue
+						}
+					} else {
+						level := LevelError
+						summary := "field references will not resolve"
+						if v.MissingFilesAreWarnings {
+							level = LevelWarning
+							summary = "assuming the documented fields exist"
+							// Tolerant mode: bind an empty document so member
+							// references and iterations over the binding stay
+							// quiet instead of cascading into errors.
+							val = parser.NewMapValue(d.Position, map[string]parser.Value{})
+						}
+						v.report(node, "with_load_failed", level,
+							fmt.Sprintf("with %s(%q): %v (%s)", d.Format, resolved, err, summary),
+							d.Position, ed.File)
+						if val == nil {
+							continue
+						}
+					}
 				}
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
 				subCtx := &index.EvaluationContext{
@@ -386,16 +399,7 @@ func (v *Validator) Activate(ctx context.Context) {
 				}
 
 				if valStr, ok := v.RawOverrides[k]; ok {
-					if shouldAutoQuoteWithDef(valStr, varInfo.Def) {
-						p := parser.NewParser("Temp = \"" + valStr + "\"")
-						cfg, _ := p.Parse()
-						if cfg != nil && len(cfg.Definitions) > 0 {
-							if f, ok := cfg.Definitions[0].(*parser.Field); ok {
-								v.Overrides[k] = f.Value
-								v.Variables[k] = f.Value
-							}
-						}
-					}
+					v.setOverrideValue(k, valStr, varInfo.Def)
 				}
 			}
 		})
@@ -1209,16 +1213,28 @@ func (v *Validator) loadStructured(path, format string) (parser.Value, error) {
 	if v.loadCache == nil {
 		v.loadCache = make(map[string]parser.Value)
 	}
+	if v.reportedLoadFailures == nil {
+		v.reportedLoadFailures = make(map[string]bool)
+	}
+	// Activation runs several passes; report a failed load once per document.
+	if v.reportedLoadFailures[path+"|"+format] {
+		return nil, errAlreadyReported
+	}
 	if val, ok := v.loadCache[path]; ok {
 		return val, nil
 	}
 	val, err := loader.Load(format, path)
 	if err != nil {
+		v.reportedLoadFailures[path+"|"+format] = true
 		return nil, err
 	}
 	v.loadCache[path] = val
 	return val, nil
 }
+
+// errAlreadyReported marks a load failure whose diagnostic was already
+// emitted on an earlier activation pass.
+var errAlreadyReported = fmt.Errorf("previously reported")
 
 // activeConditionalBranch returns the value list of the first branch whose
 // condition evaluates to true, falling back to the #else branch.
@@ -2443,8 +2459,19 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 						continue
 					}
 
+					// A struct literal needs a declared structured type. A
+					// bare undeclared name with a non-struct value stays a
+					// node/class reference (established convention).
+					if _, isStructVal := vdef.DefaultValue.(*parser.MapValue); isStructVal &&
+						!v.isDeclaredType(vdef.TypeExpr) && isBareTypeName(vdef.TypeExpr) {
+						v.report(node, "unknown_type", LevelError,
+							fmt.Sprintf("Unknown type '%s' for variable '%s' (declare it with `type %s { ... }`)", vdef.TypeExpr, vdef.Name, vdef.TypeExpr),
+							vdef.Position, frag.File)
+						continue
+					}
+
 					// Compile Type
-					typeCUE := translateTypeToCUE(vdef.TypeExpr)
+					typeCUE := v.translateVarTypeToCUE(vdef.TypeExpr, map[string]bool{})
 					typeVal := ctx_cue.CompileString(typeCUE)
 					if typeVal.Err() != nil {
 						v.report(node, "invalid_variable_type", LevelError,
@@ -2453,8 +2480,16 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 						continue
 					}
 
-					if vdef.DefaultValue != nil {
-						valInterface := v.ValueToInterface(vdef.DefaultValue, node)
+					// Validate the effective value: an override (-v) replaces
+					// (or, for structured types, merges into) the default, so
+					// overrides are checked against the declared type too.
+					effective := vdef.DefaultValue
+					if ov, ok := v.Overrides[vdef.Name]; ok {
+						effective = ov
+					}
+
+					if effective != nil {
+						valInterface := v.ValueToInterface(effective, node)
 						valVal := ctx_cue.Encode(valInterface)
 
 						// Unify
@@ -2604,6 +2639,97 @@ func (v *Validator) checkTemplateUse(inst *parser.TemplateInstantiation, file st
 	}
 }
 
+// setOverrideValue parses a raw `-v` override and stores it. When the target
+// variable is declared with a structured type, a struct override is merged
+// into the default field-by-field, so `-vCFG='{ board_id = 2 }'` replaces only
+// that field.
+func (v *Validator) setOverrideValue(name, valStr string, def *parser.VariableDefinition) {
+	if def != nil && shouldAutoQuoteWithDef(valStr, def) {
+		valStr = "\"" + valStr + "\""
+	}
+	ovVal := parser.ParseValueOverride(valStr)
+	if ovVal == nil {
+		return
+	}
+	if def != nil {
+		if merged, ok := v.Tree.MergeStructOverride(def, ovVal); ok {
+			v.Overrides[name] = merged
+			v.Variables[name] = merged
+			return
+		}
+	}
+	v.Overrides[name] = ovVal
+	v.Variables[name] = ovVal
+}
+
+// builtinTypeNames are scalar type expressions that never denote a `type`
+// declaration reference.
+var builtinTypeNames = map[string]bool{
+	"string": true, "str": true, "int": true, "uint": true, "float": true,
+	"bool": true, "number": true, "any": true,
+	"int8": true, "int16": true, "int32": true, "int64": true,
+	"uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float16": true, "float32": true, "float64": true,
+}
+
+// isBareTypeName reports whether typeExpr is a single identifier that could be
+// a structured type reference (as opposed to a scalar/list/union expression).
+func isBareTypeName(typeExpr string) bool {
+	e := strings.TrimSpace(typeExpr)
+	if e == "" || strings.ContainsAny(e, "[]|&=~ \"(){}") {
+		return false
+	}
+	if builtinTypeNames[e] {
+		return false
+	}
+	for _, r := range e {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+// translateVarTypeToCUE translates a variable/field type expression to CUE,
+// resolving names declared with `type` into closed struct constraints. The
+// expanding set guards against recursive type references.
+func (v *Validator) translateVarTypeToCUE(typeExpr string, expanding map[string]bool) string {
+	expr := strings.TrimSpace(typeExpr)
+	if t, ok := v.Tree.Types[expr]; ok {
+		return v.structTypeToCUE(t, expanding)
+	}
+	// A list of structured types, e.g. [ADCConf_T].
+	if strings.HasPrefix(expr, "[") && strings.HasSuffix(expr, "]") {
+		inner := strings.TrimSpace(expr[1 : len(expr)-1])
+		if _, isType := v.Tree.Types[inner]; isType {
+			return "[..." + v.translateVarTypeToCUE(inner, expanding) + "]"
+		}
+	}
+	return translateTypeToCUE(expr)
+}
+
+// structTypeToCUE renders a declared type as a closed CUE struct: fields are
+// required, unknown fields are rejected.
+func (v *Validator) structTypeToCUE(t *parser.TypeDefinition, expanding map[string]bool) string {
+	if expanding[t.Name] {
+		return "_"
+	}
+	expanding[t.Name] = true
+	defer delete(expanding, t.Name)
+
+	parts := make([]string, 0, len(t.Fields))
+	for _, f := range t.Fields {
+		parts = append(parts, fmt.Sprintf("%s: %s", f.Name, v.translateVarTypeToCUE(f.TypeExpr, expanding)))
+	}
+	return "close({" + strings.Join(parts, ", ") + "})"
+}
+
+// isDeclaredType reports whether typeExpr names a `type` declaration.
+func (v *Validator) isDeclaredType(typeExpr string) bool {
+	_, ok := v.Tree.Types[strings.TrimSpace(typeExpr)]
+	return ok
+}
+
 func translateTypeToCUE(typeExpr string) string {
 	clean := strings.ReplaceAll(typeExpr, " ", "")
 	if clean == "" {
@@ -2634,9 +2760,23 @@ func translateTypeToCUE(typeExpr string) string {
 			return "string"
 		}
 		switch t {
-		case "int8", "int16", "int32", "int64":
+		case "str":
+			return "string"
+		case "int8":
+			return "int & >=-128 & <=127"
+		case "int16":
+			return "int & >=-32768 & <=32767"
+		case "int32":
+			return "int & >=-2147483648 & <=2147483647"
+		case "int64":
 			return "int"
-		case "uint8", "uint16", "uint32", "uint64":
+		case "uint8":
+			return "uint & >=0 & <=255"
+		case "uint16":
+			return "uint & >=0 & <=65535"
+		case "uint32":
+			return "uint & >=0 & <=4294967295"
+		case "uint64":
 			return "uint"
 		case "float16", "float32", "float64":
 			return "float"
