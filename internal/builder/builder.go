@@ -84,11 +84,17 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					written[norm] = true
 				}
 			case *parser.ObjectNode:
+				if !nameReferencesResolved(d.Name, ed.Ctx) {
+					// The name references a variable that is not bound in
+					// this pass (a loop variable or a with binding): the
+					// bound expansion creates the real object; skip the raw
+					// residual here. Without this, a concatenation whose
+					// unresolvable part collapses to "" emitted objects with
+					// truncated names and empty fields.
+					continue
+				}
 				objName := b.tree.ValueToString(b.tree.EvaluateValue(d.Name, ed.Ctx))
 				if strings.Contains(objName, "@") || objName == "" {
-					// Unresolvable at this stage: the bound expansion
-					// (loop iteration / with binding) creates the real
-					// object; skip the raw residual here.
 					continue
 				}
 				norm := index.NormalizeName(objName)
@@ -237,15 +243,21 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					continue
 				}
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)
-				for _, f := range node.Fragments {
-					if f.IsConditional && f.BranchID == id+":with" {
-						b.activeFragments[f] = true
-					}
-				}
 				subCtx := &index.EvaluationContext{
 					Variables: map[string]parser.Value{d.BindName: val},
 					Parent:    ed.Ctx,
 					Tree:      b.tree,
+				}
+				for _, f := range node.Fragments {
+					if f.IsConditional && f.BranchID == id+":with" {
+						b.activeFragments[f] = true
+						// Later activation passes re-evaluate the body with
+						// this context; without it the binding is lost and
+						// nested foreach blocks iterate nothing.
+						if f.EvalCtx == nil {
+							f.EvalCtx = subCtx
+						}
+					}
 				}
 				// The with block always loads its document: the body's
 				// definitions are unconditional.
@@ -618,6 +630,11 @@ func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.Evalua
 	for _, obj := range objects {
 		objectNode := obj.Def.(*parser.ObjectNode)
 		objName := b.formatValueWithCtx(objectNode.Name, obj.Ctx)
+		if !nameReferencesResolved(objectNode.Name, obj.Ctx) {
+			// The name references an unbound loop variable / with binding:
+			// the bound pass already materialized the real object.
+			continue
+		}
 
 		// If name still has variables, skip it. It will be rendered as a resolved child.
 		if strings.Contains(objName, "@") {
@@ -733,6 +750,17 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 	case *parser.MemberAccess:
 		res := b.tree.EvaluateValue(v, ctx)
 		return b.formatValueWithCtx(res, ctx)
+	case *parser.MethodCall:
+		res := b.tree.EvaluateValue(v, ctx)
+		if _, stillCall := res.(*parser.MethodCall); stillCall {
+			// Unresolvable: render the original expression.
+			parts := make([]string, 0, len(v.Args))
+			for _, a := range v.Args {
+				parts = append(parts, b.formatValueWithCtx(a, ctx))
+			}
+			return fmt.Sprintf("%s.%s(%s)", b.formatValueWithCtx(v.Base, ctx), v.Method, strings.Join(parts, ", "))
+		}
+		return b.formatValueWithCtx(res, ctx)
 	case *parser.MapValue:
 		parts := []string{}
 		for _, k := range v.Keys {
@@ -766,4 +794,26 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 	default:
 		return ""
 	}
+}
+
+// nameReferencesResolved reports whether every variable that the expression
+// references is bound in ctx. Object names inside foreach/with bodies belong
+// to their bound expansion; evaluating them in a pass where the loop variable
+// or with binding is absent produced objects with truncated names and empty
+// fields (the unresolvable part of the concatenation collapses to "").
+func nameReferencesResolved(v parser.Value, ctx *index.EvaluationContext) bool {
+	switch t := v.(type) {
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(strings.TrimPrefix(t.Name, "@"), "$")
+		return ctx.Resolve(name) != nil
+	case *parser.MemberAccess:
+		return nameReferencesResolved(t.Base, ctx)
+	case *parser.MethodCall:
+		return nameReferencesResolved(t.Base, ctx)
+	case *parser.BinaryExpression:
+		return nameReferencesResolved(t.Left, ctx) && nameReferencesResolved(t.Right, ctx)
+	case *parser.UnaryExpression:
+		return nameReferencesResolved(t.Right, ctx)
+	}
+	return true
 }

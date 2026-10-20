@@ -1,0 +1,598 @@
+#package jada_gyro.RTApp
+//!allow(unused): the datasources declare monitoring signals that this
+//! fragment intentionally does not consume.
+//!
+//! NOTE: `mdt check` reports three "Implicitly Defined Signal" warnings for
+//! the AI_CH0x signals: the signal-flow analysis does not track datasource
+//! declarations generated inside #foreach blocks. They are expected here.
+
+// Converted from ex.marte.template: the {% for %}/{% if %} blocks over
+// context["dan_config"] became a `with json(...)` block combined with
+// #foreach/#if. The document path comes from a variable.
+//
+// The template stripped the "EC-GN-P01:" prefix from variable names with a
+// string replace; here the JSON carries the final signal name alongside the
+// original (`signal_name` / `name`).
+
+#var dan_config_file: str = "dan_config.json"
+#var udp_streamer: bool = true
+
+#var sampling_freq: uint32 = 10000
+#var samples_adc: uint32 = 1000
+#var adc_publish_freq: float = 100.0
+#var adc_time_offset: int64 = 0
+#var adc_dan_mul: uint32 = 4
+#var cpus_fdan: uint32 = 16
+#var cpus_epics: uint32 = 32
+#var epics_fast_ratio: uint32 = 100
+#var app_name: str = "JADA_RF01App"
+#var rfid: str = "JADA"
+
+with json(@dan_config_file) as dan begin
+
++Data = {
+  Class = ReferenceContainer
+  +FastADC = {
+    Class = "NI6368::NI6368ADC"
+    // The divisor is computed on BaseSampleClockFrequency.
+    SamplingFrequency = @sampling_freq
+    DeviceName = "/dev/pxie-6368"
+    IsMultiplexed = 0 // Default is 0 for 6368. Set to 1 if using 6363.
+    BoardId = 0 // Mandatory
+    ExecutionMode = "RealTimeThread" // Optional (default is IndependentThread). Possible values: IndependentThread, RealTimeThread
+    Calibrate = 1 // Optional (default is 0). If disabled the signals show raw acquired value (signal type must be int16). If enabled the samples already converted accordingly to the declared InputRange. In this case the signal type must be float32
+    RealTimeMode = 1
+    Signals = {
+      //! unused: not used but mandatory
+      Counter = {
+        Type = uint64
+        ResetOnBufferChange = 1
+      }
+      // Used for absolute time generation
+      Time = {
+        Type = uint64
+      }
+      Status = {
+        Type = uint32
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach idx, variable in stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  Type = float32
+                  ChannelId = @idx
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +TimingBoard = {
+    Class = NI6683H
+    BoardId = 0
+    Signals = {
+      Status = {
+        Type = uint8
+      }
+      PtpdStatus = {
+        Type = uint8
+      }
+      // Used for absolute time generation
+      Time = {
+        Type = uint64
+      }
+    }
+  }
+  +Th1Bridge = {
+    Class = GAMDataSource
+    Signals = {
+      ReferenceTime = {
+        Type = uint64
+      }
+      TRIGGER_DAN_ONPULSE = {
+        Type = uint8
+      }
+    }
+  }
+  +EPICSCAInput = {
+    Class = GAMDataSource
+    Signals = {
+      RESET_TIME = {
+        Type = uint8
+      }
+      TRIGGER_DAN = {
+        Type = uint8
+      }
+    }
+  }
+  +TimingDataSource = {
+    Class = TimingDataSource
+  }
+  +DDB4 = {
+    Class = GAMDataSource
+    Signals = {
+      GY_MHV_V_MEAS_PSU = {
+        Type = float32
+      }
+      MHVPS_PULSE_ON = {
+        Type = uint8
+      }
+      TRIGGER_DAN = {
+        Type = uint8
+      }
+      GeneratedTime = {
+        Type = uint64
+      }
+      RelativeTime = {
+        Type = uint64
+      }
+      TimeError = {
+        Type = int64
+      }
+      ReferenceTimeAtReset = {
+        Type = uint64
+      }
+      InputTimeAtReset = {
+        Type = uint64
+      }
+      PXI6368_Status = {
+        Type = uint32
+      }
+      PXI6368_Status_Async = {
+        Type = uint32
+      }
+      PXI6368_Time = {
+        Type = uint64
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  Type = float32
+                  NumberOfElements = @samples_adc
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +UdpAnalogDataSource = {
+      Class = IOExt::UDPStreamer
+      Port = 44600
+      MaxPayloadSize = 1400
+      PublishingMode = "Strict"
+      Signals = {
+        Time = {
+          Type = uint64
+        }
+        #foreach program in @dan.dan_config
+          #if (@program.ProgramName == "JADA_RF01App")
+            #foreach stream in @program.Streams
+              #if (@stream.StreamName == "FastAnalogDAN_float32")
+                #foreach variable in @stream.Variables
+                  @variable.name.replace("EC-GN-P01:", "") = {
+                    Type = float32
+                    NumberOfDimensions = 1
+                    NumberOfElements = @samples_adc
+                    TimeMode = "FirstSample"
+                    TimeSignal = Time
+                    SamplingRate = @sampling_freq
+                    Unit = "V"
+                  }
+                #end
+              #end
+            #end
+          #end
+        #end
+      }
+    }
+  +FastAnalogDAN = {
+    Class = DAN::DANSource
+    NumberOfBuffers = 100
+    CPUMask = @cpus_fdan
+    StackSize = 10000000
+    DanBufferMultiplier = @adc_dan_mul
+    StoreOnTrigger = 1
+    ICProgName = @app_name
+    NumberOfPreTriggers = 0
+    NumberOfPostTriggers = 0
+    Signals = {
+      Trigger = {
+        Type = uint8
+      }
+      AI_Time = {
+        Type = uint64
+        TimeSignal = 1
+        AbsoluteTime = 1
+        TimeSignalMultiplier = 1e-9
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  Type = float32
+                  NumberOfElements = @samples_adc
+                  SamplingFrequency = @sampling_freq
+                  NodeName = @variable.name
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +AnalogEpicsOutput = {
+    Class = EPICSCA::EPICSCAOutput
+    CPUMask = @cpus_epics // change from 0x200
+    StackSize = 10000000
+    NumberOfBuffers = 50
+    CyclePeriod = @epics_fast_ratio
+    Signals = {
+      TRIGGER_DAN = {
+        Type = uint8
+        PVName = (@rfid .. ":DAN_ENABLED_OUT")
+      }
+      PXI6368_Status = {
+        Type = uint32
+        PVName = (@rfid .. "-HWCF:6368-0-STATUS")
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  Type = float32
+                  PVName = @variable.epics_name
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +Th4Bridge = {
+    Class = RealTimeThreadAsyncBridge
+    NumberOfBuffers = 5
+    Signals = {
+      PXI6368_Status = {
+        Type = uint32
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  Type = float32
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+}
+
++Functions = {
+  Class = ReferenceContainer
+  +ReadADC = {
+    Class = IOGAM
+    InputSignals = {
+      Status = {
+        DataSource = FastADC
+        Frequency = @adc_publish_freq
+      }
+      Time = {
+        DataSource = FastADC
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = FastADC
+                  Type = float32
+                  Samples = @samples_adc
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+    OutputSignals = {
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+      PXI6368_Time = {
+        DataSource = DDB4
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = DDB4
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +PushADCtoUDP = {
+      Class = IOGAM
+      InputSignals = {
+        GeneratedTime = {
+          DataSource = DDB4
+        }
+        #foreach program in @dan.dan_config
+          #if (@program.ProgramName == "JADA_RF01App")
+            #foreach stream in @program.Streams
+              #if (@stream.StreamName == "FastAnalogDAN_float32")
+                #foreach variable in @stream.Variables
+                  @variable.name.replace("EC-GN-P01:", "") = {
+                    DataSource = DDB4
+                  }
+                #end
+              #end
+            #end
+          #end
+        #end
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = UdpAnalogDataSource
+        }
+        #foreach program in @dan.dan_config
+          #if (@program.ProgramName == "JADA_RF01App")
+            #foreach stream in @program.Streams
+              #if (@stream.StreamName == "FastAnalogDAN_float32")
+                #foreach variable in @stream.Variables
+                  @variable.name.replace("EC-GN-P01:", "") = {
+                    DataSource = UdpAnalogDataSource
+                  }
+                #end
+              #end
+            #end
+          #end
+        #end
+      }
+    }
+  +AbsoluteTimeGenerator = {
+    Class = AbsoluteTimeGeneratorGAM
+    TimeOffset = @adc_time_offset
+    RelativeTimeGain = 1000
+    InputSignals = {
+      ReferenceTime = {
+        DataSource = Th1Bridge
+        Type = uint64
+      }
+      PXI6368_Time = {
+        DataSource = DDB4
+      }
+      RESET_TIME = {
+        DataSource = EPICSCAInput
+      }
+    }
+    OutputSignals = {
+      GeneratedTime = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      RelativeTime = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      TimeError = {
+        Type = int64
+        DataSource = DDB4
+      }
+      ReferenceTimeAtReset = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      InputTimeAtReset = {
+        Type = uint64
+        DataSource = DDB4
+      }
+    }
+  }
+  +PulseDetector = {
+    Class = PulseDetectorGAM
+    UpperLimit = 2.40
+    LowerLimit = 0.03
+    InputSignals = {
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+        Type = float32
+      }
+    }
+    OutputSignals = {
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Type = uint8
+      }
+    }
+  }
+  +ComputeDANTrigger = {
+    Class = JAConditionalSignalUpdateGAM
+    Operation = "OR"
+    LatchOutput = 0
+    InputSignals = {
+      TRIGGER_DAN_ONPULSE = {
+        DataSource = Th1Bridge
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      TRIGGER_DAN = {
+        DataSource = EPICSCAInput
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+    }
+    OutputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+        DefaultValue = 0
+        Type = uint8
+        Value = 1
+      }
+    }
+  }
+  +PushADCtoDAN = {
+    Class = IOGAM
+    InputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      GeneratedTime = {
+        DataSource = DDB4
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = DDB4
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+    OutputSignals = {
+      Trigger = {
+        DataSource = FastAnalogDAN
+      }
+      AI_Time = {
+        DataSource = FastAnalogDAN
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = FastAnalogDAN
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+  +PushADCtoEpics = {
+    Class = IOGAM
+    InputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = DDB4
+      }
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                (@variable.name.replace("EC-GN-P01:", "") .. "_Async") = {
+                  Alias = @variable.name.replace("EC-GN-P01:", "")
+                  DataSource = DDB4
+                  Ranges = { { 0, 0 } }
+                }
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = DDB4
+                  Ranges = { { 0, 0 } }
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+    OutputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = Th4Bridge
+      }
+      TRIGGER_DAN = {
+        DataSource = AnalogEpicsOutput
+      }
+      PXI6368_Status = {
+        DataSource = AnalogEpicsOutput
+      }
+      #foreach program in @dan.dan_config
+        #if (@program.ProgramName == "JADA_RF01App")
+          #foreach stream in @program.Streams
+            #if (@stream.StreamName == "FastAnalogDAN_float32")
+              #foreach variable in @stream.Variables
+                (@variable.name.replace("EC-GN-P01:", "") .. "_Async") = {
+                  Alias = @variable.name.replace("EC-GN-P01:", "")
+                  DataSource = Th4Bridge
+                }
+                @variable.name.replace("EC-GN-P01:", "") = {
+                  DataSource = AnalogEpicsOutput
+                }
+              #end
+            #end
+          #end
+        #end
+      #end
+    }
+  }
+}
+
++States = {
+  Class = ReferenceContainer
+  State = {
+    Class = RealTimeState
+    Threads = {
+      Thread1 = {
+        Class = RealTimeThread
+        // Order matters: ReadADC first, then time generation and the
+        // consumers of the DDB4 signals.
+        Functions = {ReadADC AbsoluteTimeGenerator ComputeDANTrigger PulseDetector PushADCtoDAN PushADCtoUDP PushADCtoEpics}
+      }
+    }
+  }
+}
+
++Scheduler = {
+  Class = GAMScheduler
+  TimingDataSource = TimingDataSource
+}
+
+end

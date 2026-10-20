@@ -222,6 +222,31 @@ mdt build -vADC_A='{ board_id = 7 }' config.marte
 
 - Overrides are validated against the type (an unknown field or an
   out-of-range value is an error).
+- **Anonymous structured types** can be written inline on the variable —
+  no named declaration needed. The value may then come entirely from an
+  override:
+
+```marte
+var hardware: {
+  address: uint16
+  port: uint16
+  sample_rate: uint8
+}
+
+Signals = {
+  A = {
+    SampleRate = @hardware.sample_rate
+  }
+}
+```
+
+```console
+mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.marte
+```
+
+- Inline structured types also work as field types of named `type`
+  declarations, and for `let` constants. A structured variable with no
+  default and no override is reported as a warning.
 
 ## 7. Conditionals
 
@@ -245,6 +270,11 @@ mdt build -vADC_A='{ board_id = 7 }' config.marte
 - Directive keywords work with or without the `#` (`if` … `end`).
 
 ## 8. Loops: `#foreach`
+
+> **Member access needs `@`**: identifiers may contain dots and `::`
+> (field/class names), so a bare `program.Streams` is one undeclared
+> identifier. Loop variables are referenced like any variable — with the
+> `@` prefix: `@program.Streams`.
 
 ```marte
 #foreach i in { 1, 2, 3, 4 }

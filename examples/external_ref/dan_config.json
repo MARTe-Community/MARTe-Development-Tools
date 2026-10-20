@@ -1,0 +1,49 @@
+{
+  "dan_config": [
+    {
+      "ProgramName": "JADA_RF02App",
+      "Streams": [
+        {
+          "StreamName": "SlowDAN_int16",
+          "Variables": [
+            {
+              "name": "EC-GN-P01:TEMP_M1",
+              "epics_name": "JADA_RF02:TEMP_M1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "ProgramName": "JADA_RF01App",
+      "Streams": [
+        {
+          "StreamName": "AuxDAN_uint8",
+          "Variables": [
+            {
+              "name": "EC-GN-P01:AUX_BIT",
+              "epics_name": "JADA_RF01:AUX_BIT"
+            }
+          ]
+        },
+        {
+          "StreamName": "FastAnalogDAN_float32",
+          "Variables": [
+            {
+              "name": "EC-GN-P01:AI_CH01",
+              "epics_name": "JADA:AI_CH01"
+            },
+            {
+              "name": "EC-GN-P01:AI_CH02",
+              "epics_name": "JADA:AI_CH02"
+            },
+            {
+              "name": "EC-GN-P01:AI_CH03",
+              "epics_name": "JADA:AI_CH03"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -367,7 +367,14 @@ func runBuild(args []string) {
 		os.Exit(0)
 	}
 
-	v := validator.NewValidator(tree, ".", overrides)
+	projectRoot := root_path
+	if projectRoot == "" && len(files) > 0 {
+		projectRoot = filepath.Dir(files[0])
+	}
+	if projectRoot == "" {
+		projectRoot = "."
+	}
+	v := validator.NewValidator(tree, projectRoot, overrides)
 	v.ValidateProject(context.Background())
 
 	hasErrors := false
@@ -503,7 +510,16 @@ func runCheck(args []string) {
 		return
 	}
 
-	v := validator.NewValidator(tree, ".", overrides)
+	// The project root drives the schema cascade (<root>/.marte_schema.cue)
+	// and the with-document path warnings, so it must follow -P.
+	projectRoot := root_path
+	if projectRoot == "" && len(files) > 0 {
+		projectRoot = filepath.Dir(files[0])
+	}
+	if projectRoot == "" {
+		projectRoot = "."
+	}
+	v := validator.NewValidator(tree, projectRoot, overrides)
 	v.MissingFilesAreWarnings = true
 	v.ValidateProject(context.Background())
 	for _, diag := range v.Diagnostics {

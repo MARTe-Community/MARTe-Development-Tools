@@ -1,0 +1,524 @@
+#package jada_gyro.RTApp
+
++Data = {
+  +FastADC = {
+    Class = "NI6368::NI6368ADC"
+    // The divisor is computed on BaseSampleClockFrequency.
+    SamplingFrequency = @sampling_freq
+    DeviceName = "/dev/pxie-6368"
+    IsMultiplexed = 0 // Default is 0 for 6368. Set to 1 if using 6363.
+    BoardId = 0 // Mandatory
+    ExecutionMode = "RealTimeThread" // Optional (default is IndepenentThread). Possible values:IndependentThread, RealTimeThread
+    Calibrate = 1 // Optional (default is 0). If disabled the signals show raw acquired value (signal type must be int16). If enabled the samples already converted accordingly to the declared InputRange. In this case the signal type must be float32
+    RealTimeMode = 1
+    Signals = {
+      //! unused: not used but mandatory
+      Counter = {
+        Type = uint64
+        ResetOnBufferChange = 1
+      }
+      // Used for absolute time generation
+      Time = {
+        Type = uint64
+      }
+      Status = {
+        Type = uint32
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% code %}
+context["__local__"]["stream"]["_channel_cnt"]=0
+{% endcode %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        Type = float32
+        ChannelId = {{ context["__local__"]["stream"]["_channel_cnt"] }}
+      }
+{% code %}
+context["__local__"]["stream"]["_channel_cnt"]+=1
+{% endcode %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  +TimingBoard = {
+    Class = NI6683H
+    BoardId = 0
+    Signals = {
+      Status = {
+        Type = uint8
+      }
+      PtpdStatus = {
+        Type = uint8
+      }
+      // Used for absolute time generation 
+      Time = {
+        Type = uint64
+      }
+    }
+  }
+  +DDB4 = {
+    Class = GAMDataSource
+    Signals = {
+      MHVPS_PULSE_ON = {
+        Type = uint8
+      }
+      TRIGGER_DAN = {
+        Type = uint8
+      }
+      GeneratedTime = {
+        Type = uint64
+      }
+      RelativeTime = {
+        Type = uint64
+      }
+      TimeError = {
+        Type = int64
+      }
+      ReferenceTimeAtReset = {
+        Type = uint64
+      }
+      InputTimeAtReset = {
+        Type = uint64
+      }
+      PXI6368_Status = {
+        Type = uint32
+      }
+      PXI6368_Time = {
+        Type = uint64
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        Type = float32
+        NumberOfElements = @samples_adc
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  #if @udp_streamer
+    +UdpAnalogDataSource = {
+      Class = IOExt::UDPStreamer
+      Port = 44600 
+      MaxPayloadSize = 1400 
+      PublishingMode = "Strict"
+      Signals = {
+        Time = {
+          Type = uint64
+        }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+        {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+          Type = float32
+          NumberOfDimensions = 1
+          NumberOfElements = @samples_adc
+          TimeMode = "FirstSample"
+          TimeSignal = Time
+          SamplingRate = @sampling_freq
+          Unit = "V"
+        }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+      }
+    }
+  #end
+  +FastAnalogDAN = {
+    Class = DAN::DANSource
+    NumberOfBuffers = 100
+    CPUMask = @cpus_fdan
+    StackSize = 10000000
+    DanBufferMultiplier = @adc_dan_mul
+    StoreOnTrigger = 1
+    ICProgName = @app_name
+    NumberOfPreTriggers = 0
+    NumberOfPostTriggers = 0
+    Signals = {
+      Trigger = {
+        Type = uint8
+      }
+      AI_Time = {
+        Type = uint64
+        TimeSignal = 1
+        AbsoluteTime = 1
+        TimeSignalMultiplier = 1e-9
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        Type = float32
+        NumberOfElements = @samples_adc
+        SamplingFrequency = @sampling_freq
+        NodeName = "{{ context["__local__"]["variable"]["name"] }}"
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  +AnalogEpicsOutput = {
+    Class = EPICSCA::EPICSCAOutput
+    CPUMask = @cpus_epics // change from 0x200
+    StackSize = 10000000
+    NumberOfBuffers = 50
+    CyclePeriod = @epics_fast_ratio
+    Signals = {
+      TRIGGER_DAN = {
+        Type = uint8
+        PVName = (@rfid .. ":DAN_ENABLED_OUT")
+      }
+      PXI6368_Status = {
+        Type = uint32
+        PVName = (@rfid .. "-HWCF:6368-0-STATUS")
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        Type = float32
+        PVName = "{{ context["__local__"]["variable"]["epics_name"] }}"
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  +Th4Bridge = {
+    Class = RealTimeThreadAsyncBridge
+    NumberOfBuffers = 5
+    Signals = {
+      PXI6368_Status = {
+        Type = uint32
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        Type = float32
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+}
+
++Functions = {
+  +ReadADC = {
+    Class = IOGAM
+    InputSignals = {
+      Status = {
+        DataSource = FastADC
+        Frequency = @adc_publish_freq
+      }
+      Time = {
+        DataSource = FastADC
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = FastADC
+        Type = float32
+        Samples = @samples_adc
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+    OutputSignals = {
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+      PXI6368_Time = {
+        DataSource = DDB4
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = DDB4
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  #if @udp_streamer
+    +PushADCtoUDP = {
+      Class = IOGAM
+      InputSignals = {
+        GeneratedTime = {
+          DataSource = DDB4
+        }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+        {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+          DataSource = DDB4
+        }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = UdpAnalogDataSource
+        }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+        {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+            DataSource = UdpAnalogDataSource
+        }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+      }
+    }
+  #end
+  +AbsoluteTimeGenerator = {
+    Class = AbsoluteTimeGeneratorGAM
+    TimeOffset = @adc_time_offset 
+    RelativeTimeGain = 1000
+    InputSignals = {
+      ReferenceTime = {
+        DataSource = Th1Bridge
+        Type = uint64
+      }
+      PXI6368_Time = {
+        DataSource = DDB4
+      }
+      RESET_TIME = {
+        DataSource = EPICSCAInput
+      }
+    }
+    OutputSignals = {
+      GeneratedTime = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      RelativeTime = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      TimeError = {
+        Type = int64
+        DataSource = DDB4
+      }
+      ReferenceTimeAtReset = {
+        Type = uint64
+        DataSource = DDB4
+      }
+      InputTimeAtReset = {
+        Type = uint64
+        DataSource = DDB4
+      }
+    }
+  }
+  +PulseDetector = {
+    Class = PulseDetectorGAM
+    UpperLimit = 2.40
+    LowerLimit = 0.03
+    InputSignals = {
+      GY_MHV_V_MEAS_PSU = {
+        DataSource = DDB4
+        Type = float32
+      }
+    }
+    OutputSignals = {
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Type = uint8
+      }
+    }
+  } 
+  +ComputeDANTrigger = {
+    Class = JAConditionalSignalUpdateGAM
+    Operation = "OR"
+    LatchOutput = 0
+    InputSignals = {
+      TRIGGER_DAN_ONPULSE = {
+        DataSource = Th1Bridge
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      TRIGGER_DAN = {
+        DataSource = EPICSCAInput
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+      MHVPS_PULSE_ON = {
+        DataSource = DDB4
+        Comparator = "GREATER"
+        Type = uint8
+        Value = 0
+      }
+
+    }
+    OutputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+        DefaultValue = 0
+        Type = uint8
+        Value = 1
+      }
+    }
+  }
+  +PushADCtoDAN = {
+    Class = IOGAM
+    InputSignals = {
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      GeneratedTime = {
+        DataSource = DDB4
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = DDB4
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+    OutputSignals = {
+      Trigger = {
+        DataSource = FastAnalogDAN
+      }
+      AI_Time = {
+        DataSource = FastAnalogDAN
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = FastAnalogDAN
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+  +PushADCtoEpics = {
+    Class = IOGAM
+    InputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = DDB4
+      }
+      TRIGGER_DAN = {
+        DataSource = DDB4
+      }
+      PXI6368_Status = {
+        DataSource = DDB4
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }}_Async = {
+        Alias = {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }}
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = DDB4
+        Ranges = { { 0, 0 } }
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+    OutputSignals = {
+      PXI6368_Status_Async = {
+        Alias = PXI6368_Status
+        DataSource = Th4Bridge
+      }
+      TRIGGER_DAN = {
+        DataSource = AnalogEpicsOutput
+      }
+      PXI6368_Status = {
+        DataSource = AnalogEpicsOutput
+      }
+{% for (% program %) in context["dan_config"] %}
+{% if context["__local__"]["program"]["ProgramName"] == "JADA_RF01App" %}
+{% for (% stream %) in context["__local__"]["program"]["Streams"] %}
+{% if context["__local__"]["stream"]["StreamName"] == "FastAnalogDAN_float32" %}
+{% for (% variable %) in context["__local__"]["stream"]["Variables"] %}
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }}_Async = {
+        Alias = {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }}
+        DataSource = Th4Bridge
+      }
+      {{ context["__local__"]["variable"]["name"].replace("EC-GN-P01:", "") }} = {
+        DataSource = AnalogEpicsOutput
+      }
+{% endfor %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+  }
+}

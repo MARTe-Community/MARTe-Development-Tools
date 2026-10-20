@@ -976,14 +976,15 @@ func (p *Parser) parseExpression(minPrecedence int) (Value, bool) {
 
 func (p *Parser) parseAtom() (Value, bool) {
 	tok := p.next()
+	var val Value
+
 	switch tok.Type {
 	case TokenString:
-		return &StringValue{
+		val = &StringValue{
 			Position: tok.Position,
 			Value:    unescapeString(strings.Trim(tok.Value, "\"")),
 			Quoted:   true,
-		}, true
-
+		}
 	case TokenNumber:
 		isFloat := (strings.Contains(tok.Value, ".") || strings.Contains(tok.Value, "e") || strings.Contains(tok.Value, "E")) &&
 			!strings.HasPrefix(tok.Value, "0x") && !strings.HasPrefix(tok.Value, "0X") &&
@@ -991,62 +992,51 @@ func (p *Parser) parseAtom() (Value, bool) {
 
 		if isFloat {
 			f, _ := strconv.ParseFloat(tok.Value, 64)
-			return &FloatValue{Position: tok.Position, Value: f, Raw: tok.Value}, true
+			val = &FloatValue{Position: tok.Position, Value: f, Raw: tok.Value}
+		} else {
+			i, _ := strconv.ParseInt(tok.Value, 0, 64)
+			val = &IntValue{Position: tok.Position, Value: i, Raw: tok.Value}
 		}
-		i, _ := strconv.ParseInt(tok.Value, 0, 64)
-		return &IntValue{Position: tok.Position, Value: i, Raw: tok.Value}, true
 	case TokenBool:
-		return &BoolValue{Position: tok.Position, Value: tok.Value == "true"},
-			true
+		val = &BoolValue{Position: tok.Position, Value: tok.Value == "true"}
 	case TokenIdentifier:
-		return &ReferenceValue{Position: tok.Position, Value: tok.Value}, true
+		val = &ReferenceValue{Position: tok.Position, Value: tok.Value}
 	case TokenVariableReference:
-		var val Value = &VariableReferenceValue{Position: tok.Position, Name: tok.Value}
-		// Structured member access: @doc.member (chains allowed).
-		for p.peek().Type == TokenSymbol && p.peek().Value == "." && p.peekN(1).Type == TokenIdentifier {
-			p.next() // consume '.'
-			member := p.next()
-			val = &MemberAccess{Position: tok.Position, Base: val, Member: member.Value}
-		}
-		return val, true
+		val = &VariableReferenceValue{Position: tok.Position, Name: tok.Value}
 	case TokenMinus:
-		val, ok := p.parseAtom()
-		if !ok {
+		inner, innerOK := p.parseAtom()
+		if !innerOK {
 			return nil, false
 		}
-		return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
+		return &UnaryExpression{Position: tok.Position, Operator: tok, Right: inner}, true
 	case TokenSymbol:
-		if tok.Value == "(" {
-			val, ok := p.parseExpression(0)
-			if !ok {
+		switch tok.Value {
+		case "(":
+			inner, innerOK := p.parseExpression(0)
+			if !innerOK {
 				return nil, false
 			}
 			if next := p.next(); next.Type != TokenSymbol || next.Value != ")" {
 				p.addError(next.Position, "expected )")
 				return nil, false
 			}
-			return val, true
-		}
-		if tok.Value == "!" {
-			val, ok := p.parseAtom()
-			if !ok {
+			val = inner
+		case "!":
+			inner, innerOK := p.parseAtom()
+			if !innerOK {
 				return nil, false
 			}
-			return &UnaryExpression{Position: tok.Position, Operator: tok, Right: val}, true
-		}
-		if tok.Value != "{" {
+			return &UnaryExpression{Position: tok.Position, Operator: tok, Right: inner}, true
+		default:
 			p.addError(tok.Position, fmt.Sprintf("unexpected symbol %q", tok.Value))
 			return nil, false
 		}
-		fallthrough
 	case TokenLBrace:
 		// Struct literal: `{ name = value, ... }`. A leading `identifier =`
 		// switches the brace from list to struct syntax; plain lists are
 		// unchanged.
-		if tok.Value == "{" || tok.Type == TokenLBrace {
-			if p.peek().Type == TokenIdentifier && p.peekN(1).Type == TokenEqual {
-				return p.parseStructLiteral(tok)
-			}
+		if p.peek().Type == TokenIdentifier && p.peekN(1).Type == TokenEqual {
+			return p.parseStructLiteral(tok)
 		}
 		arr := &ArrayValue{Position: tok.Position}
 		for {
@@ -1062,26 +1052,90 @@ func (p *Parser) parseAtom() (Value, bool) {
 			}
 			if t.Type == TokenIf {
 				ifTok := p.next()
-				elem, ok := p.parseConditionalArrayElements(ifTok)
-				if !ok {
+				elem, elemOK := p.parseConditionalArrayElements(ifTok)
+				if !elemOK {
 					return nil, false
 				}
 				arr.Elements = append(arr.Elements, elem)
 				continue
 			}
-			val, ok := p.parseValue()
-			if !ok {
+			elem, elemOK := p.parseValue()
+			if !elemOK {
 				return nil, false
 			}
-			arr.Elements = append(arr.Elements, val)
+			arr.Elements = append(arr.Elements, elem)
 		}
-		return arr, true
+		val = arr
 	default:
 		p.addError(tok.Position, fmt.Sprintf("unexpected value token %v", tok.Value))
 		return nil, false
 	}
+
+	return p.parsePostfix(tok, val)
 }
 
+// parsePostfix applies member access and builtin method calls to a primary
+// expression:
+//
+//	@var.name.replace("prefix:", "")   // chained calls are allowed
+//	@list.append(4).length()
+//
+// It returns the expression unchanged when no postfix operator follows.
+func (p *Parser) parsePostfix(startTok Token, val Value) (Value, bool) {
+	lastLine := startTok.Position.Line
+	for {
+		if p.peek().Type == TokenSymbol && p.peek().Value == "." && p.peekN(1).Type == TokenIdentifier {
+			p.next() // consume '.'
+			member := p.next()
+			lastLine = member.Position.Line
+			// The identifier lexer consumes dots (field/class names are
+			// dotted), so `a.b.c` arrives as one token: split it back into
+			// per-segment member accesses.
+			for _, part := range strings.Split(member.Value, ".") {
+				val = &MemberAccess{Position: startTok.Position, Base: val, Member: part}
+			}
+			continue
+		}
+		if p.peek().Type == TokenSymbol && p.peek().Value == "(" && p.peek().Position.Line == lastLine {
+			// A call binds only when the '(' is on the receiver's line: a
+			// '(' on a following line starts a body object instead
+			// (`foreach x in @list` + ("+Ch" .. @x) = { ... }).
+			mc, isMember := val.(*MemberAccess)
+			if !isMember {
+				return val, true
+			}
+			p.next() // consume '('
+			args := []Value{}
+			for {
+				t := p.peek()
+				if t.Type == TokenEOF {
+					p.addError(t.Position, "unexpected EOF, expected )")
+					return nil, false
+				}
+				if t.Type == TokenSymbol && t.Value == ")" {
+					p.next()
+					break
+				}
+				if t.Type == TokenComma {
+					p.next()
+					continue
+				}
+				arg, argOK := p.parseExpression(0)
+				if !argOK {
+					return nil, false
+				}
+				args = append(args, arg)
+			}
+			val = &MethodCall{Position: startTok.Position, Base: mc.Base, Method: mc.Member, Args: args}
+			continue
+		}
+		return val, true
+	}
+}
+
+// ParseValue parses src purely as a value expression -- scalars, lists, and
+// struct literals (`{ field = value, ... }`). Value context matters: the same
+// braces at statement level define an object instead.
 func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 	nameTok := p.next()
 	if nameTok.Type != TokenIdentifier {
@@ -1091,6 +1145,12 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 
 	if p.next().Type != TokenColon {
 		p.addError(nameTok.Position, "expected :")
+		return nil, false
+	}
+
+	// Inline structured type: `var v: { field: type, ... }`.
+	inlineTypeExpr, inlineType, inlineOK := p.parseInlineStructType()
+	if !inlineOK {
 		return nil, false
 	}
 
@@ -1111,10 +1171,17 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 			}
 			break
 		}
+		if t.Type == TokenLBrace {
+			p.addError(t.Position, "unexpected { in type expression")
+			return nil, false
+		}
 		typeTokens = append(typeTokens, p.next())
 	}
 
-	typeExpr := joinTypeTokens(typeTokens)
+	typeExpr := strings.TrimSpace(joinTypeTokens(typeTokens))
+	if inlineType != nil {
+		typeExpr = inlineTypeExpr
+	}
 
 	var defVal Value
 	if p.peek().Type == TokenEqual {
@@ -1130,7 +1197,8 @@ func (p *Parser) parseVariableDefinition(startTok Token) (Definition, bool) {
 	return &VariableDefinition{
 		Position:     startTok.Position,
 		Name:         nameTok.Value,
-		TypeExpr:     strings.TrimSpace(typeExpr),
+		TypeExpr:     typeExpr,
+		InlineType:   inlineType,
 		DefaultValue: defVal,
 	}, true
 }
@@ -1185,6 +1253,24 @@ func (p *Parser) parseTypeDefinition(startTok Token) (Definition, bool) {
 		if p.next().Type != TokenColon {
 			p.addError(fieldName.Position, "expected : after field name")
 			return nil, false
+		}
+
+		// Nested anonymous struct type: `field: { ... }`.
+		if p.peek().Type == TokenLBrace {
+			nested, nestedOK := p.parseStructTypeFields(p.peek())
+			if !nestedOK {
+				return nil, false
+			}
+			def.Fields = append(def.Fields, &TypeField{
+				Position:   fieldName.Position,
+				Name:       fieldName.Value,
+				TypeExpr:   renderStructType(nested),
+				InlineType: nested,
+			})
+			if p.peek().Type == TokenComma {
+				p.next()
+			}
+			continue
 		}
 
 		var typeTokens []Token
@@ -1242,8 +1328,6 @@ func (p *Parser) parseStructLiteral(openTok Token) (Value, bool) {
 			p.next()
 			continue
 		case tok.Type != TokenIdentifier:
-			// Newline-separated fields are fine: anything that is not a
-			// field name here (e.g. a stray token) is an error.
 			p.addError(tok.Position, "expected field name in struct literal")
 			return nil, false
 		}
@@ -1261,17 +1345,14 @@ func (p *Parser) parseStructLiteral(openTok Token) (Value, bool) {
 			return nil, false
 		}
 
-		val, ok := p.parseValue()
-		if !ok {
+		val, valOK := p.parseValue()
+		if !valOK {
 			return nil, false
 		}
 		values[key.Value] = val
 	}
 }
 
-// ParseValue parses src purely as a value expression -- scalars, lists, and
-// struct literals (`{ field = value, ... }`). Value context matters: the same
-// braces at statement level define an object instead.
 func ParseValue(src string) (Value, error) {
 	p := NewParser(src)
 	val, ok := p.parseValue()
@@ -1298,6 +1379,136 @@ func ParseValueOverride(src string) Value {
 // string, e.g. "[&GAM]" rather than "[ & GAM ]". Tokens are space-separated by
 // default, except around bracket/paren/comma delimiters and after a leading
 // "&" reference marker, which are kept tight against their neighbour.
+// parseStructTypeFields parses an anonymous structured type:
+//
+//	{ field: type, ... }
+//
+// Fields are comma/newline separated with an optional trailing comma; a
+// field's type may itself be a nested anonymous struct. The returned
+// TypeDefinition has an empty name.
+func (p *Parser) parseStructTypeFields(openTok Token) (*TypeDefinition, bool) {
+	if p.peek().Type == TokenLBrace {
+		p.next() // consume {
+	} else {
+		p.addError(openTok.Position, "expected { in structured type")
+		return nil, false
+	}
+
+	def := &TypeDefinition{Position: openTok.Position}
+	seen := make(map[string]Token)
+
+	for {
+		tok := p.peek()
+		switch {
+		case tok.Type == TokenEOF:
+			p.addError(tok.Position, "unexpected EOF, expected } in structured type")
+			return nil, false
+		case tok.Type == TokenRBrace:
+			p.next()
+			if len(def.Fields) == 0 {
+				p.addError(tok.Position, "structured type has no fields")
+				return nil, false
+			}
+			return def, true
+		case tok.Type == TokenComma, tok.Type == TokenComment:
+			p.next()
+			continue
+		case tok.Type != TokenIdentifier:
+			// Fields are newline separated: any token that is not a field
+			// name here is an error.
+			p.addError(tok.Position, "expected field name in structured type")
+			return nil, false
+		}
+
+		fieldName := p.next()
+		if prev, dup := seen[fieldName.Value]; dup {
+			p.addError(fieldName.Position, fmt.Sprintf("duplicate field '%s' in structured type (first at %d:%d)", fieldName.Value, prev.Position.Line, prev.Position.Column))
+			return nil, false
+		}
+		seen[fieldName.Value] = fieldName
+
+		if p.next().Type != TokenColon {
+			p.addError(fieldName.Position, "expected : after field name")
+			return nil, false
+		}
+
+		field := &TypeField{Position: fieldName.Position, Name: fieldName.Value}
+
+		// Nested anonymous struct type.
+		if p.peek().Type == TokenLBrace {
+			nested, nestedOK := p.parseStructTypeFields(p.peek())
+			if !nestedOK {
+				return nil, false
+			}
+			field.InlineType = nested
+			field.TypeExpr = renderStructType(nested)
+			def.Fields = append(def.Fields, field)
+			if p.peek().Type == TokenComma {
+				p.next()
+			}
+			continue
+		}
+
+		var typeTokens []Token
+		fieldLine := fieldName.Position.Line
+		for {
+			t := p.peek()
+			if t.Type == TokenEOF || t.Type == TokenComma || t.Type == TokenRBrace {
+				break
+			}
+			if t.Type == TokenComment {
+				break
+			}
+			if t.Position.Line > fieldLine {
+				break
+			}
+			if t.Type == TokenEqual && p.peekN(1).Type == TokenSymbol && p.peekN(1).Value == "~" {
+				p.next()
+				p.next()
+				typeTokens = append(typeTokens, Token{Type: TokenSymbol, Value: "=~", Position: t.Position})
+				continue
+			}
+			typeTokens = append(typeTokens, p.next())
+		}
+
+		if len(typeTokens) == 0 {
+			p.addError(fieldName.Position, fmt.Sprintf("expected a type after '%s:'", fieldName.Value))
+			return nil, false
+		}
+
+		field.TypeExpr = joinTypeTokens(typeTokens)
+		def.Fields = append(def.Fields, field)
+
+		if p.peek().Type == TokenComma {
+			p.next()
+		}
+	}
+}
+
+// renderStructType renders a structured type back to its canonical compact
+// source form so it survives round-trips and type-expression consumers.
+func renderStructType(t *TypeDefinition) string {
+	parts := make([]string, 0, len(t.Fields))
+	for _, f := range t.Fields {
+		parts = append(parts, f.Name+": "+f.TypeExpr)
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
+}
+
+// parseInlineStructType, when the next token opens a brace, parses an
+// anonymous structured type and returns its canonical source form together
+// with the parsed definition.
+func (p *Parser) parseInlineStructType() (string, *TypeDefinition, bool) {
+	if p.peek().Type != TokenLBrace {
+		return "", nil, true
+	}
+	inline, ok := p.parseStructTypeFields(p.peek())
+	if !ok {
+		return "", nil, false
+	}
+	return renderStructType(inline), inline, true
+}
+
 func joinTypeTokens(tokens []Token) string {
 	var b strings.Builder
 	for i, t := range tokens {
@@ -1340,6 +1551,11 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 		return nil, false
 	}
 
+	inlineTypeExpr, inlineType, inlineOK := p.parseInlineStructType()
+	if !inlineOK {
+		return nil, false
+	}
+
 	var typeTokens []Token
 	startLine := nameTok.Position.Line
 
@@ -1351,10 +1567,17 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 		if t.Type == TokenEqual {
 			break
 		}
+		if t.Type == TokenLBrace {
+			p.addError(t.Position, "unexpected { in type expression")
+			return nil, false
+		}
 		typeTokens = append(typeTokens, p.next())
 	}
 
-	typeExpr := joinTypeTokens(typeTokens)
+	typeExpr := strings.TrimSpace(joinTypeTokens(typeTokens))
+	if inlineType != nil {
+		typeExpr = inlineTypeExpr
+	}
 
 	var defVal Value
 	if p.next().Type != TokenEqual {
@@ -1371,7 +1594,8 @@ func (p *Parser) parseLet(startTok Token) (Definition, bool) {
 	return &VariableDefinition{
 		Position:     startTok.Position,
 		Name:         nameTok.Value,
-		TypeExpr:     strings.TrimSpace(typeExpr),
+		TypeExpr:     typeExpr,
+		InlineType:   inlineType,
 		DefaultValue: defVal,
 		IsConst:      true,
 	}, true

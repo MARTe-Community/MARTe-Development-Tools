@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/marte-community/marte-dev-tools/internal/loader"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
@@ -209,6 +210,9 @@ func (pt *ProjectTree) MergeStructOverride(vdef *parser.VariableDefinition, over
 	}
 	typ, ok := pt.Types[strings.TrimSpace(vdef.TypeExpr)]
 	if !ok {
+		typ = vdef.InlineType
+	}
+	if typ == nil {
 		return nil, false
 	}
 	ov, ok := override.(*parser.MapValue)
@@ -239,7 +243,11 @@ func (pt *ProjectTree) mergeStructFields(typ *parser.TypeDefinition, def parser.
 		ovVal := ov.Values[k]
 		field := typ.Field(k)
 		if field != nil {
-			if nested, isType := pt.Types[strings.TrimSpace(field.TypeExpr)]; isType {
+			nested, isType := pt.Types[strings.TrimSpace(field.TypeExpr)]
+			if !isType && field.InlineType != nil {
+				nested, isType = field.InlineType, true
+			}
+			if isType {
 				if ovSub, isMap := ovVal.(*parser.MapValue); isMap {
 					out.Values[k] = pt.mergeStructFields(nested, out.Values[k], ovSub)
 					continue
@@ -1696,6 +1704,22 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 			Operator: v.Operator,
 			Right:    right,
 		}
+	case *parser.MethodCall:
+		recv := pt.EvaluateValue(v.Base, ctx)
+		if os.Getenv("MDT_TRACE_METHODS") != "" {
+			pt.traceMethod(v.Method, recv, v.Args, nil)
+		}
+		if recv == nil {
+			return v
+		}
+		args := make([]parser.Value, len(v.Args))
+		for k, a := range v.Args {
+			args[k] = pt.EvaluateValue(a, ctx)
+		}
+		if res := loader.MethodCall(recv, v.Method, args); res != nil {
+			return res
+		}
+		return v
 	case *parser.MemberAccess:
 		base := pt.EvaluateValue(v.Base, ctx)
 		if m, ok := base.(*parser.MapValue); ok {
@@ -2211,6 +2235,21 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		}
 		// Unresolvable: return the access node itself so callers can
 		// render it or flag it.
+		return v
+	case *parser.MethodCall:
+		recv := pt.evaluate(v.Base, ctx)
+		if recv == nil {
+			return v
+		}
+		args := make([]parser.Value, len(v.Args))
+		for i, a := range v.Args {
+			args[i] = pt.evaluate(a, ctx)
+		}
+		if res := loader.MethodCall(recv, v.Method, args); res != nil {
+			return res
+		}
+		// Unknown method or incompatible receiver: keep the node so it
+		// renders symbolically instead of silently vanishing.
 		return v
 	case *parser.BinaryExpression:
 		left := pt.evaluate(v.Left, ctx)
@@ -2841,4 +2880,20 @@ func (pt *ProjectTree) ResolveFields(activeFragments map[*Fragment]bool) {
 			}
 		}
 	})
+}
+
+func (pt *ProjectTree) traceMethod(method string, recv parser.Value, args []parser.Value, _ *ProjectNode) {
+	fmt.Fprintf(os.Stderr, "[TRACE] method %s recv=%T(%v) args=%v\n", method, recv, renderScalarish(recv), args)
+}
+
+func renderScalarish(v parser.Value) string {
+	switch t := v.(type) {
+	case *parser.StringValue:
+		return t.Value
+	case *parser.MapValue:
+		return fmt.Sprintf("map{%d keys}", len(t.Keys))
+	case *parser.ArrayValue:
+		return fmt.Sprintf("list{%d}", len(t.Elements))
+	}
+	return fmt.Sprintf("%T", v)
 }

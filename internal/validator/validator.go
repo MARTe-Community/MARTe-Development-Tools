@@ -777,9 +777,10 @@ func (v *Validator) validateClassField(f index.EvaluatedField, node *index.Proje
 			lookupName = className[idx+2:]
 		}
 
-		// Use cue LookupPath to check existence in #Classes
-		path := cue.ParsePath(fmt.Sprintf("#Classes.%s", lookupName))
-		if v.Schema.Value.LookupPath(path).Err() != nil {
+		// Use a string selector: class names may contain characters that
+		// cue.ParsePath would misread (e.g. "DAN::DANSource").
+		path := cue.ParsePath("#Classes")
+		if v.Schema.Value.LookupPath(path).Lookup(lookupName).Err() != nil {
 			// Unknown Class
 			v.report(node, "unknown_class", LevelWarning,
 				fmt.Sprintf("Unknown Class '%s'", className),
@@ -993,8 +994,8 @@ func (v *Validator) validateWithCUE(node *index.ProjectNode, className string) {
 	}
 
 	// Check if class exists in schema
-	classPath := cue.ParsePath(fmt.Sprintf("#Classes.%s", lookupName))
-	if v.Schema.Value.LookupPath(classPath).Err() != nil {
+	classPath := cue.ParsePath("#Classes")
+	if v.Schema.Value.LookupPath(classPath).Lookup(lookupName).Err() != nil {
 		return // Unknown class, skip validation
 	}
 
@@ -2471,7 +2472,12 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 					}
 
 					// Compile Type
-					typeCUE := v.translateVarTypeToCUE(vdef.TypeExpr, map[string]bool{})
+					var typeCUE string
+					if vdef.InlineType != nil {
+						typeCUE = v.structTypeToCUE(vdef.InlineType, map[string]bool{})
+					} else {
+						typeCUE = v.translateVarTypeToCUE(vdef.TypeExpr, map[string]bool{})
+					}
 					typeVal := ctx_cue.CompileString(typeCUE)
 					if typeVal.Err() != nil {
 						v.report(node, "invalid_variable_type", LevelError,
@@ -2486,6 +2492,15 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 					effective := vdef.DefaultValue
 					if ov, ok := v.Overrides[vdef.Name]; ok {
 						effective = ov
+					}
+
+					// A structured variable with no value anywhere would render
+					// as an unresolved reference downstream; say so here.
+					isStructType := vdef.InlineType != nil || v.isDeclaredType(vdef.TypeExpr)
+					if isStructType && effective == nil {
+						v.report(node, "missing_struct_value", LevelWarning,
+							fmt.Sprintf("Structured variable '%s' has no default value and no override", vdef.Name),
+							vdef.Position, frag.File)
 					}
 
 					if effective != nil {
@@ -2698,6 +2713,12 @@ func (v *Validator) translateVarTypeToCUE(typeExpr string, expanding map[string]
 	if t, ok := v.Tree.Types[expr]; ok {
 		return v.structTypeToCUE(t, expanding)
 	}
+	// Anonymous structured types arrive with their canonical `{ ... }` form
+	// and are validated through the parsed InlineType, which carries range
+	// constraints per field.
+	if strings.HasPrefix(expr, "{") && strings.HasSuffix(expr, "}") {
+		return translateTypeToCUE(expr)
+	}
 	// A list of structured types, e.g. [ADCConf_T].
 	if strings.HasPrefix(expr, "[") && strings.HasSuffix(expr, "]") {
 		inner := strings.TrimSpace(expr[1 : len(expr)-1])
@@ -2719,6 +2740,10 @@ func (v *Validator) structTypeToCUE(t *parser.TypeDefinition, expanding map[stri
 
 	parts := make([]string, 0, len(t.Fields))
 	for _, f := range t.Fields {
+		if f.InlineType != nil {
+			parts = append(parts, fmt.Sprintf("%s: %s", f.Name, v.structTypeToCUE(f.InlineType, expanding)))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s: %s", f.Name, v.translateVarTypeToCUE(f.TypeExpr, expanding)))
 	}
 	return "close({" + strings.Join(parts, ", ") + "})"
@@ -2782,8 +2807,12 @@ func translateTypeToCUE(typeExpr string) string {
 			return "float"
 		}
 		switch t {
-		case "string", "int", "uint", "float", "bool", "number":
+		case "string", "str", "int", "uint", "float", "bool", "number":
 			return t
+		case "any":
+			// CUE's top type; spelled "_" because the compiled snippet has
+			// no prelude.
+			return "_"
 		}
 		// Any other named type denotes a reference to a node or class;
 		// references are spelled as strings in configurations.

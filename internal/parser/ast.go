@@ -188,6 +188,25 @@ func (v *MemberAccess) End() Position {
 }
 func (v *MemberAccess) isValue() {}
 
+// MethodCall is a builtin method invocation on a value, written
+// `receiver.method(arg, …)`:
+//
+//	@variable.name.replace("EC-GN-P01:", "")
+//	@list.append(4).length()
+//
+// The receiver is any expression; the method set depends on the receiver's
+// kind (string, list or dict).
+type MethodCall struct {
+	Position Position
+	Base     Value
+	Method   string
+	Args     []Value
+}
+
+func (v *MethodCall) Pos() Position { return v.Position }
+func (v *MethodCall) End() Position { return v.Position }
+func (v *MethodCall) isValue()      {}
+
 // NewMapValue builds a MapValue from a Go map, sorting the keys.
 func NewMapValue(pos Position, values map[string]Value) *MapValue {
 	keys := make([]string, 0, len(values))
@@ -230,9 +249,12 @@ func (p *Pragma) End() Position {
 }
 
 type VariableDefinition struct {
-	Position     Position
-	Name         string
-	TypeExpr     string
+	Position Position
+	Name     string
+	TypeExpr string
+	// InlineType holds the parsed structured type when TypeExpr is an
+	// anonymous struct type (`var v: { field: type, ... }`). nil otherwise.
+	InlineType   *TypeDefinition
 	DefaultValue Value
 	IsConst      bool
 }
@@ -287,6 +309,9 @@ type TypeField struct {
 	Position Position
 	Name     string
 	TypeExpr string
+	// InlineType holds the parsed structured type when the field's type is
+	// an anonymous struct (`field: { ... }`). nil otherwise.
+	InlineType *TypeDefinition
 }
 
 func (f *TypeField) Pos() Position { return f.Position }
