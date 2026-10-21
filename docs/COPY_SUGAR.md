@@ -64,6 +64,10 @@ Inline groups sit directly in the `Functions` list and expand in place:
 Functions = { Acq copy { Acq.T2 -> Filter.In3 } Filter }
 ```
 
+An anonymous group written in an object body (outside a `Functions` list)
+is rejected: nothing would ever reference it. Give it a name and list that
+name in the thread, or move it into the list.
+
 ### Endpoints
 
 | Form | Meaning |

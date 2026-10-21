@@ -265,6 +265,12 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 			}
 			for i, def := range frag.Definitions {
 				if g, ok := def.(*parser.CopyGroup); ok {
+					if g.Name == "" {
+						// An anonymous group in an object body has no place
+						// in any Functions list, so it could never run.
+						return fmt.Errorf("%d:%d: an anonymous copy group must be written inside a Functions list; give it a name and reference it, or move it into the list",
+							g.Position.Line, g.Position.Column)
+					}
 					groups = append(groups, pending{owner: owner, frag: frag, index: i, group: g})
 				}
 				// Copy groups inside Functions arrays.

@@ -285,14 +285,14 @@ func TestCopyRedundant(t *testing.T) {
 // Sugar errors are reported instead of producing a broken config.
 func TestCopyErrors(t *testing.T) {
 	cases := []struct{ name, group, want string }{
-		{"unknown gam", `    copy { Nope.X -> Filter.In1 }`, "unknown GAM"},
-		{"unknown signal", `    copy { Acq.Nope -> Filter.In1 }`, "no output signal"},
-		{"index out of range", `    copy { Acq[9] -> Filter.In1 }`, "out of bounds"},
-		{"placement out of range", `    copy { Acq.T1 -> Filter.In2 at 9 }`, "out of range"},
+		{"unknown gam", `copy { Nope.X -> Filter.In1 }`, "unknown GAM"},
+		{"unknown signal", `copy { Acq.Nope -> Filter.In1 }`, "no output signal"},
+		{"index out of range", `copy { Acq[9] -> Filter.In1 }`, "out of bounds"},
+		{"placement out of range", `copy { Acq.T1 -> Filter.In2 at 9 }`, "out of range"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := buildSugar(t, copyApp(tc.group), nil)
+			_, _, err := buildSugar(t, copyAppArray(tc.group), nil)
 			if err == nil {
 				t.Fatalf("expected an error")
 			}
@@ -454,5 +454,20 @@ func TestFuseKeepsSharedSignal(t *testing.T) {
 	}
 	if !strings.Contains(out, "+Post = {") {
 		t.Errorf("shared-signal chain was fused:\n%s", out)
+	}
+}
+
+// An anonymous group in an object body would never run; it is rejected.
+func TestCopyAnonymousGroupOutsideFunctionsList(t *testing.T) {
+	src := copyApp(`    copy {
+      Acq.T1 -> Filter.In1
+    }
+`)
+	_, _, err := buildSugar(t, src, nil)
+	if err == nil {
+		t.Fatal("expected an error for an anonymous group in an object body")
+	}
+	if !strings.Contains(err.Error(), "anonymous copy group") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
