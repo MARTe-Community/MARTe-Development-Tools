@@ -530,6 +530,8 @@ type CopyItem struct {
 	// Per-signal options copied into the generated entries.
 	SrcOptions []CopyOption
 	DstOptions []CopyOption
+	// Pragmas attached to the item (`//! implicit: …`), emitted above it.
+	Pragmas []string
 	// Grouped endpoints: `(a, b) -> c`. When set, the members are copied as
 	// one contiguous memory block (the IOGAM copies whole memory, not
 	// pairwise), and Src/Dst hold the first member for position reporting.

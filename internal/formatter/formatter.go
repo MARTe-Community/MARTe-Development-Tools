@@ -127,6 +127,53 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 			fmt.Fprintf(f.writer, "%s}", indentStr)
 		}
 		return d.EndPosition.Line
+	case *parser.CopyGroup:
+		indentStr := strings.Repeat("  ", indent)
+		if d.Name != "" {
+			fmt.Fprintf(f.writer, "%scopy %s {", indentStr, d.Name)
+		} else {
+			fmt.Fprintf(f.writer, "%scopy {", indentStr)
+		}
+		if f.hasTrailingComment(d.Position.Line) {
+			fmt.Fprintf(f.writer, " %s", f.popComment())
+		}
+		fmt.Fprintln(f.writer)
+		for _, item := range d.Items {
+			for _, pr := range item.Pragmas {
+				fmt.Fprintf(f.writer, "%s  //! %s\n", indentStr, pr)
+			}
+			fmt.Fprintf(f.writer, "%s  ", indentStr)
+			f.formatCopySide(item.Src, item.SrcAlias, item.SrcOptions, item.SrcGroup, indent+1)
+			fmt.Fprint(f.writer, " -> ")
+			f.formatCopySide(item.Dst, item.DstAlias, item.DstOptions, item.DstGroup, indent+1)
+			if item.DstAt > 0 {
+				fmt.Fprintf(f.writer, " at %d", item.DstAt)
+			}
+			if item.Type != "" {
+				fmt.Fprintf(f.writer, ": %s", item.Type)
+				if item.Dim > 0 {
+					fmt.Fprintf(f.writer, "[%d]", item.Dim)
+				}
+			}
+			fmt.Fprintln(f.writer)
+		}
+		fmt.Fprintf(f.writer, "%s}", indentStr)
+		return d.EndPosition.Line
+	case *parser.FuseStatement:
+		fmt.Fprintf(f.writer, "%sfuse %s with %s", indentStr, d.Left, d.Right)
+		return d.Position.Line
+	case *parser.GamDefinition:
+		fmt.Fprintf(f.writer, "%sgam %s {", indentStr, d.Name)
+		fmt.Fprintln(f.writer)
+		for _, p := range d.Inputs {
+			f.formatGamPort("in", p, indent+1)
+		}
+		for _, p := range d.Outputs {
+			f.formatGamPort("out", p, indent+1)
+		}
+		f.formatBlock(d.Body, indent+1)
+		fmt.Fprintf(f.writer, "%s}", indentStr)
+		return d.EndPosition.Line
 	case *parser.Field:
 		fmt.Fprintf(f.writer, "%s%s = ", indentStr, d.Name)
 		endLine := f.formatValue(d.Value, indent)
@@ -471,4 +518,61 @@ func (f *Formatter) peekPosition() parser.Position {
 		return f.insertables[f.cursor].Position
 	}
 	return parser.Position{}
+}
+
+// formatCopySide prints one side of a copy item (grouped or single).
+func (f *Formatter) formatCopySide(ep parser.CopyEndpoint, alias string, opts []parser.CopyOption, group []parser.CopyMember, indent int) {
+	writeOne := func(e parser.CopyEndpoint, al string, os []parser.CopyOption) {
+		if e.IsDS {
+			fmt.Fprintf(f.writer, "%s::%s", e.Object, e.Signal)
+		} else if e.ByIndex {
+			if e.IndexEnd > e.Index {
+				fmt.Fprintf(f.writer, "%s[%d..%d]", e.Object, e.Index, e.IndexEnd)
+			} else {
+				fmt.Fprintf(f.writer, "%s[%d]", e.Object, e.Index)
+			}
+		} else {
+			fmt.Fprintf(f.writer, "%s", e.Object)
+			if e.Signal != "" {
+				fmt.Fprintf(f.writer, ".%s", e.Signal)
+			}
+		}
+		if al != "" {
+			fmt.Fprintf(f.writer, " as %s", al)
+		}
+		if len(os) > 0 {
+			fmt.Fprint(f.writer, " { ")
+			for i, o := range os {
+				if i > 0 {
+					fmt.Fprint(f.writer, "  ")
+				}
+				fmt.Fprintf(f.writer, "%s = ", o.Name)
+				f.formatValue(o.Value, indent)
+			}
+			fmt.Fprint(f.writer, " }")
+		}
+	}
+	if len(group) > 0 {
+		fmt.Fprint(f.writer, "(")
+		for i, m := range group {
+			if i > 0 {
+				fmt.Fprint(f.writer, ", ")
+			}
+			writeOne(m.Endpoint, m.Alias, m.Options)
+		}
+		fmt.Fprint(f.writer, ")")
+		return
+	}
+	writeOne(ep, alias, opts)
+}
+
+func (f *Formatter) formatGamPort(kind string, p parser.GamPort, indent int) {
+	fmt.Fprintf(f.writer, "%s%s %s", strings.Repeat("  ", indent), kind, p.Name)
+	if p.Type != "" {
+		fmt.Fprintf(f.writer, ": %s", p.Type)
+		if p.Dim > 0 {
+			fmt.Fprintf(f.writer, "[%d]", p.Dim)
+		}
+	}
+	fmt.Fprintln(f.writer)
 }

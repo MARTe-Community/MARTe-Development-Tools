@@ -16,11 +16,26 @@ func (p *Parser) parseCopyGroup(startTok Token, name string) (Definition, bool) 
 	p.next() // consume '{'
 
 	group := &CopyGroup{Position: startTok.Position, Name: name}
+	// Pragmas are collected by the parser before being swallowed; those
+	// written above an item belong to it.
+	pi := 0
+	for pi < len(p.pragmas) && p.pragmas[pi].Position.Line <= startTok.Position.Line {
+		pi++
+	}
+	var pendingPragmas []string
 	for {
 		t := p.peek()
 		if t.Type == TokenEOF {
 			p.addError(t.Position, "unexpected EOF, expected }")
 			return nil, false
+		}
+		for pi < len(p.pragmas) && p.pragmas[pi].Position.Line < t.Position.Line {
+			pendingPragmas = append(pendingPragmas, strings.TrimSpace(strings.TrimPrefix(p.pragmas[pi].Text, "//!")))
+			if p.consumedPragmas == nil {
+				p.consumedPragmas = map[int]bool{}
+			}
+			p.consumedPragmas[pi] = true
+			pi++
 		}
 		if t.Type == TokenRBrace {
 			group.EndPosition = p.next().Position
@@ -38,6 +53,8 @@ func (p *Parser) parseCopyGroup(startTok Token, name string) (Definition, bool) 
 		if !ok {
 			return nil, false
 		}
+		item.Pragmas = pendingPragmas
+		pendingPragmas = nil
 		group.Items = append(group.Items, item)
 	}
 }

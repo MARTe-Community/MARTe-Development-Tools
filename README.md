@@ -75,6 +75,14 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   ```bash
   mdt fmt path/to/file.marte
   ```
+- **Refactor**: Rewrite configurations to the current sugar syntax (IOGAMs
+  become `copy` groups, signal declarations become the compact shorthand
+  forms).
+  ```bash
+  mdt refactor -P .            # in place
+  mdt refactor --check -P .    # CI: fail when a file would change
+  mdt refactor -n file.marte   # dry run to stdout
+  ```
 - **Graph**: Open an interactive signal-flow graph in the browser.
   ```bash
   mdt graph [-P folder_path] [-p project_name] [-port PORT] [-vVAR=VAL] [files...]

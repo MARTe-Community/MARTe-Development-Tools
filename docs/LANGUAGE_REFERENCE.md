@@ -429,6 +429,7 @@ same `Name: Type` form instead of a nested `Type = …` object:
 | `mdt check [-P dir] [-p project] [-j vars.{json,yaml,toml}] [-vVAR=VAL] files…` | validate        |
 | `mdt build [-P dir] [-j vars.{json,yaml,toml}] [-o out] [-O] [-vVAR=VAL] files…` | evaluate + merge |
 | `mdt fmt files…`                                     | canonical formatting                |
+| `mdt refactor [-P dir] [--check] [-n] files…`        | rewrite to copy groups + shorthand  |
 | `mdt graph`                                          | signal-flow graph (DOT/HTML)        |
 | `mdt lsp`                                            | language server                     |
 
@@ -439,6 +440,12 @@ same `Name: Type` form instead of a nested `Type = …` object:
 - `-P <dir>` and a file list both work for `check` and `build`; passing
   a bare directory as an input behaves like `-P <dir>` (the directory is
   scanned recursively for `*.marte` files).
+- `mdt refactor` rewrites a configuration to the current sugar syntax:
+  IOGAM objects become named copy groups (with per-signal options, aliases
+  and grouped memory blocks) and signal declarations become the shorthand
+  forms (`DS::Sig: Type as Alias = { … }`, `Signal: Type[Dim] = { … }`).
+  `--check` exits non-zero when a file would change; `-n` prints the result.
+  The rewrite is idempotent and preserves `//!` pragmas.
 - `-O`/`--optimize` optimises the generated application: adjacent IOGAMs
   are merged, identity copy GAMs are dropped, and DataSource/GAM signals
   are ordered by consumer to reduce signal-copy (memcpy) overhead. The

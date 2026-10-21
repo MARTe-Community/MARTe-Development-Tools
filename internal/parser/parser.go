@@ -11,7 +11,10 @@ type Parser struct {
 	buf      []Token
 	comments []Comment
 	pragmas  []Pragma
-	errors   []error
+	// consumedPragmas marks pragmas attached to a definition (copy items),
+	// so they are not also emitted as file-level pragmas.
+	consumedPragmas map[int]bool
+	errors          []error
 	// signalsDepth counts how many "Signals = { … }" bodies we are
 	// inside. Signal definition sugar (`Name: Type`) is only valid there.
 	signalsDepth int
@@ -90,7 +93,12 @@ func (p *Parser) Parse() (*Configuration, error) {
 		}
 	}
 	config.Comments = p.comments
-	config.Pragmas = p.pragmas
+	for i, pr := range p.pragmas {
+		if p.consumedPragmas[i] {
+			continue
+		}
+		config.Pragmas = append(config.Pragmas, pr)
+	}
 
 	var err error
 	if len(p.errors) > 0 {

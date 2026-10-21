@@ -2,6 +2,7 @@ package builder
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -67,9 +68,10 @@ type copyEntry struct {
 // contiguous destination block. IOGAM copies whole memory, so entries inside
 // an op keep their order.
 type copyOp struct {
-	srcs []copyEntry
-	dsts []copyEntry
-	pos  parser.Position
+	srcs    []copyEntry
+	dsts    []copyEntry
+	pos     parser.Position
+	pragmas []string
 }
 
 func (o copyOp) grouped() bool { return len(o.srcs) != 1 || len(o.dsts) != 1 }
@@ -538,7 +540,7 @@ func (l *lowerer) singleOp(item parser.CopyItem, src, dst signalRef) (copyOp, bo
 		src.ds == dst.ds && src.signal == dst.signal {
 		return copyOp{}, false
 	}
-	return copyOp{srcs: []copyEntry{srcEntry}, dsts: []copyEntry{dstEntry}, pos: item.Position}, true
+	return copyOp{srcs: []copyEntry{srcEntry}, dsts: []copyEntry{dstEntry}, pos: item.Position, pragmas: item.Pragmas}, true
 }
 
 func (r signalRef) aliasEmpty(item parser.CopyItem) bool {
@@ -547,7 +549,7 @@ func (r signalRef) aliasEmpty(item parser.CopyItem) bool {
 
 // groupOp resolves a grouped item `(a, b, …) -> (c, …)`.
 func (l *lowerer) groupOp(item parser.CopyItem) (copyOp, bool, error) {
-	op := copyOp{pos: item.Position}
+	op := copyOp{pos: item.Position, pragmas: item.Pragmas}
 	for _, m := range item.SrcGroup {
 		refs, err := l.resolveSourceList(m.Endpoint)
 		if err != nil {
@@ -1216,7 +1218,13 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, ops []copyO
 
 	usedIn := map[string]bool{}
 	usedOut := map[string]bool{}
-	appendEntry := func(container *parser.ObjectNode, e copyEntry, side string, used map[string]bool) {
+	type attached struct {
+		side    string
+		entry   string
+		pragmas []string
+	}
+	var attaches []attached
+	appendEntry := func(container *parser.ObjectNode, e copyEntry, side string, used map[string]bool, pragmas []string) {
 		entryName := e.alias
 		if entryName == "" {
 			entryName = e.signal
@@ -1239,15 +1247,17 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, ops []copyO
 			entry.Subnode.Definitions = append(entry.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
 		}
 		container.Subnode.Definitions = append(container.Subnode.Definitions, entry)
-		_ = side
+		if len(pragmas) > 0 {
+			attaches = append(attaches, attached{side: side, entry: entryName, pragmas: pragmas})
+		}
 	}
 
 	for _, op := range ops {
 		for _, e := range op.srcs {
-			appendEntry(inputs, e, "in", usedIn)
+			appendEntry(inputs, e, "in", usedIn, op.pragmas)
 		}
 		for _, e := range op.dsts {
-			appendEntry(outputs, e, "out", usedOut)
+			appendEntry(outputs, e, "out", usedOut, op.pragmas)
 		}
 		rep.Copies += len(op.srcs)
 	}
@@ -1258,6 +1268,30 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, ops []copyO
 		l.insertDefinition(owner, insertAt, obj)
 	} else {
 		l.appendDefinition(owner, obj, owner.File)
+	}
+	// Carry per-item pragmas (e.g. `//! implicit: …`) onto the generated
+	// signal nodes so diagnostics behave like the hand-written entries.
+	if len(attaches) > 0 {
+		gam := owner.Children[index.NormalizeName(name)]
+		if os.Getenv("MDT_PRAGMA_DEBUG") != "" {
+			fmt.Fprintf(os.Stderr, "[PRAG] gam=%v attaches=%v\n", gam != nil, attaches)
+		}
+		for _, a := range attaches {
+			container := "InputSignals"
+			if a.side == "out" {
+				container = "OutputSignals"
+			}
+			if gam == nil {
+				continue
+			}
+			cont, ok := gam.Children[container]
+			if !ok {
+				continue
+			}
+			if sig, ok := cont.Children[index.NormalizeName(a.entry)]; ok {
+				sig.Pragmas = append(sig.Pragmas, a.pragmas...)
+			}
+		}
 	}
 	return nil
 }

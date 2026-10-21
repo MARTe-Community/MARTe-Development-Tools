@@ -30,6 +30,7 @@ Commands:
   build   Parse, validate, and merge .marte files into a single output
   check   Validate .marte files and report diagnostics
   fmt     Format .marte files in-place
+  refactor Rewrite configs to the copy-group / compact-signal syntax
   init    Create a new MARTe2 project scaffold
   graph   Launch the interactive signal-flow graph viewer
   version Show mdt version and build information
@@ -95,6 +96,22 @@ Variable files are flat objects ("Name": value); values keep their type
 and timestamps are rejected.
 `
 
+const helpRefactor = `Usage: mdt refactor [flags] [files...]
+
+Rewrite configurations to the current sugar syntax:
+  - IOGAM objects become named copy groups (with per-signal options,
+    aliases and grouped memory blocks where needed)
+  - signal declarations become the compact shorthand forms:
+      GAM:  DataSource::Signal [: Type[Dim]] [as Alias] [= { … }]
+      DS:   Signal: Type[Dim] [= { … }]
+
+Flags:
+  -P <folder>    Scan folder recursively for .marte files
+  --check        Exit non-zero when a file would be rewritten
+  -n, --dry-run  Print the rewritten files instead of writing them
+  -h, --help     Show this help message
+`
+
 const helpFmt = `Usage: mdt fmt <files...>
 
 Format .marte files in-place.
@@ -147,6 +164,8 @@ func printHelp(cmd string) {
 		fmt.Print(helpCheck)
 	case "fmt":
 		fmt.Print(helpFmt)
+	case "refactor":
+		fmt.Print(helpRefactor)
 	case "init":
 		fmt.Print(helpInit)
 	case "graph":
@@ -203,6 +222,12 @@ func main() {
 			os.Exit(0)
 		}
 		runFmt(os.Args[2:])
+	case "refactor":
+		if hasHelpFlag(os.Args[2:]) {
+			printHelp("refactor")
+			os.Exit(0)
+		}
+		runRefactor(os.Args[2:])
 	case "init":
 		if hasHelpFlag(os.Args[2:]) {
 			printHelp("init")

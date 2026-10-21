@@ -240,6 +240,16 @@ condition fails; the build proceeds without fusion.
 
 ## Tooling
 
+* `mdt refactor [-P dir] [--check] [-n] files…` rewrites existing
+  configurations to this syntax automatically: every IOGAM becomes a named
+  copy group (1:1 when the signal counts match, grouped memory blocks when
+  they do not and the byte sizes are known), every `DataSource` signal entry
+  becomes `Signal: Type[Dim] = { … }`, and every GAM signal entry becomes
+  `DS::Signal: Type[Dim] as Alias = { … }`. The rewrite is idempotent,
+  preserves `//!` pragmas (they stay attached to the generated copy items)
+  and reports the number of rewritten declarations per file. `--check` is
+  suitable for CI; `-n` prints instead of writing.
+
 * `mdt build` prints a summary, e.g.
   `Copies: 7 copy pair(s), 1 direct wire(s), 1 GAM pair(s) fused, 1 pipeline(s) expanded`.
 * `mdt check` lowers sugar before validation (sugar counts as a signal
