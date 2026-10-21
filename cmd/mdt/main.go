@@ -223,14 +223,15 @@ func runLSP() {
 	lsp.RunServer()
 }
 
-// applyJSONVars loads JSON variable files into the overrides map.
-// Entries already present (from -v flags) take precedence over file
-// values, matching the "most specific wins" convention.
-func applyJSONVars(jsonFiles []string, overrides map[string]string) {
-	for _, jf := range jsonFiles {
-		vars, err := varsfile.LoadJSON(jf)
+// applyVarsFiles loads variable files (JSON, YAML or TOML, chosen by
+// extension) into the overrides map. Entries already present (from -v
+// flags) take precedence over file values; earlier files take precedence
+// over later ones, matching the "most specific wins" convention.
+func applyVarsFiles(varsFiles []string, overrides map[string]string) {
+	for _, vf := range varsFiles {
+		vars, err := varsfile.Load(vf)
 		if err != nil {
-			logger.Printf("Error loading JSON variables from %s: %v", jf, err)
+			logger.Printf("Error loading variables from %s: %v", vf, err)
 			os.Exit(1)
 		}
 		for k, v := range vars {
@@ -275,7 +276,7 @@ func runBuild(args []string) {
 	outputFile := ""
 	root_path := ""
 	projectFilter := ""
-	jsonFiles := []string{}
+	varsFiles := []string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -286,7 +287,7 @@ func runBuild(args []string) {
 			projectFilter = args[i+1]
 			i++
 		} else if arg == "-j" && i+1 < len(args) {
-			jsonFiles = append(jsonFiles, args[i+1])
+			varsFiles = append(varsFiles, args[i+1])
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -302,7 +303,7 @@ func runBuild(args []string) {
 			files = append(files, arg)
 		}
 	}
-	applyJSONVars(jsonFiles, overrides)
+	applyVarsFiles(varsFiles, overrides)
 	if root_path != "" {
 		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -321,7 +322,7 @@ func runBuild(args []string) {
 
 	files = expandDirectoryInputs(files)
 	if len(files) < 1 {
-		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-j json_vars] [-o output] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-o output] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
@@ -419,7 +420,7 @@ func runCheck(args []string) {
 	overrides := make(map[string]string)
 	root_path := ""
 	projectFilter := ""
-	jsonFiles := []string{}
+	varsFiles := []string{}
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -430,7 +431,7 @@ func runCheck(args []string) {
 			projectFilter = args[i+1]
 			i++
 		} else if arg == "-j" && i+1 < len(args) {
-			jsonFiles = append(jsonFiles, args[i+1])
+			varsFiles = append(varsFiles, args[i+1])
 			i++
 		} else if strings.HasPrefix(arg, "-v") {
 			pair := arg[2:]
@@ -442,7 +443,7 @@ func runCheck(args []string) {
 			files = append(files, arg)
 		}
 	}
-	applyJSONVars(jsonFiles, overrides)
+	applyVarsFiles(varsFiles, overrides)
 
 	if root_path != "" {
 		err := filepath.WalkDir(root_path, func(path string, d fs.DirEntry, err error) error {
@@ -462,7 +463,7 @@ func runCheck(args []string) {
 
 	files = expandDirectoryInputs(files)
 	if len(files) < 1 {
-		logger.Println("Usage: mdt check [-P folder_path] [-p project_name] [-j json_vars] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt check [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 

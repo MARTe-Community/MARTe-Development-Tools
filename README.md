@@ -62,11 +62,11 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   ```
 - **Check**: Run validation on a file or project.
   ```bash
-  mdt check [-P folder_path] [-p project_name] [-vVAR=VAL] <input_files...>
+  mdt check [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-vVAR=VAL] <input_files...>
   ```
 - **Build**: Merge project files into a single output.
   ```bash
-  mdt build [-P folder_path] [-p project_name] [-o output.marte] [-vVAR=VAL] <input_files...>
+  mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-o output.marte] [-vVAR=VAL] <input_files...>
   ```
 - **Format**: Format configuration files.
   ```bash
@@ -75,6 +75,11 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
 - **Graph**: Open an interactive signal-flow graph in the browser.
   ```bash
   mdt graph [-P folder_path] [-p project_name] [-port PORT] [-vVAR=VAL] [files...]
+  ```
+- **Variables from a file**: `-j` loads overrides from a JSON, YAML or
+  TOML file (chosen by extension); `-vVAR=VAL` still wins.
+  ```bash
+  mdt build -P . -j vars.yaml -o out.marte
   ```
 - **LSP**: Start the language server (used by editor plugins).
   ```bash

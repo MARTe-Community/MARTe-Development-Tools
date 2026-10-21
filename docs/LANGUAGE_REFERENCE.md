@@ -422,8 +422,8 @@ same `Name: Type` form instead of a nested `Type = …` object:
 
 | Command                                              | Purpose                             |
 | ---------------------------------------------------- | ----------------------------------- |
-| `mdt check [-P dir] [-p project] [-j vars.json] [-vVAR=VAL] files…` | validate                            |
-| `mdt build [-P dir] [-j vars.json] [-o out] [-vVAR=VAL] files…`     | evaluate + merge to a MARTe2 config |
+| `mdt check [-P dir] [-p project] [-j vars.{json,yaml,toml}] [-vVAR=VAL] files…` | validate        |
+| `mdt build [-P dir] [-j vars.{json,yaml,toml}] [-o out] [-vVAR=VAL] files…` | evaluate + merge |
 | `mdt fmt files…`                                     | canonical formatting                |
 | `mdt graph`                                          | signal-flow graph (DOT/HTML)        |
 | `mdt lsp`                                            | language server                     |
@@ -435,11 +435,30 @@ same `Name: Type` form instead of a nested `Type = …` object:
 - `-P <dir>` and a file list both work for `check` and `build`; passing
   a bare directory as an input behaves like `-P <dir>` (the directory is
   scanned recursively for `*.marte` files).
-- `-j vars.json` loads variable overrides from a flat JSON file
-  (`{ "Name": value, … }`). Later `-j` files override earlier ones;
-  `-vVAR=value` overrides everything. Values keep their JSON types
-  (numbers stay numbers, strings stay quoted, arrays become lists);
-  nested objects are rejected.
+- `-j vars.<ext>` loads variable overrides from a flat file. The
+  format is chosen by the extension: `.json`, `.yaml`/`.yml` or `.toml`:
+
+  ```json
+  { "Streaming": false, "NumChannels": 8, "CPUMask": [1, 2] }
+  ```
+
+  ```yaml
+  Streaming: false
+  NumChannels: 8
+  CPUMask: [1, 2]
+  ```
+
+  ```toml
+  Streaming = false
+  NumChannels = 8
+  CPUMask = [1, 2]
+  ```
+
+  All three forms produce the same MARTe literals: booleans and numbers
+  stay bare, strings stay quoted, arrays become lists. Later `-j` files
+  override earlier ones and `-vVAR=value` overrides everything. Nested
+  objects (including TOML tables and YAML mappings), nulls, and timestamps
+  are rejected; unknown extensions are an error rather than a silent no-op.
 
 ## 13. Validation status of the shipped examples
 

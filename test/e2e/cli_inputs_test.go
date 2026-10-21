@@ -66,3 +66,37 @@ var Streaming: bool = true
 	// -v overrides -j, so the config is valid again.
 	framework.AssertNoErrors(tf, tf.RunCheck("-j", "vars.json", "-vStreaming=true", "main.marte"))
 }
+
+// `-j` accepts YAML and TOML variable files as well as JSON; the same
+// override semantics apply (file values lose to -v).
+func TestYAMLAndTOMLVarsFileOverride(t *testing.T) {
+	for _, tc := range []struct{ name, file, content string }{
+		{"yaml", "vars.yaml", "Streaming: false\n"},
+		{"toml", "vars.toml", "Streaming = false\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := framework.NewTestContext(t)
+			defer ctx.Cleanup()
+			tf := framework.WrapT(t, ctx)
+
+			tf.CreateFile("main.marte", `#package t
+var Streaming: bool = true
++App = {
+  Class = ReferenceContainer
+  #if @Streaming
+    +Streaming_ = {
+      Class = ReferenceContainer
+    }
+  #else
+    +Local = { }
+  #end
+}
+`)
+			tf.CreateFile(tc.file, tc.content)
+
+			framework.AssertNoErrors(tf, tf.RunCheck("main.marte"))
+			framework.AssertErrors(tf, tf.RunCheck("-j", tc.file, "main.marte"), "Class")
+			framework.AssertNoErrors(tf, tf.RunCheck("-j", tc.file, "-vStreaming=true", "main.marte"))
+		})
+	}
+}

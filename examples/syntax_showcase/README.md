@@ -22,8 +22,8 @@ commands used).
 # Whole project (including loops.marte and external.marte):
 mdt check -P .
 
-# With variable overrides — -j loads a JSON variable file, -v wins on
-# conflicts:
+# With variable overrides — -j loads a JSON, YAML or TOML variable file
+# (chosen by extension), -v wins on conflicts:
 mdt check -P . -j vars_streaming_off.json
 mdt check -P . -vudp_streamer=false -vChannelBudget=1
 
