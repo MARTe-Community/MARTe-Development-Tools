@@ -496,6 +496,15 @@ type CopyEndpoint struct {
 
 func (e CopyEndpoint) Pos() Position { return e.Position }
 
+// CopyOption is a per-signal field emitted verbatim into the generated
+// IOGAM signal entry (Type, NumberOfElements, Samples, Frequency, Ranges,
+// Value, Trigger, …).
+type CopyOption struct {
+	Position Position
+	Name     string
+	Value    Value
+}
+
 // CopyItem is one copy line inside a copy group.
 type CopyItem struct {
 	Position Position
@@ -510,6 +519,9 @@ type CopyItem struct {
 	// Optional explicit type for signals that declare none.
 	Type string
 	Dim  int
+	// Per-signal options copied into the generated entries.
+	SrcOptions []CopyOption
+	DstOptions []CopyOption
 }
 
 func (c *CopyItem) Pos() Position { return c.Position }

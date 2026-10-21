@@ -62,6 +62,14 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.SrcAlias = nameTok.Value
 	}
 
+	if p.peek().Type == TokenLBrace {
+		opts, ok := p.parseCopyOptions()
+		if !ok {
+			return item, false
+		}
+		item.SrcOptions = opts
+	}
+
 	if p.peek().Type != TokenArrow {
 		p.addError(p.peek().Position, "expected '->' in copy item")
 		return item, false
@@ -82,6 +90,14 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 			return item, false
 		}
 		item.DstAlias = nameTok.Value
+	}
+
+	if p.peek().Type == TokenLBrace {
+		opts, ok := p.parseCopyOptions()
+		if !ok {
+			return item, false
+		}
+		item.DstOptions = opts
 	}
 
 	if p.peek().Type == TokenIdentifier && p.peek().Value == "at" {
@@ -119,6 +135,49 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.Type, item.Dim = splitTypeAndDim(joinTypeTokens(typeTokens))
 	}
 	return item, true
+}
+
+// parseCopyOptions parses `{ Name = value, … }` per-signal options.
+func (p *Parser) parseCopyOptions() ([]CopyOption, bool) {
+	if p.peek().Type != TokenLBrace {
+		p.addError(p.peek().Position, "expected '{'")
+		return nil, false
+	}
+	p.next() // consume '{'
+	var opts []CopyOption
+	for {
+		t := p.peek()
+		if t.Type == TokenRBrace {
+			p.next()
+			return opts, true
+		}
+		if t.Type == TokenComma {
+			p.next()
+			continue
+		}
+		if t.Type == TokenComment {
+			p.next()
+			continue
+		}
+		if t.Type == TokenEOF {
+			p.addError(t.Position, "unexpected EOF in signal options")
+			return nil, false
+		}
+		nameTok := p.next()
+		if nameTok.Type != TokenIdentifier {
+			p.addError(nameTok.Position, "expected an option name")
+			return nil, false
+		}
+		if p.next().Type != TokenEqual {
+			p.addError(nameTok.Position, "expected '=' after option name")
+			return nil, false
+		}
+		val, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+		opts = append(opts, CopyOption{Position: nameTok.Position, Name: nameTok.Value, Value: val})
+	}
 }
 
 // parseCopyEndpoint parses `GAM.Signal`, `GAM[n]`, `GAM[a..b]` or `DS::Signal`.

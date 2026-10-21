@@ -499,131 +499,24 @@
 }
 
 +Functions = {
-  +ReadADC = {
-    Class = IOGAM
-    InputSignals = {
-      Status = {
-        DataSource = FastADC
-        Frequency = @adc_publish_freq
-      }
-      GY_APS_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_APS_I_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_BPS_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_BPS_I_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_MHV_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_MHV_I_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_ARC1_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_ARC2_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_ARC3_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_RF_V_MEAS = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_MHV_V_MEAS_PSU = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      GY_MHV_I_MEAS_PSU = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      Channel_12 = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      Channel_13 = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      Channel_14 = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-      Channel_15 = {
-        DataSource = FastADC
-        Samples = @samples_adc
-      }
-    }
-    OutputSignals = {
-      PXI6368_Status = {
-        DataSource = DDB4
-      }
-      GY_APS_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_APS_I_MEAS = {
-        DataSource = DDB4
-      }
-      GY_BPS_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_BPS_I_MEAS = {
-        DataSource = DDB4
-      }
-      GY_MHV_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_MHV_I_MEAS = {
-        DataSource = DDB4
-      }
-      GY_ARC1_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_ARC2_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_ARC3_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_RF_V_MEAS = {
-        DataSource = DDB4
-      }
-      GY_MHV_V_MEAS_PSU = {
-        DataSource = DDB4
-      }
-      GY_MHV_I_MEAS_PSU = {
-        DataSource = DDB4
-      }
-      Channel_12 = {
-        DataSource = DDB4
-      }
-      Channel_13 = {
-        DataSource = DDB4
-      }
-      Channel_14 = {
-        DataSource = DDB4
-      }
-      Channel_15 = {
-        DataSource = DDB4
-      }
-    }
+  copy ReadADC {
+    FastADC::Status { Frequency = @adc_publish_freq } -> DDB4::PXI6368_Status
+    FastADC::GY_APS_V_MEAS { Samples = @samples_adc } -> DDB4::GY_APS_V_MEAS
+    FastADC::GY_APS_I_MEAS { Samples = @samples_adc } -> DDB4::GY_APS_I_MEAS
+    FastADC::GY_BPS_V_MEAS { Samples = @samples_adc } -> DDB4::GY_BPS_V_MEAS
+    FastADC::GY_BPS_I_MEAS { Samples = @samples_adc } -> DDB4::GY_BPS_I_MEAS
+    FastADC::GY_MHV_V_MEAS { Samples = @samples_adc } -> DDB4::GY_MHV_V_MEAS
+    FastADC::GY_MHV_I_MEAS { Samples = @samples_adc } -> DDB4::GY_MHV_I_MEAS
+    FastADC::GY_ARC1_V_MEAS { Samples = @samples_adc } -> DDB4::GY_ARC1_V_MEAS
+    FastADC::GY_ARC2_V_MEAS { Samples = @samples_adc } -> DDB4::GY_ARC2_V_MEAS
+    FastADC::GY_ARC3_V_MEAS { Samples = @samples_adc } -> DDB4::GY_ARC3_V_MEAS
+    FastADC::GY_RF_V_MEAS { Samples = @samples_adc } -> DDB4::GY_RF_V_MEAS
+    FastADC::GY_MHV_V_MEAS_PSU { Samples = @samples_adc } -> DDB4::GY_MHV_V_MEAS_PSU
+    FastADC::GY_MHV_I_MEAS_PSU { Samples = @samples_adc } -> DDB4::GY_MHV_I_MEAS_PSU
+    FastADC::Channel_12 { Samples = @samples_adc } -> DDB4::Channel_12
+    FastADC::Channel_13 { Samples = @samples_adc } -> DDB4::Channel_13
+    FastADC::Channel_14 { Samples = @samples_adc } -> DDB4::Channel_14
+    FastADC::Channel_15 { Samples = @samples_adc } -> DDB4::Channel_15
   }
   +AdcTimeStamp = {
     Class = IOExt::SystemClockGAM
@@ -695,253 +588,100 @@
       }
     }
   }
-  copy PushADCtoDAN {
-    DDB4::TRIGGER_DAN -> FastAnalogDAN::Trigger
-    DDB4::Time -> FastAnalogDAN::AI_Time
-    DDB4::GY_APS_V_MEAS -> FastAnalogDAN::GY_APS_V_MEAS
-    DDB4::GY_APS_I_MEAS -> FastAnalogDAN::GY_APS_I_MEAS
-    DDB4::GY_BPS_V_MEAS -> FastAnalogDAN::GY_BPS_V_MEAS
-    DDB4::GY_BPS_I_MEAS -> FastAnalogDAN::GY_BPS_I_MEAS
-    DDB4::GY_MHV_V_MEAS -> FastAnalogDAN::GY_MHV_V_MEAS
-    DDB4::GY_MHV_I_MEAS -> FastAnalogDAN::GY_MHV_I_MEAS
-    DDB4::GY_ARC1_V_MEAS -> FastAnalogDAN::GY_ARC1_V_MEAS
-    DDB4::GY_ARC2_V_MEAS -> FastAnalogDAN::GY_ARC2_V_MEAS
-    DDB4::GY_ARC3_V_MEAS -> FastAnalogDAN::GY_ARC3_V_MEAS
-    DDB4::GY_RF_V_MEAS -> FastAnalogDAN::GY_RF_V_MEAS
-    DDB4::GY_MHV_V_MEAS_PSU -> FastAnalogDAN::GY_MHV_V_MEAS_PSU
-    DDB4::GY_MHV_I_MEAS_PSU -> FastAnalogDAN::GY_MHV_I_MEAS_PSU
-    DDB4::Channel_12 -> FastAnalogDAN::Channel_12
-    DDB4::Channel_13 -> FastAnalogDAN::Channel_13
-    DDB4::Channel_14 -> FastAnalogDAN::Channel_14
-    DDB4::Channel_15 -> FastAnalogDAN::Channel_15
+  //# ADC publication pipeline: bind the source signals once for the
+  //# DAN and EPICS publishers (the UDP one is conditional and stays separate).
+  gam AdcPublication {
+    in TRIGGER_DAN
+    in Time
+    in GY_APS_V_MEAS
+    in GY_APS_I_MEAS
+    in GY_BPS_V_MEAS
+    in GY_BPS_I_MEAS
+    in GY_MHV_V_MEAS
+    in GY_MHV_I_MEAS
+    in GY_ARC1_V_MEAS
+    in GY_ARC2_V_MEAS
+    in GY_ARC3_V_MEAS
+    in GY_RF_V_MEAS
+    in GY_MHV_V_MEAS_PSU
+    in GY_MHV_I_MEAS_PSU
+    in Channel_12
+    in Channel_13
+    in Channel_14
+    in Channel_15
+    in PXI6368_Status
+    copy PushADCtoDAN {
+      TRIGGER_DAN -> FastAnalogDAN::Trigger
+      Time -> FastAnalogDAN::AI_Time
+      GY_APS_V_MEAS -> FastAnalogDAN::GY_APS_V_MEAS
+      GY_APS_I_MEAS -> FastAnalogDAN::GY_APS_I_MEAS
+      GY_BPS_V_MEAS -> FastAnalogDAN::GY_BPS_V_MEAS
+      GY_BPS_I_MEAS -> FastAnalogDAN::GY_BPS_I_MEAS
+      GY_MHV_V_MEAS -> FastAnalogDAN::GY_MHV_V_MEAS
+      GY_MHV_I_MEAS -> FastAnalogDAN::GY_MHV_I_MEAS
+      GY_ARC1_V_MEAS -> FastAnalogDAN::GY_ARC1_V_MEAS
+      GY_ARC2_V_MEAS -> FastAnalogDAN::GY_ARC2_V_MEAS
+      GY_ARC3_V_MEAS -> FastAnalogDAN::GY_ARC3_V_MEAS
+      GY_RF_V_MEAS -> FastAnalogDAN::GY_RF_V_MEAS
+      GY_MHV_V_MEAS_PSU -> FastAnalogDAN::GY_MHV_V_MEAS_PSU
+      GY_MHV_I_MEAS_PSU -> FastAnalogDAN::GY_MHV_I_MEAS_PSU
+      Channel_12 -> FastAnalogDAN::Channel_12
+      Channel_13 -> FastAnalogDAN::Channel_13
+      Channel_14 -> FastAnalogDAN::Channel_14
+      Channel_15 -> FastAnalogDAN::Channel_15
+    }
+    copy PushADCtoEpics {
+      PXI6368_Status as PXI6368_Status_Async -> Th4Bridge::PXI6368_Status as PXI6368_Status_Async
+      TRIGGER_DAN -> AnalogEpicsOutput::TRIGGER_DAN
+      PXI6368_Status -> AnalogEpicsOutput::PXI6368_Status
+      GY_APS_V_MEAS as GY_APS_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_APS_V_MEAS as GY_APS_V_MEAS_Async
+      GY_APS_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_APS_V_MEAS
+      GY_APS_I_MEAS as GY_APS_I_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_APS_I_MEAS as GY_APS_I_MEAS_Async
+      GY_APS_I_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_APS_I_MEAS
+      GY_BPS_V_MEAS as GY_BPS_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_BPS_V_MEAS as GY_BPS_V_MEAS_Async
+      GY_BPS_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_BPS_V_MEAS
+      GY_BPS_I_MEAS as GY_BPS_I_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_BPS_I_MEAS as GY_BPS_I_MEAS_Async
+      GY_BPS_I_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_BPS_I_MEAS
+      GY_MHV_V_MEAS as GY_MHV_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_MHV_V_MEAS as GY_MHV_V_MEAS_Async
+      GY_MHV_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_MHV_V_MEAS
+      GY_MHV_I_MEAS as GY_MHV_I_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_MHV_I_MEAS as GY_MHV_I_MEAS_Async
+      GY_MHV_I_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_MHV_I_MEAS
+      GY_ARC1_V_MEAS as GY_ARC1_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_ARC1_V_MEAS as GY_ARC1_V_MEAS_Async
+      GY_ARC1_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_ARC1_V_MEAS
+      GY_ARC2_V_MEAS as GY_ARC2_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_ARC2_V_MEAS as GY_ARC2_V_MEAS_Async
+      GY_ARC2_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_ARC2_V_MEAS
+      GY_ARC3_V_MEAS as GY_ARC3_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_ARC3_V_MEAS as GY_ARC3_V_MEAS_Async
+      GY_ARC3_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_ARC3_V_MEAS
+      GY_RF_V_MEAS as GY_RF_V_MEAS_Async { Ranges = { { 0, 0 } } }  -> Th4Bridge::GY_RF_V_MEAS as GY_RF_V_MEAS_Async
+      GY_RF_V_MEAS { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_RF_V_MEAS
+      GY_MHV_V_MEAS_PSU { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_MHV_V_MEAS_PSU
+      GY_MHV_I_MEAS_PSU { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::GY_MHV_I_MEAS_PSU
+      Channel_12 { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::Channel_12
+      Channel_13 { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::Channel_13
+      Channel_14 { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::Channel_14
+      Channel_15 { Ranges = { { 0, 0 } } }  -> AnalogEpicsOutput::Channel_15
+    }
   }
-  +PushADCtoEpics = {
-    Class = IOGAM
-    InputSignals = {
-      PXI6368_Status_Async = {
-        Alias = PXI6368_Status
-        DataSource = DDB4
-      }
-      TRIGGER_DAN = {
-        DataSource = DDB4
-      }
-      PXI6368_Status = {
-        DataSource = DDB4
-      }
-      GY_APS_V_MEAS_Async = {
-        Alias = GY_APS_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_APS_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_APS_I_MEAS_Async = {
-        Alias = GY_APS_I_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_APS_I_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_BPS_V_MEAS_Async = {
-        Alias = GY_BPS_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_BPS_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_BPS_I_MEAS_Async = {
-        Alias = GY_BPS_I_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_BPS_I_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_V_MEAS_Async = {
-        Alias = GY_MHV_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_I_MEAS_Async = {
-        Alias = GY_MHV_I_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_I_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC1_V_MEAS_Async = {
-        Alias = GY_ARC1_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC1_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC2_V_MEAS_Async = {
-        Alias = GY_ARC2_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC2_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC3_V_MEAS_Async = {
-        Alias = GY_ARC3_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_ARC3_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_RF_V_MEAS_Async = {
-        Alias = GY_RF_V_MEAS
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_RF_V_MEAS = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_V_MEAS_PSU = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      GY_MHV_I_MEAS_PSU = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      Channel_12 = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      Channel_13 = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      Channel_14 = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-      Channel_15 = {
-        DataSource = DDB4
-        Ranges = { { 0, 0 } }
-      }
-    }
-    OutputSignals = {
-      PXI6368_Status_Async = {
-        Alias = PXI6368_Status
-        DataSource = Th4Bridge
-      }
-      TRIGGER_DAN = {
-        DataSource = AnalogEpicsOutput
-      }
-      PXI6368_Status = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_APS_V_MEAS_Async = {
-        Alias = GY_APS_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_APS_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_APS_I_MEAS_Async = {
-        Alias = GY_APS_I_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_APS_I_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_BPS_V_MEAS_Async = {
-        Alias = GY_BPS_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_BPS_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_BPS_I_MEAS_Async = {
-        Alias = GY_BPS_I_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_BPS_I_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_MHV_V_MEAS_Async = {
-        Alias = GY_MHV_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_MHV_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_MHV_I_MEAS_Async = {
-        Alias = GY_MHV_I_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_MHV_I_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_ARC1_V_MEAS_Async = {
-        Alias = GY_ARC1_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_ARC1_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_ARC2_V_MEAS_Async = {
-        Alias = GY_ARC2_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_ARC2_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_ARC3_V_MEAS_Async = {
-        Alias = GY_ARC3_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_ARC3_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_RF_V_MEAS_Async = {
-        Alias = GY_RF_V_MEAS
-        DataSource = Th4Bridge
-      }
-      GY_RF_V_MEAS = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_MHV_V_MEAS_PSU = {
-        DataSource = AnalogEpicsOutput
-      }
-      GY_MHV_I_MEAS_PSU = {
-        DataSource = AnalogEpicsOutput
-      }
-      Channel_12 = {
-        DataSource = AnalogEpicsOutput
-      }
-      Channel_13 = {
-        DataSource = AnalogEpicsOutput
-      }
-      Channel_14 = {
-        DataSource = AnalogEpicsOutput
-      }
-      Channel_15 = {
-        DataSource = AnalogEpicsOutput
-      }
-    }
+  +AdcPublication_ = {
+    Class = AdcPublication
+    TRIGGER_DAN = DDB4::TRIGGER_DAN
+    Time = DDB4::Time
+    GY_APS_V_MEAS = DDB4::GY_APS_V_MEAS
+    GY_APS_I_MEAS = DDB4::GY_APS_I_MEAS
+    GY_BPS_V_MEAS = DDB4::GY_BPS_V_MEAS
+    GY_BPS_I_MEAS = DDB4::GY_BPS_I_MEAS
+    GY_MHV_V_MEAS = DDB4::GY_MHV_V_MEAS
+    GY_MHV_I_MEAS = DDB4::GY_MHV_I_MEAS
+    GY_ARC1_V_MEAS = DDB4::GY_ARC1_V_MEAS
+    GY_ARC2_V_MEAS = DDB4::GY_ARC2_V_MEAS
+    GY_ARC3_V_MEAS = DDB4::GY_ARC3_V_MEAS
+    GY_RF_V_MEAS = DDB4::GY_RF_V_MEAS
+    GY_MHV_V_MEAS_PSU = DDB4::GY_MHV_V_MEAS_PSU
+    GY_MHV_I_MEAS_PSU = DDB4::GY_MHV_I_MEAS_PSU
+    Channel_12 = DDB4::Channel_12
+    Channel_13 = DDB4::Channel_13
+    Channel_14 = DDB4::Channel_14
+    Channel_15 = DDB4::Channel_15
+    PXI6368_Status = DDB4::PXI6368_Status
   }
 }

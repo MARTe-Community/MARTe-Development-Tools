@@ -136,127 +136,26 @@
 }
 +Functions = {
   #if @sdn_enabled
-    +SDNCommandGAM = {
-      Class = IOGAM
-      InputSignals = {
-        Command = {
-          DataSource = SDNCommands
-          NumberOfDimensions = 1
-          NumberOfElements = 64
-          Ranges = { { 0, 0 } }
-        }
-        ESDNTime = {
-          DataSource = SDNCommands
-          NumberOfDimensions = 1
-          NumberOfElements = 1
-        }
-      }
-      OutputSignals = {
-        Command = {
-          DataSource = Th2Bridge
-        }
-        ESDNTime = {
-          DataSource = DDB2
-        }
-      }
+    copy SDNCommandGAM {
+      SDNCommands::Command { NumberOfDimensions = 1  NumberOfElements = 64  Ranges = { { 0, 0 } } } -> Th2Bridge::Command
+      SDNCommands::ESDNTime { NumberOfDimensions = 1  NumberOfElements = 1 } -> DDB2::ESDNTime
     }
-    +SDNReplyGAM = {
-      Class = IOGAM
-      InputSignals = {
-        ESDNTime = {
-          DataSource = DDB2
-        }
-        WaveformPacketID = {
-          DataSource = DDB2
-        }
-        GY_BPS_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_BPS_I_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_APS_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_APS_I_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_ARC1_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_ARC2_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_ARC3_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_MHV_V_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_MHV_I_MEAS = {
-          DataSource = Th4Bridge
-        }
-        GY_MCPS_CURR_MON = {
-          DataSource = EPICSCAInput
-        }
-        GY_GCPS_CURR_MON = {
-          DataSource = EPICSCAInput
-        }
-        GY_FHPS_MEAS_ACI = {
-          DataSource = EPICSCAInput
-        }
-        GY_CCPS_MEAS_DCI = {
-          DataSource = EPICSCAInput
-        }
-      }
-      OutputSignals = {
-        ESDNTime = {
-          DataSource = SDNReply
-        }
-        ReplyWaveformAck = {
-          DataSource = SDNReply
-        }
-        GYA_BPS_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_BPS_MESCURR = {
-          DataSource = SDNReply
-        }
-        GYA_APS_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_APS_MESCURR = {
-          DataSource = SDNReply
-        }
-        GYA_ARC1_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_ARC2_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_ARC3_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_MHVPS_MESVOLT = {
-          DataSource = SDNReply
-        }
-        GYA_MHVPS_MESCURR = {
-          DataSource = SDNReply
-        }
-        GYA_MCPS_CURR_MON = {
-          DataSource = SDNReply
-        }
-        GYA_GCPS_CURR_MON = {
-          DataSource = SDNReply
-        }
-        GYA_FHPS_MEAS_ACI = {
-          DataSource = SDNReply
-        }
-        GYA_CCPS_MEAS_DCI = {
-          DataSource = SDNReply
-          Trigger = 1
-        }
-      }
+    copy SDNReplyGAM {
+      DDB2::ESDNTime -> SDNReply::ESDNTime
+      DDB2::WaveformPacketID -> SDNReply::ReplyWaveformAck
+      Th4Bridge::GY_BPS_V_MEAS -> SDNReply::GYA_BPS_MESVOLT
+      Th4Bridge::GY_BPS_I_MEAS -> SDNReply::GYA_BPS_MESCURR
+      Th4Bridge::GY_APS_V_MEAS -> SDNReply::GYA_APS_MESVOLT
+      Th4Bridge::GY_APS_I_MEAS -> SDNReply::GYA_APS_MESCURR
+      Th4Bridge::GY_ARC1_V_MEAS -> SDNReply::GYA_ARC1_MESVOLT
+      Th4Bridge::GY_ARC2_V_MEAS -> SDNReply::GYA_ARC2_MESVOLT
+      Th4Bridge::GY_ARC3_V_MEAS -> SDNReply::GYA_ARC3_MESVOLT
+      Th4Bridge::GY_MHV_V_MEAS -> SDNReply::GYA_MHVPS_MESVOLT
+      Th4Bridge::GY_MHV_I_MEAS -> SDNReply::GYA_MHVPS_MESCURR
+      EPICSCAInput::GY_MCPS_CURR_MON -> SDNReply::GYA_MCPS_CURR_MON
+      EPICSCAInput::GY_GCPS_CURR_MON -> SDNReply::GYA_GCPS_CURR_MON
+      EPICSCAInput::GY_FHPS_MEAS_ACI -> SDNReply::GYA_FHPS_MEAS_ACI
+      EPICSCAInput::GY_CCPS_MEAS_DCI -> SDNReply::GYA_CCPS_MEAS_DCI { Trigger = 1 }
     }
   #end
 }

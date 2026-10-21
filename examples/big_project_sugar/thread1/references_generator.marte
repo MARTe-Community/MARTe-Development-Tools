@@ -1,28 +1,9 @@
 #package jada_gyro.RTApp.Functions
 
 //# MCPS, GCPS PV to DDB1
-+MCPSGAM = {
-  Class = IOGAM
-  InputSignals = {
-    MCPS_TRG_CURR_MANUAL = {
-      DataSource = EPICSCAInput
-      Type = float32
-    }
-    GCPS_TRG_CURR_MANUAL = {
-      DataSource = EPICSCAInput
-      Type = float32
-    }
-  }
-  OutputSignals = {
-    MCPS_TRG_CURR_SET = {
-      DataSource = DDB1
-      Type = float32
-    }
-    GCPS_TRG_CURR_SET = {
-      DataSource = DDB1
-      Type = float32
-    }
-  }
+copy MCPSGAM {
+  EPICSCAInput::MCPS_TRG_CURR_MANUAL { Type = float32 } -> DDB1::MCPS_TRG_CURR_SET { Type = float32 }
+  EPICSCAInput::GCPS_TRG_CURR_MANUAL { Type = float32 } -> DDB1::GCPS_TRG_CURR_SET { Type = float32 }
 }
 //# Switching AO port source between internal variable and EPICS PV.
 +ChoiceGAM = {

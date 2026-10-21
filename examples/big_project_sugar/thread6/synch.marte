@@ -73,76 +73,15 @@
   }
 }
 +Functions = {
-  +WGProducerGAM = {
-    Class = IOGAM
-    InputSignals = {
-      CCPS_REF = {
-        DataSource = DDB6
-      }
-      CCPS_REF_OUT = {
-        Alias = CCPS_REF
-        DataSource = DDB6
-      }
-      FHPS_A_SCALED = {
-        DataSource = DDB6
-      }
-      DDB6::FHPS_B_SCALED
-      BPS_VREF = {
-        Alias = BPS_OUT
-        Type = float32
-        DataSource = Th1Bridge
-      }
-      APS_VREF = {
-        Alias = APS_OUT
-        Type = float32
-        DataSource = Th1Bridge
-      }
-      MAIN_VREF = {
-        Alias = MHVPS_OUT
-        Type = float32
-        DataSource = Th1Bridge
-      }
-      FHPS_A_REF_OUT = {
-        Alias = FHPS_A_REF
-        DataSource = DDB6
-      }
-      FHPS_A_AUTO_STAT = {
-        DataSource = DDB6
-      }
-    }
-    OutputSignals = {
-      CCPS_REF = {
-        DataSource = WGAsyncBridge
-      }
-      CCPS_REF_OUT = {
-        Alias = CCPS_REF
-        DataSource = NI6259_AO
-      }
-      FHPS_REF_A_OUT = {
-        Alias = FHPS_A_REF
-        DataSource = NI6259_AO
-        Trigger = 1
-      }
-      NI6259_AO::FHPS_B_REF
-      BPS_VREF = {
-        Type = float32
-        DataSource = NI6368_AO
-      }
-      APS_VREF = {
-        Type = float32
-        DataSource = NI6368_AO
-      }
-      MAIN_VREF = {
-        Type = float32
-        DataSource = NI6368_AO
-        Trigger = 1
-      }
-      FHPS_A_REF = {
-        DataSource = WGAsyncBridge
-      }
-      FHPS_A_AUTO_STAT = {
-        DataSource = WGAsyncBridge
-      }
-    }
+  copy WGProducerGAM {
+    DDB6::CCPS_REF -> WGAsyncBridge::CCPS_REF
+    DDB6::CCPS_REF as CCPS_REF_OUT -> NI6259_AO::CCPS_REF as CCPS_REF_OUT
+    DDB6::FHPS_A_SCALED -> NI6259_AO::FHPS_A_REF as FHPS_REF_A_OUT { Trigger = 1 }
+    Th1Bridge::BPS_OUT as BPS_VREF { Type = float32 } -> NI6368_AO::BPS_VREF { Type = float32 }
+    Th1Bridge::APS_OUT as APS_VREF { Type = float32 } -> NI6368_AO::APS_VREF { Type = float32 }
+    Th1Bridge::MHVPS_OUT as MAIN_VREF { Type = float32 } -> NI6368_AO::MAIN_VREF { Type = float32  Trigger = 1 }
+    DDB6::FHPS_A_REF as FHPS_A_REF_OUT -> WGAsyncBridge::FHPS_A_REF
+    DDB6::FHPS_A_AUTO_STAT -> WGAsyncBridge::FHPS_A_AUTO_STAT
+    DDB6::FHPS_B_SCALED -> NI6259_AO::FHPS_B_REF
   }
 }

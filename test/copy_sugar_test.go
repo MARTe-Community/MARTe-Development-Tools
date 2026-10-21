@@ -471,3 +471,45 @@ func TestCopyAnonymousGroupOutsideFunctionsList(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+// Per-signal options are emitted verbatim into the generated IOGAM entries
+// and feed type inference for synthesized destination signals.
+func TestCopyPerSignalOptions(t *testing.T) {
+	src := copyAppArray(`copy {
+      Acq.T1 { Type = uint32  Samples = @Samples  Frequency = 2 } -> Filter.In2
+      Acq.T2 { Ranges = { { 0, 0 } } } -> Filter.In3 { Trigger = 1 }
+      Acq.T1 -> Filter.In4 { Type = float64 }
+    }`)
+	src = strings.Replace(src, "var on: bool = true", "", 1)
+	src = strings.Replace(src, "    +Filter = {", `    +Filter = {
+`, 1)
+	out, rep, err := buildSugar(t, src, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if rep.Copies != 3 {
+		t.Errorf("Copies = %d, want 3 (%s)", rep.Copies, rep)
+	}
+	for _, want := range []string{
+		`Samples = @Samples`,
+		"Frequency = 2",
+		"Ranges = { { 0 0 } }",
+		"Trigger = 1",
+		"Type = uint32",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("option %q not emitted:\n%s", want, out)
+		}
+	}
+	// The synthesized destination buffer uses the type from the
+	// destination option.
+	bufStart := strings.Index(out, "In4 = {")
+	if bufStart < 0 {
+		t.Fatalf("synthesized signal In4 missing:\n%s", out)
+	}
+	buf := out[bufStart:]
+	buf = buf[:strings.Index(buf, "}\n")]
+	if !strings.Contains(buf, "Type = float64") {
+		t.Errorf("buffer signal type not inferred from the destination option:\n%s", buf)
+	}
+}

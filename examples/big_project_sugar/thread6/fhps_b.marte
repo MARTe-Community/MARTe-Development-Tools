@@ -4,19 +4,8 @@
 +Functions = {
 
   //# Flat FHPS Setpoint.
-  +FHPS_B_SetpointGAM = {
-    Class = IOGAM
-    InputSignals = {
-      FHPS_B_AUTO_TAGV = {
-        DataSource = EPICSCAInput
-        Type = float32
-      }
-    }
-    OutputSignals = {
-      FHPS_B_TAGV = {
-        DataSource = DDB6
-      }
-    }
+  copy FHPS_B_SetpointGAM {
+    EPICSCAInput::FHPS_B_AUTO_TAGV { Type = float32 } -> DDB6::FHPS_B_TAGV
   }
 
   //# Filament heating rampup reference generator

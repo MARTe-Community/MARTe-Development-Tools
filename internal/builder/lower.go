@@ -62,6 +62,8 @@ type copyPair struct {
 	typ       string
 	dim       int
 	position  parser.Position
+	srcOpts   []parser.CopyOption
+	dstOpts   []parser.CopyOption
 }
 
 // lowerAll lowers every root of the tree (the root node plus isolated files).
@@ -346,13 +348,18 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 			name = fmt.Sprintf("MdtCopy%d", l.seq)
 		}
 		// Drop the sugar definition first so the generated GAM can take its
-		// slot without shifting it.
+		// slot without shifting it. Locate it by identity: earlier
+		// insertions in the same fragment shift the recorded indices.
 		var insertFrag *index.Fragment
 		insertAt := -1
 		if p.frag != nil {
-			insertAt = p.index
+			if idx := indexOfDefinition(p.frag.Definitions, p.group); idx >= 0 {
+				insertAt = idx
+				p.frag.Definitions[idx] = nil
+			} else {
+				insertAt = p.index
+			}
 			insertFrag = p.frag
-			p.frag.Definitions[p.index] = nil
 		}
 		if err := l.emitCopyGAM(owner, name, pairs, p.group.Position, rep, insertAt, insertFrag); err != nil {
 			return err
@@ -426,6 +433,11 @@ func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyP
 		}
 
 		typ, dim := srcs[0].typ, srcs[0].dim
+		if t, d, ok := optionType(item.SrcOptions); ok {
+			typ, dim = t, d
+		} else if t, d, ok := optionType(item.DstOptions); ok {
+			typ, dim = t, d
+		}
 		if item.Type != "" {
 			typ, dim = item.Type, item.Dim
 		}
@@ -458,8 +470,14 @@ func (l *lowerer) pair(item parser.CopyItem, src, dst signalRef) (copyPair, bool
 		typ:       src.typ,
 		dim:       src.dim,
 		position:  item.Position,
+		srcOpts:   item.SrcOptions,
+		dstOpts:   item.DstOptions,
 	}
-	if p.typ == "" {
+	if typ, dim, ok := optionType(item.SrcOptions); ok {
+		p.typ, p.dim = typ, dim
+	} else if typ, dim, ok := optionType(item.DstOptions); ok {
+		p.typ, p.dim = typ, dim
+	} else if p.typ == "" {
 		p.typ, p.dim = dst.typ, dst.dim
 	}
 	if item.Type != "" {
@@ -469,6 +487,24 @@ func (l *lowerer) pair(item parser.CopyItem, src, dst signalRef) (copyPair, bool
 		return p, false
 	}
 	return p, true
+}
+
+// optionType extracts Type/NumberOfElements from a signal's options.
+func optionType(opts []parser.CopyOption) (string, int, bool) {
+	typ, dim := "", 0
+	found := false
+	for _, o := range opts {
+		switch o.Name {
+		case "Type":
+			typ = literalText(o.Value)
+			found = true
+		case "NumberOfElements":
+			if v, err := strconv.Atoi(literalText(o.Value)); err == nil {
+				dim = v
+			}
+		}
+	}
+	return typ, dim, found
 }
 
 // resolveDestinationRange resolves an index range to existing destination
@@ -794,6 +830,16 @@ func (l *lowerer) ensureSignalContainer(gam *index.ProjectNode, name string) *in
 	return gam
 }
 
+// indexOfDefinition returns the position of def in defs, or -1.
+func indexOfDefinition(defs []parser.Definition, def parser.Definition) int {
+	for i, d := range defs {
+		if d == def {
+			return i
+		}
+	}
+	return -1
+}
+
 // insertDefinitionInFrag inserts def at index of a specific fragment.
 func (l *lowerer) insertDefinitionInFrag(owner *index.ProjectNode, frag *index.Fragment, index int, def parser.Definition) {
 	if index < 0 || index > len(frag.Definitions) {
@@ -1008,6 +1054,9 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []cop
 				Position: p.position, Name: "Alias", Value: &parser.StringValue{Position: p.position, Value: p.srcSignal, Quoted: true},
 			})
 		}
+		for _, o := range p.srcOpts {
+			in.Subnode.Definitions = append(in.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
+		}
 		inputs.Subnode.Definitions = append(inputs.Subnode.Definitions, in)
 
 		outName := p.dstAlias
@@ -1027,6 +1076,9 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []cop
 			out.Subnode.Definitions = append(out.Subnode.Definitions, &parser.Field{
 				Position: p.position, Name: "Alias", Value: &parser.StringValue{Position: p.position, Value: p.dstSignal, Quoted: true},
 			})
+		}
+		for _, o := range p.dstOpts {
+			out.Subnode.Definitions = append(out.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
 		}
 		outputs.Subnode.Definitions = append(outputs.Subnode.Definitions, out)
 		rep.Copies++

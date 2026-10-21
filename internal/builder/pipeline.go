@@ -36,13 +36,14 @@ func (l *lowerer) expandPipelines(root *index.ProjectNode, rep *LowerReport) err
 	}
 
 	type expansion struct {
-		node  *index.ProjectNode
-		frag  *index.Fragment
-		index int
-		name  string
-		elems []parser.Value
-		defs  []parser.Definition
-		err   error
+		node    *index.ProjectNode
+		frag    *index.Fragment
+		index   int
+		name    string
+		elems   []parser.Value
+		defs    []parser.Definition
+		unnamed []*parser.CopyGroup
+		err     error
 	}
 	var expansions []expansion
 
@@ -58,10 +59,10 @@ func (l *lowerer) expandPipelines(root *index.ProjectNode, rep *LowerReport) err
 					continue
 				}
 				instanceName := index.NormalizeName(literalText(obj.Name))
-				elems, generated, err := l.expandInstance(pipeline, instanceName, obj)
+				elems, generated, unnamed, err := l.expandInstance(pipeline, instanceName, obj)
 				expansions = append(expansions, expansion{
 					node: n, frag: frag, index: i, name: instanceName,
-					elems: elems, defs: generated, err: err,
+					elems: elems, defs: generated, unnamed: unnamed, err: err,
 				})
 			}
 		}
@@ -82,11 +83,19 @@ func (l *lowerer) expandPipelines(root *index.ProjectNode, rep *LowerReport) err
 			newDefs = append(newDefs, def)
 		}
 		e.frag.Definitions = newDefs
+		referenced := l.replaceFunctionsElement(e.name, e.elems)
+		if !referenced && len(e.unnamed) > 0 {
+			return fmt.Errorf("%d:%d: pipeline %q uses anonymous copy groups but is not referenced by any Functions list",
+				e.frag.ObjectPos.Line, e.frag.ObjectPos.Column, e.name)
+		}
 		for _, def := range e.defs {
+			if _, isGroup := def.(*parser.CopyGroup); isGroup && referenced {
+				// The groups live in the Functions list instead.
+				continue
+			}
 			l.indexDefinition(e.node, def, e.frag.File)
 		}
 		delete(e.node.Children, e.name)
-		l.replaceFunctionsElement(e.name, e.elems)
 		rep.Pipelines++
 	}
 	return nil
@@ -103,7 +112,7 @@ func (l *lowerer) classOfObject(obj *parser.ObjectNode) string {
 }
 
 // expandInstance builds the generated definitions and Functions elements.
-func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string, obj *parser.ObjectNode) ([]parser.Value, []parser.Definition, error) {
+func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string, obj *parser.ObjectNode) ([]parser.Value, []parser.Definition, []*parser.CopyGroup, error) {
 	bindings := map[string]parser.CopyEndpoint{}
 	for _, def := range obj.Subnode.Definitions {
 		f, ok := def.(*parser.Field)
@@ -112,7 +121,7 @@ func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string
 		}
 		ep, err := endpointFromBinding(f.Value)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%d:%d: port %q: %v", f.Position.Line, f.Position.Column, f.Name, err)
+			return nil, nil, nil, fmt.Errorf("%d:%d: port %q: %v", f.Position.Line, f.Position.Column, f.Name, err)
 		}
 		bindings[f.Name] = ep
 	}
@@ -135,12 +144,12 @@ func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string
 	}
 	for _, p := range pipeline.Inputs {
 		if _, ok := bindings[p.Name]; !ok {
-			return nil, nil, fmt.Errorf("pipeline %q: input port %q is not bound", pipeline.Name, p.Name)
+			return nil, nil, nil, fmt.Errorf("pipeline %q: input port %q is not bound", pipeline.Name, p.Name)
 		}
 	}
 	for _, p := range pipeline.Outputs {
 		if _, ok := bindings[p.Name]; !ok {
-			return nil, nil, fmt.Errorf("pipeline %q: output port %q is not bound", pipeline.Name, p.Name)
+			return nil, nil, nil, fmt.Errorf("pipeline %q: output port %q is not bound", pipeline.Name, p.Name)
 		}
 	}
 
@@ -151,6 +160,13 @@ func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string
 		group *parser.CopyGroup
 		name  string
 	}
+	prefix := strings.TrimSuffix(instance, "_") + "_"
+	bodyGAMs := map[string]bool{}
+	for _, b := range pipeline.Body {
+		if obj, ok := b.(*parser.ObjectNode); ok {
+			bodyGAMs[index.NormalizeName(literalText(obj.Name))] = true
+		}
+	}
 	var items []bodyItem
 	for _, body := range pipeline.Body {
 		switch d := body.(type) {
@@ -159,8 +175,8 @@ func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string
 		case *parser.CopyGroup:
 			group := &parser.CopyGroup{Position: d.Position, EndPosition: d.EndPosition, Name: d.Name}
 			for _, item := range d.Items {
-				item.Src = l.rewriteEndpoint(item.Src, bindings, instance, isInput, isOutput, true)
-				item.Dst = l.rewriteEndpoint(item.Dst, bindings, instance, isInput, isOutput, false)
+				item.Src = l.rewriteEndpoint(item.Src, bindings, prefix, bodyGAMs, isInput, isOutput, true)
+				item.Dst = l.rewriteEndpoint(item.Dst, bindings, prefix, bodyGAMs, isInput, isOutput, false)
 				group.Items = append(group.Items, item)
 			}
 			items = append(items, bodyItem{group: group})
@@ -226,50 +242,53 @@ func (l *lowerer) expandInstance(pipeline *parser.GamDefinition, instance string
 
 	var elems []parser.Value
 	var generated []parser.Definition
+	var unnamed []*parser.CopyGroup
+	addGroup := func(g *parser.CopyGroup) {
+		elems = append(elems, g)
+		if g.Name == "" {
+			unnamed = append(unnamed, g)
+			return
+		}
+		generated = append(generated, g)
+	}
 	for gi := range gamOrder {
 		// Wiring feeding this GAM runs first.
 		for _, g := range scheduled[gi] {
-			elems = append(elems, g)
+			addGroup(g)
 		}
 		for _, it := range items {
 			if it.gam != nil && it.name == gamOrder[gi] {
-				clone := cloneObjectWithPrefix(it.gam, instance+"_")
+				clone := cloneObjectWithPrefix(it.gam, prefix)
 				generated = append(generated, clone)
-				elems = append(elems, &parser.ReferenceValue{Position: it.gam.Position, Value: instance + "_" + it.name})
+				elems = append(elems, &parser.ReferenceValue{Position: it.gam.Position, Value: prefix + it.name})
 				break
 			}
 		}
 	}
 	for _, g := range tail {
-		elems = append(elems, g)
+		addGroup(g)
 	}
-	return elems, generated, nil
+	return elems, generated, unnamed, nil
 }
 
 // rewriteEndpoint substitutes ports with their bindings and prefixes
 // internal GAM names with the instance name.
 func (l *lowerer) rewriteEndpoint(ep parser.CopyEndpoint, bindings map[string]parser.CopyEndpoint,
-	instance string, isInput, isOutput func(string) bool, asSource bool) parser.CopyEndpoint {
+	prefix string, bodyGAMs map[string]bool, isInput, isOutput func(string) bool, asSource bool) parser.CopyEndpoint {
+	if ep.IsDS {
+		// DataSource endpoints are external to the pipeline.
+		return ep
+	}
 	name := index.NormalizeName(ep.Object)
 	if bound, ok := bindings[name]; ok {
-		if asSource && isOutput(name) {
-			// An output port as a source: use the bound signal (fan-out
-			// from the pipeline output back into the body).
-			return bound
-		}
-		if !asSource && isInput(name) {
-			// An input port as a destination: write into the bound signal.
-			return bound
-		}
 		return bound
 	}
-	if isInput(name) && !asSource {
+	if isInput(name) || isOutput(name) {
 		return ep
 	}
-	if isOutput(name) && asSource {
-		return ep
+	if bodyGAMs[name] {
+		ep.Object = prefix + name
 	}
-	ep.Object = instance + "_" + name
 	return ep
 }
 
@@ -369,10 +388,11 @@ func cloneValue(v parser.Value, prefix string) parser.Value {
 
 // replaceFunctionsElement expands a pipeline instance reference in every
 // Functions list into the generated elements.
-func (l *lowerer) replaceFunctionsElement(instance string, elems []parser.Value) {
+func (l *lowerer) replaceFunctionsElement(instance string, elems []parser.Value) bool {
 	if len(elems) == 0 {
-		return
+		return false
 	}
+	replaced := false
 	l.tree.Walk(func(n *index.ProjectNode) {
 		for _, frag := range n.Fragments {
 			for _, def := range frag.Definitions {
@@ -401,8 +421,10 @@ func (l *lowerer) replaceFunctionsElement(instance string, elems []parser.Value)
 				}
 				if changed {
 					arr.Elements = out
+					replaced = true
 				}
 			}
 		}
 	})
+	return replaced
 }

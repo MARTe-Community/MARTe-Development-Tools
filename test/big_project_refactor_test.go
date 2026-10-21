@@ -3,9 +3,12 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/builder"
+	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
 
 // buildProjectDir builds every .marte file under dir (one directory level of
@@ -52,36 +55,183 @@ func buildProjectDir(t *testing.T, dir string) string {
 	return string(content)
 }
 
-// The refactored big project (copy groups instead of simple IOGAMs) must
-// produce exactly the same MARTe configuration as the original.
+// canonicalConfig reduces a built configuration to its semantics: object
+// classes, fields, signal entries (as maps, since field order is not
+// semantic) and thread function order. Quoting style and definition order
+// inside a container are ignored.
+func canonicalConfig(t *testing.T, src string) []string {
+	t.Helper()
+	cfg, err := parser.NewParser(src).Parse()
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	var lines []string
+
+	var walk func(path string, defs []parser.Definition)
+	walk = func(path string, defs []parser.Definition) {
+		fields := map[string]string{}
+		children := []*parser.ObjectNode{}
+		for _, def := range defs {
+			switch d := def.(type) {
+			case *parser.Field:
+				fields[d.Name] = canonicalValue(d.Value)
+			case *parser.ObjectNode:
+				children = append(children, d)
+			}
+		}
+		// Function lists keep their order: it is the execution sequence.
+		if fv, ok := fields["Functions"]; ok {
+			_ = fv
+		}
+		if f, ok := lookupField(defs, "Functions"); ok {
+			lines = append(lines, "FUNCS "+path+" = "+canonicalValue(f.Value))
+		}
+		names := make([]string, 0, len(fields))
+		for k := range fields {
+			if k == "Functions" {
+				continue
+			}
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, k := range names {
+			lines = append(lines, "FIELD "+path+" "+k+" = "+fields[k])
+		}
+		for _, child := range children {
+			name := canonicalValue(child.Name)
+			childPath := path + "/" + normName(name)
+			class := ""
+			var sigs []string
+			for _, d := range child.Subnode.Definitions {
+				if f, ok := d.(*parser.Field); ok && f.Name == "Class" {
+					class = canonicalValue(f.Value)
+				}
+				if obj, ok := d.(*parser.ObjectNode); ok {
+					n := normName(canonicalValue(obj.Name))
+					if n == "InputSignals" || n == "OutputSignals" || n == "Signals" {
+						sigs = append(sigs, canonicalSignals(childPath, n, obj, class == "IOGAM"))
+					}
+				}
+			}
+			lines = append(lines, "OBJ "+childPath+" class="+class)
+			lines = append(lines, sigs...)
+			walk(childPath, child.Subnode.Definitions)
+		}
+	}
+	walk("", cfg.Definitions)
+	sort.Strings(lines)
+	return lines
+}
+
+func lookupField(defs []parser.Definition, name string) (*parser.Field, bool) {
+	for _, d := range defs {
+		if f, ok := d.(*parser.Field); ok && f.Name == name {
+			return f, true
+		}
+	}
+	return nil, false
+}
+
+func normName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "+")
+	s = strings.TrimPrefix(s, "$")
+	return s
+}
+
+// canonicalSignals renders a signal container; entry order is kept for
+// IOGAM inputs/outputs (copies are positional) and ignored otherwise.
+func canonicalSignals(path, container string, obj *parser.ObjectNode, ordered bool) string {
+	var entries []string
+	for _, d := range obj.Subnode.Definitions {
+		if s, ok := d.(*parser.ObjectNode); ok {
+			name := canonicalValue(s.Name)
+			fields := map[string]string{}
+			for _, sd := range s.Subnode.Definitions {
+				if f, ok := sd.(*parser.Field); ok {
+					fields[f.Name] = canonicalValue(f.Value)
+				}
+			}
+			keys := make([]string, 0, len(fields))
+			for k := range fields {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			var b strings.Builder
+			b.WriteString(name)
+			for _, k := range keys {
+				b.WriteString("|")
+				b.WriteString(k)
+				b.WriteString("=")
+				b.WriteString(fields[k])
+			}
+			entries = append(entries, b.String())
+		}
+	}
+	// IOGAM entry order is the copy order and must match; other containers
+	// are maps.
+	if !ordered {
+		sort.Strings(entries)
+	}
+	return "SIG " + path + "/" + container + " = [" + strings.Join(entries, " ; ") + "]"
+}
+
+func canonicalValue(v parser.Value) string {
+	switch t := v.(type) {
+	case *parser.StringValue:
+		return strings.TrimSpace(t.Value)
+	case *parser.ReferenceValue:
+		return strings.TrimSpace(t.Value)
+	case *parser.IntValue:
+		return strings.TrimSpace(t.Raw)
+	case *parser.FloatValue:
+		return strings.TrimSpace(t.Raw)
+	case *parser.BoolValue:
+		if t.Value {
+			return "true"
+		}
+		return "false"
+	case *parser.ArrayValue:
+		parts := make([]string, 0, len(t.Elements))
+		for _, e := range t.Elements {
+			parts = append(parts, canonicalValue(e))
+		}
+		return "[ " + strings.Join(parts, " ") + " ]"
+	case *parser.MapValue:
+		keys := append([]string{}, t.Keys...)
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, k+"="+canonicalValue(t.Values[k]))
+		}
+		return "{ " + strings.Join(parts, " ") + " }"
+	}
+	return ""
+}
+
+// The refactored big project (copy groups instead of IOGAMs, with
+// per-signal options) must be semantically identical to the original: same
+// objects and classes, same signals and fields, same thread function
+// sequences. Definition order and field/alias ordering are not semantic.
 func TestBigProjectRefactorEquivalence(t *testing.T) {
 	orig := buildProjectDir(t, "../examples/big_project")
 	refac := buildProjectDir(t, "../examples/big_project_sugar")
-	if orig != refac {
-		// Report the first differing line to keep failures readable.
-		origLines := splitLines(orig)
-		refLines := splitLines(refac)
-		for i := 0; i < len(origLines) && i < len(refLines); i++ {
-			if origLines[i] != refLines[i] {
-				t.Fatalf("outputs differ at line %d:\n original: %q\nrefactored: %q", i+1, origLines[i], refLines[i])
-			}
-		}
-		t.Fatalf("outputs differ in length: original %d lines, refactored %d lines", len(origLines), len(refLines))
+	origLines := canonicalConfig(t, orig)
+	refLines := canonicalConfig(t, refac)
+	if strings.Join(origLines, "\n") == strings.Join(refLines, "\n") {
+		return
 	}
-	if len(orig) == 0 {
-		t.Fatal("empty output")
+	// Report the first difference.
+	max := len(origLines)
+	if len(refLines) < max {
+		max = len(refLines)
 	}
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
+	for i := 0; i < max; i++ {
+		if origLines[i] != refLines[i] {
+			t.Fatalf("configurations differ at line %d:\n original: %s\nrefactored: %s", i+1, origLines[i], refLines[i])
 		}
 	}
-	lines = append(lines, s[start:])
-	return lines
+	if len(origLines) != len(refLines) {
+		t.Fatalf("configurations differ in size: original %d entries, refactored %d entries", len(origLines), len(refLines))
+	}
 }

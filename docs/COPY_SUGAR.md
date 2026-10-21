@@ -86,6 +86,23 @@ name in the thread, or move it into the list.
 | `as NAME` | destination | destination slot is renamed to `NAME` with `Alias = <signal>` |
 | `at N` | destination | generated declaration is placed at 1-based position `N` |
 | `: type[dim]` | item | type for signals that declare none |
+| `{ Name = value … }` | both | per-signal options emitted verbatim into the generated entry (`Type`, `NumberOfElements`, `Samples`, `Frequency`, `Ranges`, `Value`, `Trigger`, `Comparator`, …) |
+
+Per-signal options follow the endpoint, before `->` for the source and
+after the destination alias for the destination:
+
+```marte
+copy DecimateGAM {
+  DDB1::PXI6259_Status_SAMPLES { Ranges = { { @dec_index, @dec_index } } }
+    -> DDB1::PXI6259_Status
+  DDB1::FAST_STOP { Type = uint32 } -> EPICS::MHVPS_STOP
+  DDB3::WaveformPacketID -> SDNReply::ReplyWaveformAck { Trigger = 1 }
+}
+```
+
+`Type`/`NumberOfElements` options also drive type inference for
+synthesized destination signals; other options are copied through
+unchanged (their values are evaluated like any field).
 
 ### Lowering rules
 

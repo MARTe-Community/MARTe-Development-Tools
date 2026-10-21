@@ -3,65 +3,14 @@
 +Functions = {
   //# Thread3 pulse parameter EPICS PVs read.
   //# TODO: Should be better to read it in thread 1 and use a async bridge to copy to 3?
-  +FastEpicsInputGAM = {
-    Class = IOGAM
-    InputSignals = {
-      MHVPS_DT = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      APS_HVON_DT = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      APS_SWON_DT = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      BPS_HVON_DT = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      BPS_SWON_DT = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      SHOTLEN = {
-        DataSource = EPICSCAInput
-        Type = uint32
-      }
-      SHORT_PULSE_MODE = {
-       DataSource = EPICSCAInput 
-      }
-      FAST_PAUSE = {
-        DataSource = EPICSCAInput
-      }
-    }
-    OutputSignals = {
-      MHVPS_DT = {
-        DataSource = DDB3
-      }
-      APS_HVON_DT = {
-        DataSource = DDB3
-      }
-      APS_SWON_DT = {
-        DataSource = DDB3
-      }
-      BPS_HVON_DT = {
-        DataSource = DDB3
-      }
-      BPS_SWON_DT = {
-        DataSource = DDB3
-      }
-      SHOTLEN = {
-        DataSource = DDB3
-      }
-      SHORT_PULSE_MODE = {
-        DataSource = DDB3
-      }
-      FAST_PAUSE = {
-        DataSource = DDB3
-      }
-    }
+  copy FastEpicsInputGAM {
+    EPICSCAInput::MHVPS_DT { Type = uint32 } -> DDB3::MHVPS_DT
+    EPICSCAInput::APS_HVON_DT { Type = uint32 } -> DDB3::APS_HVON_DT
+    EPICSCAInput::APS_SWON_DT { Type = uint32 } -> DDB3::APS_SWON_DT
+    EPICSCAInput::BPS_HVON_DT { Type = uint32 } -> DDB3::BPS_HVON_DT
+    EPICSCAInput::BPS_SWON_DT { Type = uint32 } -> DDB3::BPS_SWON_DT
+    EPICSCAInput::SHOTLEN { Type = uint32 } -> DDB3::SHOTLEN
+    EPICSCAInput::SHORT_PULSE_MODE -> DDB3::SHORT_PULSE_MODE
+    EPICSCAInput::FAST_PAUSE -> DDB3::FAST_PAUSE
   }
 }

@@ -112,84 +112,21 @@
 +Functions = {
   #if @sdn_enabled
     //# Timer for SDN thread.
-    +TimeSDNGAM = {
-      Class = IOGAM
-      InputSignals = {
-        Time = {
-          DataSource = TimerSDN
-        }
-        Counter = {
-          DataSource = TimerSDN
-          Frequency = @slow_clock
-        }
-      }
-      OutputSignals = {
-        Time = {
-          DataSource = DDB2
-        }
-        Counter = {
-          DataSource = DDB2
-        }
-      }
+    copy TimeSDNGAM {
+      TimerSDN::Time -> DDB2::Time
+      TimerSDN::Counter { Frequency = @slow_clock } -> DDB2::Counter
     }
   #end
   //# GAM for realtime statemachine
-  +FastTimerGAM = {
-    Class = IOGAM
-    InputSignals = {
-      Counter = {
-        DataSource = FastTimer
-        Frequency = @fast_clock
-      }
-      Time = {
-        DataSource = FastTimer
-      }
-      AbsoluteTime = {
-        DataSource = FastTimer
-      }
-      PCF_FAULT = {
-        DataSource = Th1Bridge
-      }
-      PXI_FAULT = {
-        DataSource = Th1Bridge
-      }
-    }
-    OutputSignals = {
-      Counter = {
-        DataSource = DDB3
-      }
-      Time = {
-        DataSource = DDB3
-      }
-      AbsoluteTime = {
-        DataSource = DDB3
-      }
-      PCF_FLT = {
-        DataSource = DDB3
-      }
-      PXI_FLT = {
-        DataSource = DDB3
-      }
-    }
+  copy FastTimerGAM {
+    FastTimer::Counter { Frequency = @fast_clock } -> DDB3::Counter
+    FastTimer::Time -> DDB3::Time
+    FastTimer::AbsoluteTime -> DDB3::AbsoluteTime
+    Th1Bridge::PCF_FAULT -> DDB3::PCF_FLT
+    Th1Bridge::PXI_FAULT -> DDB3::PXI_FLT
   }
-  +WGTimerGAM = {
-    Class = IOGAM
-    InputSignals = {
-      Time = {
-        DataSource = WGTimer
-      }
-      Counter = {
-        DataSource = WGTimer
-        Frequency = @wg_clock
-      }
-    }
-    OutputSignals = {
-      Time = {
-        DataSource = DDB6
-      }
-      Counter = {
-        DataSource = DDB6
-      }
-    }
+  copy WGTimerGAM {
+    WGTimer::Time -> DDB6::Time
+    WGTimer::Counter { Frequency = @wg_clock } -> DDB6::Counter
   }
 }
