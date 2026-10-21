@@ -77,9 +77,9 @@ end
 		"Plain: uint32",
 		"Vector: float32[4] = {",
 		"@cfg.db.host",
-		"#else if",
+		"else if",
 		".. ",
-		"#foreach k, val in @cfg.items",
+		"foreach k, val in @cfg.items",
 		"(\"+Item\" .. @k)",
 		`Escaped = "quote:\" tab:\t"`,
 	} {

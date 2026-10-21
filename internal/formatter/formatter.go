@@ -150,9 +150,9 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		fmt.Fprintf(f.writer, "\n%s}", indentStr)
 		return d.Position.Line
 	case *parser.VariableDefinition:
-		macro := "#var"
+		macro := "var"
 		if d.IsConst {
-			macro = "#let"
+			macro = "let"
 		}
 		if d.InlineType != nil {
 			fmt.Fprintf(f.writer, "%s%s %s: {", indentStr, macro, d.Name)
@@ -168,7 +168,7 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		}
 		return d.Position.Line
 	case *parser.IfBlock:
-		fmt.Fprintf(f.writer, "%s#if ", indentStr)
+		fmt.Fprintf(f.writer, "%sif ", indentStr)
 		f.formatValue(d.Condition, indent)
 		if f.hasTrailingComment(d.Position.Line) {
 			fmt.Fprintf(f.writer, " %s", f.popComment())
@@ -176,19 +176,19 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		fmt.Fprintln(f.writer)
 		f.formatBlock(d.Then, indent+1)
 		for _, ei := range d.ElseIf {
-			fmt.Fprintf(f.writer, "%s#else if ", indentStr)
+			fmt.Fprintf(f.writer, "%selse if ", indentStr)
 			f.formatValue(ei.Condition, indent)
 			fmt.Fprintln(f.writer)
 			f.formatBlock(ei.Body, indent+1)
 		}
 		if len(d.Else) > 0 {
-			fmt.Fprintf(f.writer, "%s#else\n", indentStr)
+			fmt.Fprintf(f.writer, "%selse\n", indentStr)
 			f.formatBlock(d.Else, indent+1)
 		}
-		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		fmt.Fprintf(f.writer, "%send", indentStr)
 		return d.EndPosition.Line
 	case *parser.ForeachBlock:
-		fmt.Fprintf(f.writer, "%s#foreach ", indentStr)
+		fmt.Fprintf(f.writer, "%sforeach ", indentStr)
 		if d.KeyVar != "" {
 			fmt.Fprintf(f.writer, "%s, ", d.KeyVar)
 		}
@@ -199,10 +199,10 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		}
 		fmt.Fprintln(f.writer)
 		f.formatBlock(d.Body, indent+1)
-		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		fmt.Fprintf(f.writer, "%send", indentStr)
 		return d.EndPosition.Line
 	case *parser.TemplateDefinition:
-		fmt.Fprintf(f.writer, "%s#template %s(", indentStr, d.Name)
+		fmt.Fprintf(f.writer, "%stemplate %s(", indentStr, d.Name)
 		for i, p := range d.Parameters {
 			if i > 0 {
 				fmt.Fprint(f.writer, ", ")
@@ -219,7 +219,7 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		}
 		fmt.Fprintln(f.writer)
 		f.formatBlock(d.Body, indent+1)
-		fmt.Fprintf(f.writer, "%s#end", indentStr)
+		fmt.Fprintf(f.writer, "%send", indentStr)
 		return d.EndPosition.Line
 	case *parser.WithBlock:
 		fmt.Fprintf(f.writer, "%swith %s(", indentStr, d.Format)
@@ -231,7 +231,7 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		fmt.Fprintf(f.writer, "%send", indentStr)
 		return d.EndPosition.Line
 	case *parser.TemplateInstantiation:
-		fmt.Fprintf(f.writer, "%s#use %s %s(", indentStr, d.Template, d.Name)
+		fmt.Fprintf(f.writer, "%suse %s %s(", indentStr, d.Template, d.Name)
 		for i, arg := range d.Arguments {
 			if i > 0 {
 				fmt.Fprint(f.writer, ", ")
@@ -389,7 +389,7 @@ func (f *Formatter) formatArray(v *parser.ArrayValue, indent int) int {
 func (f *Formatter) formatConditionalArrayElement(v *parser.ConditionalArrayElements, indent int) int {
 	indentStr := strings.Repeat("  ", indent)
 	innerStr := strings.Repeat("  ", indent+1)
-	fmt.Fprintf(f.writer, "%s#if ", indentStr)
+	fmt.Fprintf(f.writer, "%sif ", indentStr)
 	f.formatValue(v.Condition, indent)
 	fmt.Fprintln(f.writer)
 	for _, e := range v.Then {
@@ -398,14 +398,14 @@ func (f *Formatter) formatConditionalArrayElement(v *parser.ConditionalArrayElem
 		fmt.Fprintln(f.writer)
 	}
 	if len(v.Else) > 0 {
-		fmt.Fprintf(f.writer, "%s#else\n", indentStr)
+		fmt.Fprintf(f.writer, "%selse\n", indentStr)
 		for _, e := range v.Else {
 			fmt.Fprint(f.writer, innerStr)
 			f.formatValue(e, indent+1)
 			fmt.Fprintln(f.writer)
 		}
 	}
-	fmt.Fprintf(f.writer, "%s#end\n", indentStr)
+	fmt.Fprintf(f.writer, "%send\n", indentStr)
 	return v.EndPosition.Line
 }
 

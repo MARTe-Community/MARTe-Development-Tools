@@ -17,14 +17,13 @@ $RtApp = {
 
   //# Profile comes from the if / else if / else chain below;
   //# ChannelBudget is defined in variables.marte.
-  #if (@ChannelBudget > 2)
+  if (@ChannelBudget > 2)
     Profile = "wide"
-  #else if (@ChannelBudget == 2)
+  else if (@ChannelBudget == 2)
     Profile = "narrow"
-  #else
+  else
     Profile = "single"
-  #end
-
+  end
 
   +Data = {
     Class = ReferenceContainer

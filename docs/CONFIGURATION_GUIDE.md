@@ -90,7 +90,7 @@ mdt build -o final.marte src/*.marte
 
 You can define variables to parameterize your configuration.
 
-### Variables (`#var`)
+### Variables (`var`)
 Variables can be defined at any level and can be overridden externally (e.g., via CLI).
 
 ```marte
@@ -103,7 +103,7 @@ var Timeout: uint32 = 100
 }
 ```
 
-### Constants (`#let`)
+### Constants (`let`)
 Constants are like variables but **cannot** be overridden externally. They are ideal for internal calculations or fixed parameters.
 
 ```marte
@@ -138,7 +138,8 @@ Field3 = ($MyVar + 5) * 2
 ```
 
 ### Build Override
-You can override variable values during build (only for `#var`):
+You can override variable values during build (only for `var`; the
+`#var` spelling is equivalent):
 
 ```bash
 mdt build -vMyVar=200 src/*.marte

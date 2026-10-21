@@ -2,8 +2,8 @@
 #package Showcase.RTApp.States
 
 //# Typed list of GAM names — [&GAM] means "list of GAM references".
-#let AcqFunctions: [&GAM] = {
-  AcqReader,
+let AcqFunctions: [&GAM] = {
+  AcqReader
 }
 
 //# The single running state. The thread function list comes from the
@@ -17,18 +17,18 @@
       CPUs = 0x1
       Functions = @AcqFunctions
     }
-    #if @udp_streamer
+    if @udp_streamer
       +TapThread = {
         Class = RealTimeThread
         CPUs = 0x2
         Functions = { UdpTap }
       }
-    #else
+    else
       +TapThread = {
         Class = RealTimeThread
         CPUs = 0x2
         Functions = { FileTap }
       }
-    #end
+    end
   }
 }

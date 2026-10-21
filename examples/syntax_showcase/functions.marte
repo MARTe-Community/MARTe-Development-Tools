@@ -19,7 +19,7 @@
 //# Conditional streaming branch, selected by the udp_streamer
 //# variable (variables.marte). Both taps do the same job here; the
 //# point is the #if / #else syntax.
-#if @udp_streamer
+if @udp_streamer
   +UdpTap = {
     Class = IOGAM
     InputSignals = {
@@ -29,7 +29,7 @@
       Logger::CounterOut: uint32[1]
     }
   }
-#else
+else
   +FileTap = {
     Class = IOGAM
     InputSignals = {
@@ -39,4 +39,4 @@
       Logger::CounterOut: uint32[1]
     }
   }
-#end
+end

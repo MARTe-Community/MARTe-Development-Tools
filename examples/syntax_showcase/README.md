@@ -8,13 +8,13 @@ commands used).
 
 | File | Demonstrates |
 |---|---|
-| `app.marte` | `$`-root application skeleton, `#package` routing, `#if`/`#else if`/`#else` chains |
-| `variables.marte` | `#var`/`#let`, every literal flavour, computed constants, expression notes |
+| `app.marte` | `$`-root application skeleton, `#package` routing, `if`/`else if`/`else` chains |
+| `variables.marte` | `var`/`let` (also accepted as `#var`/`#let`), every literal flavour, computed constants, expression notes |
 | `data.marte` | Data sources (`LinuxTimer`, `GAMDataSource`, `LoggerDataSource`), signal definition sugar (`Counter: uint32`), `//! unused:` pragma |
 | `functions.marte` | `DataSource::Signal` shorthand (type, dimension, alias, extra fields), conditional GAM definitions |
 | `states.marte` | Typed `[&GAM]` function lists, conditional threads |
-| `loops.marte` | `#template`/`#use`, `#foreach` (one and two variables), dynamic object names |
-| `external.marte` + `data/epics_cfg.json` | `with json(...) as … begin…end`, member access (`@cfg.member`), two-variable `#foreach` over a dict |
+| `loops.marte` | `template`/`use`, `foreach` (one and two variables), dynamic object names |
+| `external.marte` + `data/epics_cfg.json` | `with json(...) as … begin…end`, member access (`@cfg.member`), two-variable `foreach` over a dict |
 
 ## Validating
 

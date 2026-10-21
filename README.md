@@ -23,14 +23,14 @@ Few additional features have been added to the standard MARTe configuration lang
   - Multi file definition merging
   - File level namespace / node (`#package`)
 - Variables and Constants
-  - Overrideable variables (`#var`)
-  - Fixed constants (`#let`)
+  - Overrideable variables (`var`, also written `#var`)
+  - Fixed constants (`let`, also written `#let`)
   - Powerful expressions (arithmetic, bitwise, string concatenation)
 - Doc-strings support (`//#`) for objects, fields, and variables
 - Logic and Templates
-  - Conditional blocks (`#if`, `#else`)
-  - Loops (`#foreach` over arrays)
-  - Reusable parameterized templates (`#template`, `#use`)
+  - Conditional blocks (`if`, `else`; the `#`-prefixed forms work too)
+  - Loops (`foreach` over arrays)
+  - Reusable parameterized templates (`template`, `use`)
 - Pragmas (`//!`) for warning suppression / documentation
 
 ## Documentation

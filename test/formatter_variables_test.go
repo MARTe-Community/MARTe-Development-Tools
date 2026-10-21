@@ -31,12 +31,12 @@ func TestFormatterVariables(t *testing.T) {
 	output := buf.String()
 
 	// Parser reconstructs type expression with spaces
-	if !strings.Contains(output, "#var MyInt: int = 10") {
+	if !strings.Contains(output, "var MyInt: int = 10") {
 		t.Errorf("Variable MyInt formatted incorrectly. Got:\n%s", output)
 	}
 	// Note: parser adds space after each token in TypeExpr
 	// string | "A" -> "string | \"A\""
-	if !strings.Contains(output, "#var MyStr: string | \"A\" = \"default\"") {
+	if !strings.Contains(output, "var MyStr: string | \"A\" = \"default\"") {
 		t.Errorf("Variable MyStr formatted incorrectly. Got:\n%s", output)
 	}
 	if !strings.Contains(output, "Field1 = @MyInt") {
@@ -63,11 +63,11 @@ func TestFormatterReferenceArrayType(t *testing.T) {
 	formatter.Format(cfg, &buf)
 	output := buf.String()
 
-	if !strings.Contains(output, "#let funcs: [&GAM] = { GAM1 }") {
-		t.Errorf("Expected compact '[&GAM]' type formatting for #let. Got:\n%s", output)
+	if !strings.Contains(output, "let funcs: [&GAM] = { GAM1 }") {
+		t.Errorf("Expected compact '[&GAM]' type formatting for let. Got:\n%s", output)
 	}
-	if !strings.Contains(output, "#var spaced: [&GAM] = { GAM1 }") {
-		t.Errorf("Expected #var with spaced-out source type to still format compactly as '[&GAM]'. Got:\n%s", output)
+	if !strings.Contains(output, "var spaced: [&GAM] = { GAM1 }") {
+		t.Errorf("Expected var with spaced-out source type to still format compactly as '[&GAM]'. Got:\n%s", output)
 	}
 	if strings.Contains(output, "[ & GAM ]") {
 		t.Errorf("Unexpected spaced-out '[ & GAM ]' type formatting. Got:\n%s", output)

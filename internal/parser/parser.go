@@ -1106,6 +1106,7 @@ func (p *Parser) parsePostfix(startTok Token, val Value) (Value, bool) {
 			}
 			p.next() // consume '('
 			args := []Value{}
+			var closeTok Token
 			for {
 				t := p.peek()
 				if t.Type == TokenEOF {
@@ -1113,7 +1114,7 @@ func (p *Parser) parsePostfix(startTok Token, val Value) (Value, bool) {
 					return nil, false
 				}
 				if t.Type == TokenSymbol && t.Value == ")" {
-					p.next()
+					closeTok = p.next()
 					break
 				}
 				if t.Type == TokenComma {
@@ -1126,7 +1127,13 @@ func (p *Parser) parsePostfix(startTok Token, val Value) (Value, bool) {
 				}
 				args = append(args, arg)
 			}
-			val = &MethodCall{Position: startTok.Position, Base: mc.Base, Method: mc.Member, Args: args}
+			val = &MethodCall{
+				Position:    startTok.Position,
+				EndPosition: Position{Line: closeTok.Position.Line, Column: closeTok.Position.Column + 1},
+				Base:        mc.Base,
+				Method:      mc.Member,
+				Args:        args,
+			}
 			continue
 		}
 		return val, true

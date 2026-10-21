@@ -22,12 +22,12 @@
         Class = EPICSCAInput
         Signals = {
           //# Two-variable foreach over a dict binds key and value.
-          #foreach name, object in @epics_cfg.signals
+          foreach name, object in @epics_cfg.signals
             @name = {
               Type = @object.Type
               PVName = @object.PVName
             }
-          #end
+          end
         }
       }
     end

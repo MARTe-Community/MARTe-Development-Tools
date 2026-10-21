@@ -106,15 +106,15 @@ Matrix = {
 
 ### Conditional array elements
 
-`#if`/`#else` blocks flatten inline inside array literals (the active
+`if`/`else` blocks flatten inline inside array literals (the active
 branch's elements are spliced into the enclosing list):
 
 ```marte
-#let AcqFunctions: [&GAM] = {
+let AcqFunctions: [&GAM] = {
   AcqReader,
-  #if @udp_streamer
+  if @udp_streamer
     UdpTap,
-  #end
+  end
 }
 ```
 
@@ -265,25 +265,29 @@ mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.mar
 ## 7. Conditionals
 
 ```marte
-#if (@ChannelBudget > 2)
+if (@ChannelBudget > 2)
   Profile = "wide"
-#else if (@ChannelBudget == 2)
+else if (@ChannelBudget == 2)
   Profile = "narrow"
-#else
+else
   Profile = "single"
-#end
+end
 ```
 
-- Both `#else if` (two words) and `#elseif` (one word) are accepted;
+- Both `else if` (two words) and `elseif` (one word) are accepted;
   the two-word form is the recommended spelling.
+- Every block keyword is also accepted with a `#` prefix (`#if`,
+  `#else`, `#elseif`, `#end`, `#var`, `#let`, `#foreach`, `#template`,
+  `#use`). Both spellings parse identically; `mdt fmt` normalizes to the
+  compact form without the `#`.
 - Conditions may be any expression; unresolved variables in a condition
   are reported as errors.
 - Conditionals may appear wherever a definition may appear (file top
-  level, inside objects, inside `#foreach` bodies) and inside array
+  level, inside objects, inside `foreach` bodies) and inside array
   literals (section 4).
 - Directive keywords work with or without the `#` (`if` … `end`).
 
-## 8. Loops: `#foreach`
+## 8. Loops: `foreach`
 
 > **Member access needs `@`**: identifiers may contain dots and `::`
 > (field/class names), so a bare `program.Streams` is one undeclared
@@ -291,22 +295,22 @@ mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.mar
 > `@` prefix: `@program.Streams`.
 
 ```marte
-#foreach i in { 1, 2, 3, 4 }
-  #if (@i <= @NumChannels)
+foreach i in { 1, 2, 3, 4 }
+  if (@i <= @NumChannels)
     use AcqChannel Chan(ID = @i, Gain = (0.5 * @i))
-  #end
-#end
+  end
+end
 
-#foreach idx name in { Alpha, Beta }
+foreach idx name in { Alpha, Beta }
   ("+Pair" .. @idx) = {
     Class = ReferenceContainer
     Partner = @name
   }
-#end
+end
 ```
 
-- One variable: `#foreach value in <array-expression>`.
-- Two variables (space-separated, no comma): `#foreach index value in …`
+- One variable: `foreach value in <array-expression>`.
+- Two variables (space-separated, no comma): `foreach index value in …`
   binds the element index and the element.
 - The iterable is an array literal or an expression evaluating to one.
 - Loop and template variables are fully substituted in build output:
@@ -314,7 +318,7 @@ mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.mar
   the evaluated `Index`, `Scale` and dynamic names.
 - Validation is stable in multi-file projects and under `-v` overrides.
 
-## 9. Templates: `#template` / `#use`
+## 9. Templates: `template` / `use`
 
 ```marte
 template AcqChannel(ID: int, Gain: float = 1.0)
@@ -324,14 +328,14 @@ template AcqChannel(ID: int, Gain: float = 1.0)
   }
 end
 
-#foreach i in { 1, 2 }
+foreach i in { 1, 2 }
   use AcqChannel Chan(ID = @i, Gain = (0.5 * @i))
-#end
+end
 ```
 
 - Parameters are `Name: Type` and may declare defaults; trailing
   parameters with defaults may be omitted at the use site.
-- `#use TemplateName InstanceName(key = value, …)` — the instance name
+- `use TemplateName InstanceName(key = value, …)` — the instance name
   is required; the argument list is optional for parameter-less
   templates. `use T I` without parentheses is valid.
 - The template body usually creates objects with dynamic names derived

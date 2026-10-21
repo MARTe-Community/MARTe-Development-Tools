@@ -183,8 +183,13 @@ type MemberAccess struct {
 }
 
 func (v *MemberAccess) Pos() Position { return v.Position }
+
+// End returns the position just past the member name. The base expression
+// is part of the access, so the member does not start at the access'
+// position: `@prefixes.fast` ends past `fast`, not past `pref`.
 func (v *MemberAccess) End() Position {
-	return Position{Line: v.Position.Line, Column: v.Position.Column + len(v.Member) + 1}
+	base := v.Base.End()
+	return Position{Line: v.Position.Line, Column: base.Column + len(v.Member) + 1}
 }
 func (v *MemberAccess) isValue() {}
 
@@ -198,14 +203,22 @@ func (v *MemberAccess) isValue() {}
 // kind (string, list or dict).
 type MethodCall struct {
 	Position Position
-	Base     Value
-	Method   string
-	Args     []Value
+	// EndPosition is just past the closing parenthesis. Zero for values
+	// built programmatically rather than parsed.
+	EndPosition Position
+	Base        Value
+	Method      string
+	Args        []Value
 }
 
 func (v *MethodCall) Pos() Position { return v.Position }
-func (v *MethodCall) End() Position { return v.Position }
-func (v *MethodCall) isValue()      {}
+func (v *MethodCall) End() Position {
+	if v.EndPosition.Line > 0 {
+		return v.EndPosition
+	}
+	return v.Base.End()
+}
+func (v *MethodCall) isValue() {}
 
 // NewMapValue builds a MapValue from a Go map, sorting the keys.
 func NewMapValue(pos Position, values map[string]Value) *MapValue {

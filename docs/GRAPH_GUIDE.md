@@ -70,7 +70,8 @@ If `--graph-port` is omitted, the OS assigns a free port.
 | Blue edge     | Read (DS → GAM)    |
 | Orange edge   | Write (GAM → DS)   |
 
-Conditional nodes (inside `#if` blocks) are shown with a dashed border.
+Conditional nodes (inside `if` blocks; `#if` is equivalent) are shown
+with a dashed border.
 
 ## Navigation
 
