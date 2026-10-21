@@ -185,7 +185,9 @@ green (≈1.7 s), `go vet` clean.
 - Pipeline instances inside `#if`/`#foreach` are not expanded (generated
   references would be unconditional).
 - No nested pipeline instantiation.
-- No LSP completion/hover/definition or graph support for the new syntax.
+- LSP support (diagnostics with sugar lowering, hover, definition,
+  completion) is included; the graph view does not yet show copy-item edges
+  or pipeline expansions.
 - Alias quoting/field order in generated entries can differ from
   hand-written ones (semantically identical).
 

@@ -30,6 +30,9 @@ type ProjectTree struct {
 	NodeMap        map[string][]*ProjectNode
 	Templates      map[string]*parser.TemplateDefinition
 	TemplateFiles  map[string]string // Maps template name to the file it came from
+	// GamDefinitions holds `gam Name { … }` pipeline macros by name.
+	GamDefinitions map[string]*parser.GamDefinition
+	GamFiles       map[string]string // Maps pipeline name to its file
 	// Types holds structured type declarations (`type Name { ... }`) by name.
 	Types map[string]*parser.TypeDefinition
 	// MemberRefs records struct field usages through variables
@@ -445,6 +448,8 @@ func NewProjectTree() *ProjectTree {
 		FileReferences: make(map[string][]Reference),
 		Templates:      make(map[string]*parser.TemplateDefinition),
 		TemplateFiles:  make(map[string]string),
+		GamDefinitions: make(map[string]*parser.GamDefinition),
+		GamFiles:       make(map[string]string),
 		Types:          make(map[string]*parser.TypeDefinition),
 		MemberRefs:     make(map[string][]MemberReference),
 		knownFiles:     make(map[string]struct{}),
@@ -861,6 +866,10 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.TypeDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Types[d.Name] = d
+		case *parser.GamDefinition:
+			fileFragment.Definitions = append(fileFragment.Definitions, d)
+			pt.GamDefinitions[d.Name] = d
+			pt.GamFiles[d.Name] = file
 		case *parser.TemplateDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Templates[d.Name] = d
@@ -1019,6 +1028,10 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.TypeDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Types[d.Name] = d
+		case *parser.GamDefinition:
+			frag.Definitions = append(frag.Definitions, d)
+			pt.GamDefinitions[d.Name] = d
+			pt.GamFiles[d.Name] = file
 		case *parser.TemplateDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Templates[d.Name] = d
@@ -1288,6 +1301,9 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 		case *parser.TypeDefinition:
 			// Type declarations carry no runtime value; the definition is
 			// already registered in pt.Types during indexing.
+		case *parser.GamDefinition:
+			pt.GamDefinitions[d.Name] = d
+			pt.GamFiles[d.Name] = file
 		case *parser.TemplateDefinition:
 			pt.Templates[d.Name] = d
 			pt.TemplateFiles[d.Name] = file
@@ -2523,6 +2539,14 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	// Clone Templates
 	for k, v := range pt.Templates {
 		newPT.Templates[k] = v
+	}
+
+	// Clone pipeline definitions
+	for k, v := range pt.GamDefinitions {
+		newPT.GamDefinitions[k] = v
+	}
+	for k, v := range pt.GamFiles {
+		newPT.GamFiles[k] = v
 	}
 
 	// Clone TemplateFiles

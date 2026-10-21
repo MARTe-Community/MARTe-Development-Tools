@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
@@ -1106,8 +1107,21 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 		}
 	}
 
+	// Expand copy/wiring sugar (and pipeline/fusion directives) on a clone
+	// so validation sees the same producers as a build. The snapshot tree is
+	// left untouched for hover/definition.
+	validationTree := snap.Tree()
+	lowered := snap.Tree().CloneUnresolved()
+	if _, err := builder.Lower(lowered); err == nil {
+		validationTree = lowered
+	} else {
+		// The sugar itself is broken: report the position and validate the
+		// original tree so unrelated diagnostics still appear.
+		fileDiags[uriToPath(uri)] = append(fileDiags[uriToPath(uri)], sugarDiagnostic(err))
+	}
+
 	// Semantic Validation
-	v := validator.NewValidator(snap.Tree(), snap.View().Root(), nil)
+	v := validator.NewValidator(validationTree, snap.View().Root(), nil)
 	v.MissingFilesAreWarnings = true
 	v.ValidateProject(ctx)
 
@@ -1196,8 +1210,21 @@ func HandleHover(params HoverParams) *Hover {
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
 
+	// Pipeline instances (`Class = <gam macro>`).
+	if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+		if h := pipelineHover(tree, text, line, col); h != nil {
+			return h
+		}
+	}
+
 	res := tree.Query(path, line, col)
 	if res == nil {
+		// Copy endpoints are not indexed; resolve them from the sugar.
+		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+			if h := sugarHover(tree, path, text, line, col); h != nil {
+				return h
+			}
+		}
 		logger.Debugf("No object/node/reference found")
 		return nil
 	}
@@ -1365,6 +1392,11 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	col := byteCol(lineStr, params.Position.Character)
 
 	prefix := lineStr[:col]
+
+	// Copy sugar: endpoints after `from ` / `->`.
+	if list := sugarCompletion(tree, prefix); list != nil {
+		return list
+	}
 
 	// Struct field completion: `@var.` or `@var.partial` suggests the fields
 	// of the variable's structured type (dotted paths walk nested structs).
@@ -1942,6 +1974,9 @@ func HandleDefinition(params DefinitionParams) any {
 	// Go-to-definition on a struct member usage (`@var.member`): jump to the
 	// field declaration in the variable's structured type.
 	if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+		if locs := pipelineDefinition(tree, text, line, col); len(locs) > 0 {
+			return locs
+		}
 		if locs := structFieldDefinition(tree, params.TextDocument.URI, text, path, line, col); len(locs) > 0 {
 			return locs
 		}
@@ -1949,6 +1984,11 @@ func HandleDefinition(params DefinitionParams) any {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
+		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
+				return locs
+			}
+		}
 		return nil
 	}
 
@@ -2046,6 +2086,11 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
+		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
+				return locs
+			}
+		}
 		return nil
 	}
 
@@ -2755,6 +2800,11 @@ func HandleReferences(params ReferenceParams) []Location {
 
 	res := tree.Query(path, line, col)
 	if res == nil {
+		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
+				return locs
+			}
+		}
 		return nil
 	}
 
@@ -4201,4 +4251,27 @@ func HandleWorkspaceSymbol(params WorkspaceSymbolParams) []SymbolInformation {
 	}
 
 	return symbols
+}
+
+// sugarDiagnostic turns a lowering error ("line:col: message") into a
+// diagnostic on the edited file.
+func sugarDiagnostic(err error) LSPDiagnostic {
+	line, col := 1, 1
+	msg := err.Error()
+	var l, c int
+	if n, _ := fmt.Sscanf(msg, "%d:%d:", &l, &c); n == 2 {
+		line, col = l, c
+		if idx := strings.Index(msg, ": "); idx >= 0 {
+			msg = msg[idx+2:]
+		}
+	}
+	return LSPDiagnostic{
+		Range: Range{
+			Start: Position{Line: line - 1, Character: col - 1},
+			End:   Position{Line: line - 1, Character: col},
+		},
+		Severity: 1,
+		Message:  msg,
+		Source:   "mdt-sugar",
+	}
 }

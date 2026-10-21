@@ -177,3 +177,18 @@ args = ["lsp"]
     - **Command**: `mdt`
     - **Arguments**: `lsp`
     - **Input/Output**: Standard Input/Output.
+
+## Copy sugar and pipelines
+
+The LSP understands the experimental copy/pipeline syntax:
+
+- diagnostics are computed on a lowered clone of the tree, so `copy` groups
+  act as producers and sugar errors (unknown endpoints, byte-size mismatches,
+  unbound pipeline ports) are reported at the offending item;
+- hover over `DS::Signal` / `GAM.Signal` shows the DataSource, class and
+  type; hover over `Class = <pipeline>` lists the macro ports;
+- go-to-definition on an endpoint jumps to the signal declaration, on a
+  pipeline class to the `gam` definition;
+- completion after `->` and `from ` lists GAMs and DataSources.
+
+See [COPY_SUGAR.md](COPY_SUGAR.md) for the language side.

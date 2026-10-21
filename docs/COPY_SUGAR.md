@@ -267,11 +267,26 @@ condition fails; the build proceeds without fusion.
   fused expression chain.
 * Graph/LSP support for the new syntax is not part of this branch.
 
+## Editor support
+
+The LSP understands the sugar:
+
+* **Diagnostics**: the tree is lowered on a clone before validation, so copies
+  count as signal producers, pipeline ports are checked, and sugar errors
+  (unknown endpoint, byte-size mismatch, unbound port) appear as
+  `mdt-sugar` diagnostics at the item position.
+* **Hover** on `DS::Signal` / `GAM.Signal` shows the DataSource, class, type
+  and dimensions; hovering `Class = <pipeline>` lists the macro's ports.
+* **Go-to-definition** on an endpoint jumps to the signal declaration (or the
+  GAM entry), and on a pipeline class to the `gam` definition.
+* **Completion** after `->` and `from ` suggests GAM names (and DataSource
+  names, inserting `::`).
+
 ## Not included in this branch
 
-* LSP completion/hover/definition for `copy`/`from`/`gam`.
 * Nested pipeline instantiation (a `gam` body instantiating another
   pipeline).
+* Inlay hints for copy items.
 * Pipeline instances inside `#if`/`#foreach` blocks: expansion produces
   unconditional references to conditional definitions, so instantiate
   pipelines outside conditional blocks (copy groups work there).

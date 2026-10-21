@@ -2,7 +2,6 @@ package builder
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -805,10 +804,31 @@ func (l *lowerer) dsSignalRef(ds, signal string) signalRef {
 	if !ok {
 		return ref
 	}
-	if resolved, err := l.signalRefOf(sig); err == nil {
-		ref.typ, ref.dim = resolved.typ, resolved.dim
-	}
+	ref.typ, ref.dim = signalDeclaredType(sig)
 	return ref
+}
+
+// signalDeclaredType reads Type/NumberOfElements from a DataSource signal
+// declaration (which has no DataSource field of its own).
+func signalDeclaredType(sig *index.ProjectNode) (string, int) {
+	typ, dim := "", 0
+	for _, frag := range sig.Fragments {
+		for _, def := range frag.Definitions {
+			f, ok := def.(*parser.Field)
+			if !ok {
+				continue
+			}
+			switch f.Name {
+			case "Type":
+				typ = literalText(f.Value)
+			case "NumberOfElements":
+				if v, err := strconv.Atoi(literalText(f.Value)); err == nil {
+					dim = v
+				}
+			}
+		}
+	}
+	return typ, dim
 }
 
 func (l *lowerer) signalRefOf(sig *index.ProjectNode) (signalRef, error) {
@@ -850,6 +870,7 @@ func (l *lowerer) signalRefOf(sig *index.ProjectNode) (signalRef, error) {
 	if alias != "" {
 		name = index.NormalizeName(alias)
 	}
+
 	return signalRef{ds: ds, signal: name, typ: typ, dim: dim}, nil
 }
 
@@ -1273,9 +1294,6 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, ops []copyO
 	// signal nodes so diagnostics behave like the hand-written entries.
 	if len(attaches) > 0 {
 		gam := owner.Children[index.NormalizeName(name)]
-		if os.Getenv("MDT_PRAGMA_DEBUG") != "" {
-			fmt.Fprintf(os.Stderr, "[PRAG] gam=%v attaches=%v\n", gam != nil, attaches)
-		}
 		for _, a := range attaches {
 			container := "InputSignals"
 			if a.side == "out" {
