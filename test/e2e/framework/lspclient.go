@@ -627,16 +627,53 @@ func (c *LSPTestClient) Completion(path string, line, char int) ([]CompletionIte
 		if insertText, ok := it["insertText"].(string); ok {
 			item.InsertText = insertText
 		}
+		if filterText, ok := it["filterText"].(string); ok {
+			item.FilterText = filterText
+		}
+		if te, ok := it["textEdit"].(map[string]interface{}); ok {
+			edit := &TextEdit{}
+			if nt, ok := te["newText"].(string); ok {
+				edit.NewText = nt
+			}
+			if rng, ok := te["range"].(map[string]interface{}); ok {
+				edit.Range = parseTextRange(rng)
+			}
+			item.TextEdit = edit
+		}
 		items = append(items, item)
 	}
 
 	return items, nil
 }
 
+func parseTextPosition(m map[string]interface{}) Position {
+	var p Position
+	if v, ok := m["line"].(float64); ok {
+		p.Line = int(v)
+	}
+	if v, ok := m["character"].(float64); ok {
+		p.Character = int(v)
+	}
+	return p
+}
+
+func parseTextRange(m map[string]interface{}) Range {
+	var r Range
+	if v, ok := m["start"].(map[string]interface{}); ok {
+		r.Start = parseTextPosition(v)
+	}
+	if v, ok := m["end"].(map[string]interface{}); ok {
+		r.End = parseTextPosition(v)
+	}
+	return r
+}
+
 type CompletionItem struct {
 	Label      string
 	Detail     string
 	InsertText string
+	FilterText string
+	TextEdit   *TextEdit
 }
 
 func (c *LSPTestClient) Symbol(path string) ([]DocumentSymbol, error) {

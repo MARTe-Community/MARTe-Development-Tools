@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
@@ -164,5 +165,126 @@ func TestLSPStructFieldReferencesFromUsage(t *testing.T) {
 	}
 	if locs[0].Range.Start.Line != 8 {
 		t.Errorf("Expected usage on line 8, got %d", locs[0].Range.Start.Line)
+	}
+}
+
+// Completion items must carry a text edit covering only the member after
+// the last dot, otherwise clients match candidates against "@var." and
+// show nothing.
+func TestLSPStructFieldCompletionEditRange(t *testing.T) {
+	uri := setupStructFields(t)
+
+	// Line 7 is "    Field = @hardware.port".
+	line := "    Field = @hardware."
+	text := structFieldsFixture
+	text = strings.Replace(text, "    Field = @hardware.port", line, 1)
+	lsp.GetTestDocuments()[uri] = text
+
+	checkItems := func(t *testing.T, char int, wantStart int) {
+		t.Helper()
+		list := lsp.HandleCompletion(lsp.CompletionParams{
+			TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+			Position:     lsp.Position{Line: 7, Character: char},
+		})
+		if list == nil || len(list.Items) == 0 {
+			t.Fatalf("no completions at char %d", char)
+		}
+		for _, item := range list.Items {
+			if item.TextEdit == nil {
+				t.Fatalf("%s: no textEdit", item.Label)
+			}
+			if item.TextEdit.NewText != item.Label {
+				t.Errorf("%s: newText = %q", item.Label, item.TextEdit.NewText)
+			}
+			if item.FilterText != item.Label {
+				t.Errorf("%s: filterText = %q", item.Label, item.FilterText)
+			}
+			if got := item.TextEdit.Range.Start.Character; got != wantStart {
+				t.Errorf("%s: edit starts at %d, want %d", item.Label, got, wantStart)
+			}
+			if got := item.TextEdit.Range.End.Character; got != char {
+				t.Errorf("%s: edit ends at %d, want %d", item.Label, got, char)
+			}
+		}
+	}
+
+	// Empty member: insertion at the cursor, right after the dot.
+	checkItems(t, len(line), len(line))
+
+	// Partial member: the edit replaces "por" only.
+	partial := strings.Replace(text, "@hardware.", "@hardware.por", 1)
+	lsp.GetTestDocuments()[uri] = partial
+	checkItems(t, len(line)+3, len(line))
+}
+
+// Nested member paths walk named types, and the trailing partial segment
+// does not have to resolve.
+func TestLSPStructFieldCompletionNested(t *testing.T) {
+	lsp.ResetTestServer()
+	src := `#package Demo
+
+type Cfg_T {
+  host: string
+  port: uint16
+}
+
+var cfg: { net: Cfg_T }
+
++App = {
+  Class = RealTimeApplication
+  Host = @cfg.net.por
+}
+`
+	uri := "file://nested_completion.marte"
+	lsp.GetTestDocuments()[uri] = src
+	cfg, err := parser.NewParser(src).Parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	lsp.GetTestTree().AddFile("nested_completion.marte", cfg)
+	lsp.GetTestTree().ResolveReferences(nil)
+
+	target := "  Host = @cfg.net.por"
+	list := lsp.HandleCompletion(lsp.CompletionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+		Position:     lsp.Position{Line: 11, Character: len(target)},
+	})
+	if list == nil {
+		t.Fatal("no completions for @cfg.net.por")
+	}
+	labels := make(map[string]bool, len(list.Items))
+	for _, item := range list.Items {
+		labels[item.Label] = true
+		if item.TextEdit == nil || item.TextEdit.Range.Start.Character != len(target)-3 {
+			t.Errorf("%s: edit range = %+v, want start %d", item.Label, item.TextEdit, len(target)-3)
+		}
+	}
+	if !labels["host"] || !labels["port"] {
+		t.Errorf("expected host and port from the named type, got %v", labels)
+	}
+}
+
+// Positions are UTF-16 based: a non-ASCII prefix must not shift the edit
+// range.
+func TestLSPStructFieldCompletionUTF16(t *testing.T) {
+	uri := setupStructFields(t)
+	// Em dash (3 UTF-8 bytes, 1 UTF-16 unit) before the reference.
+	line := "    Field = — @hardware."
+	text := strings.Replace(structFieldsFixture, "    Field = @hardware.port", line, 1)
+	lsp.GetTestDocuments()[uri] = text
+
+	list := lsp.HandleCompletion(lsp.CompletionParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
+		Position:     lsp.Position{Line: 7, Character: len([]rune(line))},
+	})
+	if list == nil || len(list.Items) != 3 {
+		t.Fatalf("expected three fields, got %v", list)
+	}
+	for _, item := range list.Items {
+		// UTF-16 character offset of the end of the line.
+		want := len([]rune(line))
+		if item.TextEdit == nil || item.TextEdit.Range.Start.Character != want {
+			t.Errorf("%s: edit start = %+v, want %d", item.Label, item.TextEdit, want)
+		}
 	}
 }

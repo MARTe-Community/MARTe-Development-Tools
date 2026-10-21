@@ -43,6 +43,11 @@ type CompletionItem struct {
 	InsertText       string `json:"insertText,omitempty"`
 	InsertTextFormat int    `json:"insertTextFormat,omitempty"` // 1: PlainText, 2: Snippet
 	SortText         string `json:"sortText,omitempty"`
+	FilterText       string `json:"filterText,omitempty"`
+	// TextEdit replaces the partially typed member (`@var.por`) with the
+	// field name. Clients filter candidates against the edit range, so
+	// without it `@var.` items are matched against "var." and dropped.
+	TextEdit *TextEdit `json:"textEdit,omitempty"`
 }
 
 type CompletionList struct {
@@ -918,6 +923,48 @@ func offsetAt(text string, pos Position) int {
 	return -1
 }
 
+// byteCol converts a UTF-16 character offset within line to a byte offset.
+// LSP positions count UTF-16 code units, Go strings slice bytes.
+func byteCol(line string, char int) int {
+	if char <= 0 {
+		return 0
+	}
+	units := 0
+	for i, r := range line {
+		if units >= char {
+			return i
+		}
+		if r >= 0x10000 {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return len(line)
+}
+
+// utf16Col converts a byte offset within line to a UTF-16 character offset.
+func utf16Col(line string, byteOff int) int {
+	if byteOff <= 0 {
+		return 0
+	}
+	if byteOff > len(line) {
+		byteOff = len(line)
+	}
+	units := 0
+	for i, r := range line {
+		if i >= byteOff {
+			return units
+		}
+		if r >= 0x10000 {
+			units += 2
+		} else {
+			units++
+		}
+	}
+	return units
+}
+
 func HandleFormatting(params DocumentFormattingParams) []TextEdit {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
 	if view == nil {
@@ -1315,7 +1362,7 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 	}
 	lineStr := lines[params.Position.Line]
 
-	col := min(params.Position.Character, len(lineStr))
+	col := byteCol(lineStr, params.Position.Character)
 
 	prefix := lineStr[:col]
 
@@ -1336,19 +1383,52 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 		if typ == nil {
 			return nil
 		}
-		for _, seg := range strings.Split(memberPath, ".") {
+		// The last segment is the partial text being typed, not a complete
+		// field: `@hw.por` suggests hw's fields, `@hw.cfg.por` walks cfg
+		// and suggests its fields.
+		segs := strings.Split(memberPath, ".")
+		if memberPath != "" {
+			segs = segs[:len(segs)-1]
+		}
+		for _, seg := range segs {
 			if seg == "" {
 				continue
 			}
 			field := typ.Field(seg)
-			if field == nil || field.InlineType == nil {
+			if field == nil {
 				return nil
 			}
-			typ = field.InlineType
+			next := field.InlineType
+			if next == nil && tree.Types != nil {
+				next = tree.Types[strings.TrimSpace(field.TypeExpr)]
+			}
+			if next == nil {
+				return nil
+			}
+			typ = next
+		}
+		// Replace only the partially typed segment after the last dot, so
+		// clients filter the candidates against it instead of against the
+		// whole `@var.` word. For `@a.b.` that segment is empty (insert at
+		// the cursor); for `@a.b.por` it is "por".
+		lastSeg := memberPath
+		if dot := strings.LastIndex(memberPath, "."); dot >= 0 {
+			lastSeg = memberPath[dot+1:]
+		}
+		memberStart := col - len(lastSeg)
+		editRange := Range{
+			Start: Position{Line: params.Position.Line, Character: utf16Col(lineStr, memberStart)},
+			End:   Position{Line: params.Position.Line, Character: params.Position.Character},
 		}
 		items := make([]CompletionItem, 0, len(typ.Fields))
 		for _, field := range typ.Fields {
-			items = append(items, CompletionItem{Label: field.Name, Kind: 5, Detail: field.TypeExpr})
+			items = append(items, CompletionItem{
+				Label:      field.Name,
+				Kind:       5,
+				Detail:     field.TypeExpr,
+				FilterText: field.Name,
+				TextEdit:   &TextEdit{Range: editRange, NewText: field.Name},
+			})
 		}
 		if len(items) == 0 {
 			return nil

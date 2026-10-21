@@ -275,6 +275,16 @@ func (h *marteHandler) Completion(ctx context.Context, params *golsp.CompletionP
 			InsertText:       item.InsertText,
 			InsertTextFormat: &itf,
 			SortText:         item.SortText,
+			FilterText:       item.FilterText,
+		}
+		if item.TextEdit != nil {
+			ci.TextEdit = &golsp.TextEdit{
+				Range: golsp.Range{
+					Start: golsp.Position{Line: item.TextEdit.Range.Start.Line, Character: item.TextEdit.Range.Start.Character},
+					End:   golsp.Position{Line: item.TextEdit.Range.End.Line, Character: item.TextEdit.Range.End.Character},
+				},
+				NewText: item.TextEdit.NewText,
+			}
 		}
 		if item.Documentation != "" {
 			ci.Documentation = &golsp.MarkupContent{Kind: golsp.PlainText, Value: item.Documentation}
