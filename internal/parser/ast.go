@@ -557,3 +557,27 @@ func (f *FuseStatement) Pos() Position { return f.Position }
 func (f *FuseStatement) End() Position { return f.EndPosition }
 func (f *FuseStatement) isDefinition() {}
 func (f *FuseStatement) isValue()      {}
+
+// GamPort is an input/output port of a gam pipeline block.
+type GamPort struct {
+	Position Position
+	Name     string
+	Type     string
+	Dim      int
+	IsOutput bool
+}
+
+// GamDefinition is a `gam Name { … }` pipeline macro. It expands at build
+// time into its body GAMs plus the wiring declared with `from` statements.
+type GamDefinition struct {
+	Position    Position
+	EndPosition Position
+	Name        string
+	Inputs      []GamPort
+	Outputs     []GamPort
+	Body        []Definition
+}
+
+func (g *GamDefinition) Pos() Position { return g.Position }
+func (g *GamDefinition) End() Position { return g.EndPosition }
+func (g *GamDefinition) isDefinition() {}

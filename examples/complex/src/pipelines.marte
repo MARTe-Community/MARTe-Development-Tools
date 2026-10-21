@@ -1,0 +1,32 @@
+package complex_ex
+
+// Reusable preprocessing pipeline. Instances bind the ports; the body
+// declares the GAMs and the wiring between them. At build time the macro
+// expands into the body GAMs (prefixed with the instance name) plus the
+// copy groups needed for the wiring, scheduled before each consumer.
+gam Preprocess {
+  in  Raw: float32
+  out Clean: float32
+  out Meter: float32
+
+  // First stage: scale the raw input.
+  +Scale = {
+    Class = MathExpressionGAM
+    InputSignals = { X = { DataSource = DDB  Type = float32 } }
+    OutputSignals = { Scaled = { DataSource = DDB  Type = float32 } }
+    Expression = "Scaled := X*0.5"
+  }
+  from Raw -> Scale.X
+
+  // Second stage: limit the scaled value.
+  +Limiter = {
+    Class = FilterGAM
+    InputSignals = { In = { DataSource = DDB  Type = float32 } }
+    OutputSignals = { Out = { DataSource = DDB  Type = float32 } }
+  }
+  from Scale.Scaled -> Limiter.In
+
+  // Output ports: one goes back into DDB, the other to Telemetry.
+  from Limiter.Out -> Clean
+  from Scale.Scaled -> Meter
+}

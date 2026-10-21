@@ -135,6 +135,12 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			return p.parseWith(tok)
 		}
 
+		// Pipeline macro: `gam Name { … }`.
+		if name == "gam" && p.peek().Type == TokenIdentifier && p.peekN(1).Type == TokenLBrace {
+			nameTok := p.next()
+			return p.parseGamDefinition(tok, nameTok.Value)
+		}
+
 		// Copy group: `copy { … }` or `copy Name { … }`.
 		if name == "copy" && p.looksLikeCopyGroup() {
 			groupName := ""

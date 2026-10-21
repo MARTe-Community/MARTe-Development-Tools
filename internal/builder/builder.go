@@ -377,6 +377,9 @@ func (b *Builder) Build(f *os.File) error {
 		return err
 	}
 	b.LowerReport = rep
+	// Generated references (pipeline/copy GAMs) must resolve like parsed
+	// ones so usage checks see them.
+	b.tree.ResolveReferences(b.activeFragments)
 
 	// Validate before building to ensure ActiveFragments are consistent and fields resolved
 	v := &validator.Validator{

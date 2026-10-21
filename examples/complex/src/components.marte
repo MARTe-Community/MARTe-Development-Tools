@@ -1,24 +1,61 @@
 package complex_ex.App.Data
 
-+References = {
-  Class = GAMDataSource
+// Input side: the EPICS acquisition GAM writes Raw and Stat here.
++Inputs = {
+  Class = EPICSPVAInput
   Signals = {
-    Ref = {
-      Type = float32
-    }
+    Raw = { Type = float32 }
+    Stat = { Type = uint32 }
   }
 }
+
+// Pipeline working area. The `gam Preprocess` macro wires into these
+// signals: X/Scaled/In/Out are the internal hops, Clean the bound output.
++DDB = {
+  Class = GAMDataSource
+  AllowNoProducers = 1
+  Signals = {
+    X = { Type = float32 }
+    Scaled = { Type = float32 }
+    In = { Type = float32 }
+    Out = { Type = float32 }
+    Clean = { Type = float32 }
+  }
+}
+
 +Actuators = {
   Class = GAMDataSource
+  AllowNoProducers = 1
   Signals = {
-    Actuation = {
-      Type = float32
-    }
+    Actuation = { Type = float32 }
   }
 }
+
++Monitor = {
+  Class = GAMDataSource
+  AllowNoProducers = 1
+  Signals = {
+    Aligned = { Type = float32 }
+    Count = { Type = uint32 }
+    Frame = { Type = float32 }
+  }
+}
+
+// Telemetry sink: only written by copies, never read back.
++Telemetry = {
+  Class = GAMDataSource
+  AllowNoProducers = 1
+  Signals = {
+    StatCopy = { Type = uint32 }
+    Meter = { Type = float32 }
+    Out = { Type = float32 }
+  }
+}
+
 +TimingDS = {
   Class = TimingDataSource
 }
+
 +DDB1 = {
   Class = GAMDataSource
 }

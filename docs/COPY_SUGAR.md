@@ -3,14 +3,16 @@
 > Branch `experimental/copy-and-fanout`. Semantics are settled and tested,
 > but the syntax may still change before it lands on `main`.
 
-Three build-time constructs remove the boilerplate around IOGAM copies:
+Four build-time constructs remove the boilerplate around IOGAM copies:
 
 1. **`from` wiring** in signal lists — zero-copy when the producer and the
    consumer share a DataSource.
 2. **`copy` groups** — named or inline groups of copies with aliases,
    indexes, ranges and placement, lowered to IOGAMs (and synthesized
    DataSource buffers when needed).
-3. **`fuse A with B`** — expression-GAM fusion for single-consumer
+3. **`gam` pipeline blocks** — reusable macro bundling GAMs and wiring
+   behind named ports.
+4. **`fuse A with B`** — expression-GAM fusion for single-consumer
    intermediate signals.
 
 Everything is resolved at build time; the emitted configuration contains
@@ -102,6 +104,68 @@ name in the thread, or move it into the list.
 * Group errors (unknown GAM/signal, index out of range, placement out of
   range, range-length mismatch) fail the build with the sugar position.
 
+## `gam` pipeline blocks
+
+A pipeline packages GAMs plus their wiring behind named ports:
+
+```marte
+gam Preprocess {
+  in  Raw: float32
+  out Clean: float32
+  out Meter: float32
+
+  +Scale = {
+    Class = MathExpressionGAM
+    InputSignals = { X = { DataSource = DDB  Type = float32 } }
+    OutputSignals = { Scaled = { DataSource = DDB  Type = float32 } }
+    Expression = "Scaled := X*0.5"
+  }
+  from Raw -> Scale.X
+
+  +Limiter = {
+    Class = FilterGAM
+    InputSignals = { In = { DataSource = DDB  Type = float32 } }
+    OutputSignals = { Out = { DataSource = DDB  Type = float32 } }
+  }
+  from Scale.Scaled -> Limiter.In
+  from Limiter.Out -> Clean
+  from Scale.Scaled -> Meter
+}
+```
+
+Instantiate it as an object whose `Class` is the pipeline name and whose
+fields bind the ports:
+
+```marte
++Pre = {
+  Class = Preprocess
+  Raw   = Inputs::Raw       // any signal reference: DS::Sig or GAM.Sig
+  Clean = DDB::Clean
+  Meter = Telemetry::Meter
+}
+
+Functions = { Pre }         // expands to the body GAMs + wiring
+```
+
+Expansion rules:
+
+* Body GAMs are emitted with the instance prefix (`+Pre_Scale`,
+  `+Pre_Limiter`) into the instance's container; the instance object and
+  the `gam` definition itself are not written.
+* Each `from` line becomes a copy group. It is scheduled **before the GAM
+  that consumes its destination** (or after its producer when it only
+  feeds an output port), so the declaration order in the body does not
+  have to match execution order. Copies between internal GAMs are renamed
+  with the instance prefix; port endpoints are replaced by their bound
+  signals.
+* `Functions = { Pre }` is replaced by the same order (`copy groups`
+  included), so the runtime sequence matches the expansion.
+* Unbound ports fail the build. An instance can be referenced from several
+  threads (it expands once per instance definition).
+* Pipelines nest one level (a pipeline body may contain copy groups and
+  GAMs; instantiating another pipeline inside a body is not supported in
+  this branch).
+
 ## `fuse A with B`
 
 ```marte
@@ -125,18 +189,19 @@ condition fails; the build proceeds without fusion.
 ## Tooling
 
 * `mdt build` prints a summary, e.g.
-  `Copies: 4 copy pair(s), 2 direct wire(s), 1 copy buffer(s), 1 GAM pair(s) fused`.
+  `Copies: 7 copy pair(s), 1 direct wire(s), 1 GAM pair(s) fused, 1 pipeline(s) expanded`.
 * `mdt check` lowers sugar before validation (sugar counts as a signal
   producer).
 * `mdt build -O` runs after lowering, so adjacent generated IOGAMs merge
   and DataSource ordering sees the final signal set. Named copy groups are
   ordinary IOGAMs and follow the normal optimizer rules.
+* `examples/complex/` is written entirely in the new syntax: a pipeline
+  macro, a fan-out copy group with aliases/indexes, `from` wiring and a
+  fused expression chain.
 * Graph/LSP support for the new syntax is not part of this branch.
 
 ## Not included in this branch
 
-* `gam Name { in … out … }` pipeline blocks (the optional composite-macro
-  form). They need port binding semantics on top of the copy/wiring rules
-  above; the two mechanisms they expand to (`copy` groups + `from`) are
-  available.
-* LSP completion/hover/definition for `copy`/`from`.
+* LSP completion/hover/definition for `copy`/`from`/`gam`.
+* Nested pipeline instantiation (a `gam` body instantiating another
+  pipeline).

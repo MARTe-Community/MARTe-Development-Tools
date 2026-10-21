@@ -494,6 +494,20 @@ be selected by index (`GAM[n]`, `GAM[a..b]`), aliased on both sides
 chains can be fused with `fuse A with B` when the intermediate signal has
 a single consumer.
 
+Reusable pipelines package GAMs and wiring behind ports:
+
+```marte
+gam Preprocess {
+  in  Raw: float32
+  out Clean: float32
+  +Scale = { Class = MathExpressionGAM … }
+  from Raw -> Scale.X
+  from Scale.Y -> Clean
+}
+
++Pre = { Class = Preprocess  Raw = Inputs::Raw  Clean = DDB::Clean }
+```
+
 See [COPY_SUGAR.md](COPY_SUGAR.md) for the full rules, lowering behaviour
 and limitations. This syntax is experimental and may change.
 

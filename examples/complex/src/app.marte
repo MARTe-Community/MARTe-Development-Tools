@@ -2,39 +2,85 @@ package complex_ex
 
 +App = {
   Class = RealTimeApplication
+
   +States = {
     Class = ReferenceContainer
     +Run = {
       Class = RealTimeState
       +ControlThread = {
         Class = RealTimeThread
-        Functions = { Controller }
+        CPUs = 0xFF
+        Functions = { Fanout Pre Controller MonitorGAM Bias fuse Bias with Clamp Clamp }
       }
     }
   }
+
   +Functions = {
     Class = ReferenceContainer
+
+    // Fan-out: the acquisition DataSource feeds two GAM slots (with a
+    // destination alias and explicit indexes) and a telemetry DataSource.
+    copy Fanout {
+      Inputs::Stat -> MonitorGAM.Count as Cnt at 2
+      Inputs::Raw  -> MonitorGAM.Aligned at 1
+      Inputs::Stat -> Telemetry::StatCopy
+    }
+
+    // Pipeline instance: expands into Pre_Scale, Pre_Limiter and the
+    // copies between them, bound to the ports below.
+    +Pre = {
+      Class = Preprocess
+      Raw = Inputs::Raw
+      Clean = DDB::Clean
+      Meter = Telemetry::Meter
+    }
+
+    // Consumer: reads the pipeline output through a direct wire.
     +Controller = {
-      Class = CustomController // Defined in .marte_schema.cue
+      Class = CustomController
       Gain = 10.5
       InputSignals = {
-        Ref = {
-          DataSource = App.Data.References
-          Type = float32
-        }
+        Ref = from DDB::Clean
       }
       OutputSignals = {
-        Actuation = {
-          DataSource = App.Data.Actuators
-          Type = float32
-        }
+        Actuation = { DataSource = Actuators  Type = float32 }
       }
     }
+
+    // Frame builder: consumes the aligned/counted telemetry signals.
+    +MonitorGAM = {
+      Class = FilterGAM
+      InputSignals = {
+        Aligned = { DataSource = Monitor  Type = float32 }
+        Count = { DataSource = Monitor  Type = uint32 }
+      }
+      OutputSignals = {
+        Frame = { DataSource = Monitor  Type = float32 }
+      }
+    }
+
+    // Expression chain: `fuse` inlines Bias into Clamp because Biased has
+    // a single consumer, removing the intermediate hop.
+    +Bias = {
+      Class = MathExpressionGAM
+      InputSignals = { Actuation = { DataSource = Actuators  Type = float32 } }
+      OutputSignals = { Biased = { DataSource = DDB  Type = float32 } }
+      Expression = "Biased := Actuation + 1.0"
+    }
+    fuse Bias with Clamp
+    +Clamp = {
+      Class = MathExpressionGAM
+      InputSignals = { Biased = { DataSource = DDB  Type = float32 } }
+      OutputSignals = { Out = { DataSource = Telemetry  Type = float32 } }
+      Expression = "Out := Biased"
+    }
   }
+
   +Data = {
     Class = ReferenceContainer
     DefaultDataSource = DDB1
   }
+
   +Scheduler = {
     Class = GAMScheduler
     TimingDataSource = TimingDS

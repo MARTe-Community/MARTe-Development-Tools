@@ -310,7 +310,25 @@ func (l *lowerer) fusePair(left, right *index.ProjectNode) bool {
 		&parser.ObjectNode{Position: pos, Name: &parser.ReferenceValue{Position: pos, Value: "OutputSignals"}, Subnode: parser.Subnode{Definitions: outDefs}},
 		&parser.Field{Position: pos, Name: "Expression", Value: &parser.StringValue{Position: pos, Value: newExpression, Quoted: true}},
 	}
-	l.rebuildNode(left, defs)
+	// Rewrite the definition in the owning fragment as well: the writer and
+	// the validator read the AST definitions, not just the node.
+	var fusedObj *parser.ObjectNode
+	if left.Parent != nil {
+		for _, frag := range left.Parent.Fragments {
+			for i, def := range frag.Definitions {
+				if obj, ok := def.(*parser.ObjectNode); ok &&
+					index.NormalizeName(literalText(obj.Name)) == index.NormalizeName(left.RealName) {
+					fusedObj = &parser.ObjectNode{
+						Position: obj.Position,
+						Name:     obj.Name,
+						Subnode:  parser.Subnode{Definitions: defs},
+					}
+					frag.Definitions[i] = fusedObj
+				}
+			}
+		}
+	}
+	l.rebuildNode(left, fusedObj, defs)
 	return true
 }
 
@@ -376,8 +394,9 @@ func (l *lowerer) removeGAMDefinition(n *index.ProjectNode) {
 	delete(parent.Children, n.Name)
 }
 
-// rebuildNode replaces a node's body with defs.
-func (l *lowerer) rebuildNode(node *index.ProjectNode, defs []parser.Definition) {
+// rebuildNode replaces a node's body with defs. source is the definition
+// the fragment belongs to (the validator matches fragments by Source).
+func (l *lowerer) rebuildNode(node *index.ProjectNode, source *parser.ObjectNode, defs []parser.Definition) {
 	pos := parser.Position{}
 	if len(node.Fragments) > 0 {
 		pos = node.Fragments[0].ObjectPos
@@ -386,6 +405,9 @@ func (l *lowerer) rebuildNode(node *index.ProjectNode, defs []parser.Definition)
 	node.Children = map[string]*index.ProjectNode{}
 	node.Fields = map[string][]index.EvaluatedField{}
 	frag := &index.Fragment{File: node.File, Definitions: defs, IsObject: true, ObjectPos: pos}
+	if source != nil {
+		frag.Source = source
+	}
 	node.Fragments = append(node.Fragments, frag)
 	if l.b.activeFragments != nil {
 		l.b.activeFragments[frag] = true

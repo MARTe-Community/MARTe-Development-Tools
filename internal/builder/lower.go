@@ -16,12 +16,13 @@ type LowerReport struct {
 	Wired     int // `from` entries wired without a copy
 	Buffers   int // synthesized GAMDataSource buffers
 	Fused     int // GAM pairs fused into one expression GAM
+	Pipelines int // pipeline instances expanded
 	Redundant int // copy pairs that were already wired
 }
 
 // Empty reports whether nothing was lowered.
 func (r LowerReport) Empty() bool {
-	return r.Copies == 0 && r.Wired == 0 && r.Buffers == 0 && r.Fused == 0 && r.Redundant == 0
+	return r.Copies == 0 && r.Wired == 0 && r.Buffers == 0 && r.Fused == 0 && r.Pipelines == 0 && r.Redundant == 0
 }
 
 func (r LowerReport) String() string {
@@ -40,6 +41,9 @@ func (r LowerReport) String() string {
 	}
 	if r.Fused > 0 {
 		parts = append(parts, fmt.Sprintf("%d GAM pair(s) fused", r.Fused))
+	}
+	if r.Pipelines > 0 {
+		parts = append(parts, fmt.Sprintf("%d pipeline(s) expanded", r.Pipelines))
 	}
 	if r.Redundant > 0 {
 		parts = append(parts, fmt.Sprintf("%d redundant copy pair(s) skipped", r.Redundant))
@@ -68,6 +72,7 @@ func (b *Builder) lowerAll() (LowerReport, error) {
 		total.Wired += r.Wired
 		total.Buffers += r.Buffers
 		total.Fused += r.Fused
+		total.Pipelines += r.Pipelines
 		total.Redundant += r.Redundant
 	}
 	if b.tree == nil {
@@ -94,7 +99,12 @@ func (b *Builder) lowerAll() (LowerReport, error) {
 // `mdt check` so sugar-backed configurations validate like lowered ones.
 func Lower(tree *index.ProjectTree) (LowerReport, error) {
 	b := &Builder{tree: tree}
-	return b.lowerAll()
+	rep, err := b.lowerAll()
+	if err != nil {
+		return rep, err
+	}
+	tree.ResolveReferences(nil)
+	return rep, nil
 }
 
 // lowerSugar rewrites copy groups and `from` wiring into ordinary MARTe
@@ -113,6 +123,11 @@ func (b *Builder) lowerSugar(root *index.ProjectNode) (LowerReport, error) {
 		seq:    0,
 	}
 	l.indexNames(root)
+
+	// 0. Pipeline instances expand into their body GAMs and wiring.
+	if err := l.expandPipelines(root, &rep); err != nil {
+		return rep, err
+	}
 
 	// 1. Direct `from` wiring in signal lists (no copy needed when the
 	// producer's DataSource is used directly).
@@ -250,6 +265,8 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 		// set for groups that are elements of a Functions array
 		arr      *parser.ArrayValue
 		arrIndex int
+		file     string
+		refPos   parser.Position
 	}
 	var groups []pending
 
@@ -284,7 +301,10 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 				}
 				for j, el := range arr.Elements {
 					if g, ok := el.(*parser.CopyGroup); ok {
-						groups = append(groups, pending{owner: l.functionsOwner(n, arr), arr: arr, arrIndex: j, group: g})
+						groups = append(groups, pending{
+							owner: l.functionsOwner(n, arr), arr: arr, arrIndex: j, group: g,
+							file: frag.File, refPos: field.Position,
+						})
 					}
 				}
 			}
@@ -329,10 +349,17 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 			return err
 		}
 
-		// Replace the group with a reference to the generated GAM.
-		ref := &parser.ReferenceValue{Position: p.group.Position, Value: name}
+		// Replace the group with a reference to the generated GAM. The
+		// reference lives at the list position, in the list's file, so it
+		// resolves like a parsed reference.
+		refPos := p.group.Position
+		if p.refPos.Line > 0 {
+			refPos = p.refPos
+		}
+		ref := &parser.ReferenceValue{Position: refPos, Value: name}
 		if p.arr != nil {
 			p.arr.Elements[p.arrIndex] = ref
+			l.tree.IndexValue(p.file, ref)
 		} else {
 			// The group definition is replaced by the synthesized object
 			// definition; drop the sugar node itself.
