@@ -20,8 +20,10 @@ type Builder struct {
 	ProjectRoot string // Directory containing .marte_schema.cue (derived from Files)
 	// Optimize enables MARTe-oriented output optimisations (IOGAM merging,
 	// signal ordering). See optimize.go.
-	Optimize        bool
-	OptimizeReport  OptimizeReport
+	Optimize       bool
+	OptimizeReport OptimizeReport
+	// LowerReport summarizes copy/wiring sugar expansion.
+	LowerReport     LowerReport
 	variables       map[string]parser.Value
 	tree            *index.ProjectTree
 	activeNodes     map[*index.ProjectNode]bool
@@ -367,6 +369,14 @@ func (b *Builder) Build(f *os.File) error {
 	for k, v := range b.variables {
 		evalCtx.Variables[k] = v
 	}
+
+	// Expand copy/wiring sugar before validation: copies create the signal
+	// producers that the ordering checks expect.
+	rep, err := b.lowerAll()
+	if err != nil {
+		return err
+	}
+	b.LowerReport = rep
 
 	// Validate before building to ensure ActiveFragments are consistent and fields resolved
 	v := &validator.Validator{

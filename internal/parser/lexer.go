@@ -37,6 +37,7 @@ const (
 	TokenCaret
 	TokenAmpersand
 	TokenConcat
+	TokenArrow // ->
 	TokenVariableReference
 	TokenIf
 	TokenElse
@@ -171,6 +172,10 @@ func (l *Lexer) NextToken() Token {
 			}
 			return l.lexObjectIdentifier()
 		case '-':
+			if l.peek() == '>' {
+				l.next()
+				return l.emit(TokenArrow)
+			}
 			return l.emit(TokenMinus)
 		case '*':
 			return l.emit(TokenStar)
@@ -343,9 +348,17 @@ func (l *Lexer) lexNumber() Token {
 	// Consume remaining digits
 	l.lexDigits()
 
+	// A '.' only belongs to the number when a digit follows: `1..3` is the
+	// range tokens 1, .., 3, not the malformed number `1.`.
 	if l.peek() == '.' {
+		save := l.pos
+		saveStart, saveLine, saveWidth := l.start, l.line, l.width
 		l.next()
-		l.lexDigits()
+		if unicode.IsDigit(l.peek()) {
+			l.lexDigits()
+		} else {
+			l.pos, l.start, l.line, l.width = save, saveStart, saveLine, saveWidth
+		}
 	}
 
 	if r := l.peek(); r == 'e' || r == 'E' {

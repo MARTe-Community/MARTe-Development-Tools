@@ -469,6 +469,34 @@ same `Name: Type` form instead of a nested `Type = …` object:
   objects (including TOML tables and YAML mappings), nulls, and timestamps
   are rejected; unknown extensions are an error rather than a silent no-op.
 
+## 12a. Copy and fan-out sugar (experimental)
+
+Signal copies can be declared directly instead of hand-writing IOGAMs:
+
+```marte
++Filter = {
+  Class = FilterGAM
+  InputSignals = {
+    In1 = from Acq.T1                    // direct wiring, no copy GAM
+  }
+}
+
+copy Links {                              // named copy group -> IOGAM
+  Acq[2] as T2L -> Filter.In2 at 1
+  Acq.T1 -> SINK::Telemetry
+}
+```
+
+`Functions = { Acq Links Filter }` references the group by name; inline
+groups (`copy { … }`) expand where they appear in the list. Endpoints may
+be selected by index (`GAM[n]`, `GAM[a..b]`), aliased on both sides
+(`as NAME`) and placed at a signal-list index (`at N`). Expression GAM
+chains can be fused with `fuse A with B` when the intermediate signal has
+a single consumer.
+
+See [COPY_SUGAR.md](COPY_SUGAR.md) for the full rules, lowering behaviour
+and limitations. This syntax is experimental and may change.
+
 ## 13. Validation status of the shipped examples
 
 | Example                                      | Command                                                                       | Result                        |

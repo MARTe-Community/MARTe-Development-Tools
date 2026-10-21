@@ -89,6 +89,11 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   mdt lsp [--graph [--graph-port=PORT]]
   ```
 
+- **Experimental**: copy groups and direct signal wiring
+  (`copy { Acq.T1 -> Filter.In1 }`, `In = from Acq.T1`) remove hand-written
+  IOGAMs; `fuse A with B` inlines expression-GAM chains. See
+  [docs/COPY_SUGAR.md](docs/COPY_SUGAR.md).
+
 ### Editor Integration
 
 `mdt lsp` implements the Language Server Protocol. You can use it with any LSP-compatible editor (VS Code, Neovim, Emacs, etc.).

@@ -135,6 +135,21 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			return p.parseWith(tok)
 		}
 
+		// Copy group: `copy { … }` or `copy Name { … }`.
+		if name == "copy" && p.looksLikeCopyGroup() {
+			groupName := ""
+			if p.peek().Type == TokenIdentifier {
+				groupName = p.next().Value
+			}
+			return p.parseCopyGroup(tok, groupName)
+		}
+
+		// Fusion request: `fuse A with B`.
+		if name == "fuse" && p.peek().Type == TokenIdentifier &&
+			p.peekN(1).Type == TokenIdentifier && p.peekN(1).Value == "with" {
+			return p.parseFuse(tok)
+		}
+
 		// Signal shorthand: DS::Signal [: Type[Dim]] [= { … }]
 		if strings.Contains(name, "::") {
 			return p.parseSignalShorthand(tok, name)
@@ -164,6 +179,19 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 					Position: tok.Position,
 					Name:     &ReferenceValue{Position: tok.Position, Value: name},
 					Subnode:  sub,
+				}, true
+			}
+
+			if p.peek().Type == TokenIdentifier && p.peek().Value == "from" {
+				fromTok := p.next()
+				val, ok := p.parseFromValue(fromTok)
+				if !ok {
+					return nil, false
+				}
+				return &Field{
+					Position: tok.Position,
+					Name:     name,
+					Value:    val,
 				}, true
 			}
 
@@ -565,6 +593,35 @@ func (p *Parser) parseArrayValueBlock() ([]Value, Token, bool) {
 			}
 			elems = append(elems, elem)
 		default:
+			if t.Type == TokenIdentifier && t.Value == "copy" {
+				copyTok := p.next()
+				if p.looksLikeCopyGroup() {
+					groupName := ""
+					if p.peek().Type == TokenIdentifier {
+						groupName = p.next().Value
+					}
+					def, ok := p.parseCopyGroup(copyTok, groupName)
+					if !ok {
+						return nil, Token{}, false
+					}
+					elems = append(elems, def.(Value))
+					continue
+				}
+				// A plain `copy` identifier used as a value.
+				elems = append(elems, &ReferenceValue{Position: copyTok.Position, Value: copyTok.Value})
+				continue
+			}
+			if t.Type == TokenIdentifier && t.Value == "fuse" &&
+				p.peekN(1).Type == TokenIdentifier &&
+				p.peekN(2).Type == TokenIdentifier && p.peekN(2).Value == "with" {
+				fuseTok := p.next()
+				def, ok := p.parseFuse(fuseTok)
+				if !ok {
+					return nil, Token{}, false
+				}
+				elems = append(elems, def.(Value))
+				continue
+			}
 			val, ok := p.parseValue()
 			if !ok {
 				return nil, Token{}, false
@@ -1057,6 +1114,34 @@ func (p *Parser) parseAtom() (Value, bool) {
 					return nil, false
 				}
 				arr.Elements = append(arr.Elements, elem)
+				continue
+			}
+			if t.Type == TokenIdentifier && t.Value == "copy" {
+				copyTok := p.next()
+				if p.looksLikeCopyGroup() {
+					groupName := ""
+					if p.peek().Type == TokenIdentifier {
+						groupName = p.next().Value
+					}
+					def, defOK := p.parseCopyGroup(copyTok, groupName)
+					if !defOK {
+						return nil, false
+					}
+					arr.Elements = append(arr.Elements, def.(Value))
+					continue
+				}
+				arr.Elements = append(arr.Elements, &ReferenceValue{Position: copyTok.Position, Value: copyTok.Value})
+				continue
+			}
+			if t.Type == TokenIdentifier && t.Value == "fuse" &&
+				p.peekN(1).Type == TokenIdentifier &&
+				p.peekN(2).Type == TokenIdentifier && p.peekN(2).Value == "with" {
+				fuseTok := p.next()
+				def, defOK := p.parseFuse(fuseTok)
+				if !defOK {
+					return nil, false
+				}
+				arr.Elements = append(arr.Elements, def.(Value))
 				continue
 			}
 			elem, elemOK := p.parseValue()

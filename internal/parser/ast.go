@@ -479,3 +479,81 @@ type WithBlock struct {
 func (w *WithBlock) Pos() Position { return w.Position }
 func (w *WithBlock) End() Position { return w.EndPosition }
 func (w *WithBlock) isDefinition() {}
+
+// --- Copy / wiring sugar ------------------------------------------------
+
+// CopyEndpoint is one side of a copy: `GAM.Signal`, `GAM[n]` or `DS::Signal`.
+type CopyEndpoint struct {
+	Position Position
+	Object   string // GAM or DataSource name
+	Signal   string // signal name ("" when ByIndex)
+	IsDS     bool   // DataSource::Signal form
+	ByIndex  bool   // selected by 1-based index in the GAM's signal list
+	Index    int    // 1-based start (or single) index
+	IndexEnd int    // 1-based end for ranges; equals Index for single
+	EndPos   Position
+}
+
+func (e CopyEndpoint) Pos() Position { return e.Position }
+
+// CopyItem is one copy line inside a copy group.
+type CopyItem struct {
+	Position Position
+	Src      CopyEndpoint
+	Dst      CopyEndpoint
+	// SrcAlias/DstAlias rename the local signal slot (`as NAME`).
+	SrcAlias string
+	DstAlias string
+	// DstAt places a synthesized destination declaration at a 1-based
+	// position in the GAM's signal list.
+	DstAt int
+	// Optional explicit type for signals that declare none.
+	Type string
+	Dim  int
+}
+
+func (c *CopyItem) Pos() Position { return c.Position }
+
+// CopyGroup is a copy group. With an empty Name it is an inline group that
+// expands to a generated IOGAM at its position in a Functions list. With a
+// Name it defines a named IOGAM object that Functions lists can reference.
+type CopyGroup struct {
+	Position    Position
+	EndPosition Position
+	Name        string
+	Items       []CopyItem
+}
+
+func (c *CopyGroup) Pos() Position { return c.Position }
+func (c *CopyGroup) End() Position { return c.EndPosition }
+func (c *CopyGroup) isDefinition() {}
+func (c *CopyGroup) isValue()      {} // valid as a Functions list element
+
+// FromValue is the value of `Slot = from GAM.Signal` inside a signal list.
+// Lowering turns it into a regular signal declaration (DataSource / Alias /
+// Type) wired to the producer.
+type FromValue struct {
+	Position Position
+	Src      CopyEndpoint
+	Alias    string
+	Type     string
+	Dim      int
+	EndPos   Position
+}
+
+func (f *FromValue) Pos() Position { return f.Position }
+func (f *FromValue) End() Position { return f.EndPos }
+func (f *FromValue) isValue()      {}
+
+// FuseStatement requests GAM fusion (`fuse A with B`).
+type FuseStatement struct {
+	Position    Position
+	EndPosition Position
+	Left        string
+	Right       string
+}
+
+func (f *FuseStatement) Pos() Position { return f.Position }
+func (f *FuseStatement) End() Position { return f.EndPosition }
+func (f *FuseStatement) isDefinition() {}
+func (f *FuseStatement) isValue()      {}

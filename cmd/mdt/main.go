@@ -400,6 +400,10 @@ func runBuild(args []string) {
 	if projectRoot == "" {
 		projectRoot = "."
 	}
+	if _, err := builder.Lower(tree); err != nil {
+		logger.Printf("Copy/wiring error: %v\n", err)
+		os.Exit(1)
+	}
 	v := validator.NewValidator(tree, projectRoot, overrides)
 	v.ValidateProject(context.Background())
 
@@ -438,6 +442,9 @@ func runBuild(args []string) {
 	if err != nil {
 		logger.Printf("Build failed: %v\n", err)
 		os.Exit(1)
+	}
+	if !b.LowerReport.Empty() {
+		logger.Printf("Copies: %s\n", b.LowerReport)
 	}
 	if optimize {
 		if b.OptimizeReport.Empty() {
@@ -552,6 +559,10 @@ func runCheck(args []string) {
 	}
 	if projectRoot == "" {
 		projectRoot = "."
+	}
+	if _, err := builder.Lower(tree); err != nil {
+		logger.Printf("Copy/wiring error: %v\n", err)
+		os.Exit(1)
 	}
 	v := validator.NewValidator(tree, projectRoot, overrides)
 	v.MissingFilesAreWarnings = true
