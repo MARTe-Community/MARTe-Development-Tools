@@ -445,7 +445,10 @@ same `Name: Type` form instead of a nested `Type = …` object:
   and grouped memory blocks) and signal declarations become the shorthand
   forms (`DS::Sig: Type as Alias = { … }`, `Signal: Type[Dim] = { … }`).
   `--check` exits non-zero when a file would change; `-n` prints the result.
-  The rewrite is idempotent and preserves `//!` pragmas.
+  By default the tool builds both the original and the rewritten file set
+  and compares the resulting configurations; on any semantic difference it
+  writes nothing and exits non-zero (`--no-verify` disables the check). The
+  rewrite is idempotent and preserves `//!` pragmas.
 - `-O`/`--optimize` optimises the generated application: adjacent IOGAMs
   are merged, identity copy GAMs are dropped, and DataSource/GAM signals
   are ordered by consumer to reduce signal-copy (memcpy) overhead. The

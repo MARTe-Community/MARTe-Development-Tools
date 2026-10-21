@@ -117,3 +117,22 @@ func TestRefactorCLI(t *testing.T) {
 		}
 	}
 }
+
+// --no-verify skips the build comparison and still rewrites the file.
+func TestRefactorCLINoVerify(t *testing.T) {
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+	tf := framework.WrapT(t, ctx)
+
+	path := tf.CreateFile("legacy_noverify.marte", legacyConfig)
+	if out, code := runRefactorCLI(t, "--no-verify", path); code != 0 {
+		t.Fatalf("refactor --no-verify failed (%d):\n%s", code, out)
+	}
+	content, err := ctx.ReadFile("legacy_noverify.marte")
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(content, "copy Copy {") {
+		t.Errorf("file was not rewritten:\n%s", content)
+	}
+}

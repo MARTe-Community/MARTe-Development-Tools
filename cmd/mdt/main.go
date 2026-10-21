@@ -109,6 +109,9 @@ Flags:
   -P <folder>    Scan folder recursively for .marte files
   --check        Exit non-zero when a file would be rewritten
   -n, --dry-run  Print the rewritten files instead of writing them
+  --verify       Build the original and the refactored files and compare the
+                 outputs; on a mismatch nothing is written (default: on)
+  --no-verify    Skip the build comparison
   -h, --help     Show this help message
 `
 

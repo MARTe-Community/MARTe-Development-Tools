@@ -336,3 +336,80 @@ func compareTrees(t *testing.T, a, b string) {
 		t.Fatalf("walk: %v", err)
 	}
 }
+
+// VerifyRewrite must accept an equivalent rewrite and reject one that changes
+// the built configuration (the CLI then refuses to write anything).
+func TestVerifyRewrite(t *testing.T) {
+	orig := `#package T
+
++App = {
+  Class = RealTimeApplication
+  Value = 10
+  Name = "app"
+}
+`
+	cfg, err := parser.NewParser(orig).Parse()
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var buf bytes.Buffer
+	formatter.Format(cfg, &buf)
+	equivalent := buf.String()
+
+	if err := refactor.VerifyRewrite([]string{orig}, []string{equivalent}); err != nil {
+		t.Fatalf("equivalent rewrite rejected: %v", err)
+	}
+
+	changed := strings.Replace(orig, "Value = 10", "Value = 11", 1)
+	if err := refactor.VerifyRewrite([]string{orig}, []string{changed}); err == nil {
+		t.Fatal("a changed value was not detected")
+	} else if !strings.Contains(err.Error(), "differ") {
+		t.Fatalf("unexpected verification error: %v", err)
+	}
+}
+
+// The refactor output of a real project passes the build verification.
+func TestRefactorVerifiesBigProject(t *testing.T) {
+	srcDir := "../examples/big_project"
+	var files []string
+	err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && filepath.Ext(path) == ".marte" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	var originals, refactored []string
+	var configs []*parser.Configuration
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		cfg, err := parser.NewParser(string(b)).Parse()
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		originals = append(originals, string(b))
+		configs = append(configs, cfg)
+	}
+	types := refactor.CollectTypes(configs)
+	for i, cfg := range configs {
+		refactor.Config(cfg, types, refactor.Options{
+			CompactSignals: true,
+			CopyGroups:     true,
+			Pragmas:        refactor.SourcePragmas(originals[i]),
+		})
+		var buf bytes.Buffer
+		formatter.Format(cfg, &buf)
+		refactored = append(refactored, buf.String())
+	}
+	if err := refactor.VerifyRewrite(originals, refactored); err != nil {
+		t.Fatalf("refactored project failed build verification: %v", err)
+	}
+}

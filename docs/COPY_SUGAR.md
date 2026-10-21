@@ -249,6 +249,11 @@ condition fails; the build proceeds without fusion.
   preserves `//!` pragmas (they stay attached to the generated copy items)
   and reports the number of rewritten declarations per file. `--check` is
   suitable for CI; `-n` prints instead of writing.
+  Verification is on by default: both file sets are built and the outputs
+  compared semantically (objects, classes, fields, signal entries and ordered
+  function lists). If they differ the tool writes nothing — the caller keeps
+  the original files, so the refactor is effectively reverted — and exits
+  non-zero. `--no-verify` skips the comparison.
 
 * `mdt build` prints a summary, e.g.
   `Copies: 7 copy pair(s), 1 direct wire(s), 1 GAM pair(s) fused, 1 pipeline(s) expanded`.

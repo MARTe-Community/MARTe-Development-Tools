@@ -21,6 +21,7 @@ func runRefactor(args []string) {
 	rootPath := ""
 	dryRun := false
 	checkOnly := false
+	verify := true
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -32,6 +33,10 @@ func runRefactor(args []string) {
 			dryRun = true
 		case arg == "--check":
 			checkOnly = true
+		case arg == "--verify":
+			verify = true
+		case arg == "--no-verify":
+			verify = false
 		case strings.HasPrefix(arg, "-"):
 			logger.Printf("Unknown flag %s\n", arg)
 			os.Exit(1)
@@ -81,6 +86,8 @@ func runRefactor(args []string) {
 	}
 	types := refactor.CollectTypes(configs)
 
+	outputs := make([]string, len(configs))
+	changed := make([]bool, len(configs))
 	changedFiles := 0
 	for i, cfg := range configs {
 		res := refactor.Config(cfg, types, refactor.Options{
@@ -94,25 +101,51 @@ func runRefactor(args []string) {
 
 		var buf bytes.Buffer
 		formatter.Format(cfg, &buf)
-		out := buf.String()
-		if out == sources[i] && res.Signals == 0 && res.CopyGroups == 0 {
+		outputs[i] = buf.String()
+		if outputs[i] == sources[i] && res.Signals == 0 && res.CopyGroups == 0 {
 			continue
 		}
 		if res.Signals > 0 || res.CopyGroups > 0 {
 			logger.Printf("%s: %d signal declaration(s), %d IOGAM(s)\n", files[i], res.Signals, res.CopyGroups)
 		}
+		changed[i] = true
+		changedFiles++
+	}
 
+	// Verify that the rewrite does not change the built configuration before
+	// touching any file: on a mismatch nothing is written, so there is
+	// nothing to revert.
+	if verify && changedFiles > 0 {
+		if err := refactor.VerifyRewrite(sources, outputs); err != nil {
+			logger.Printf("Verification failed: %v\n", err)
+			logger.Println("No files were modified (refactor reverted).")
+			os.Exit(1)
+		}
+		logger.Println("Verification: the refactored configuration builds identically.")
+	}
+
+	for i := range configs {
+		if !changed[i] {
+			continue
+		}
 		switch {
 		case checkOnly:
-			changedFiles++
+			// counted already
 		case dryRun:
-			fmt.Printf("// ==== %s ====\n%s\n", files[i], out)
+			fmt.Printf("// ==== %s ====\n%s\n", files[i], outputs[i])
 		default:
-			if err := os.WriteFile(files[i], []byte(out), 0o644); err != nil {
+			// Write through a temporary file so a crash cannot leave a
+			// half-written configuration behind.
+			tmp := files[i] + ".refactor.tmp"
+			if err := os.WriteFile(tmp, []byte(outputs[i]), 0o644); err != nil {
 				logger.Printf("Error writing %s: %v\n", files[i], err)
 				os.Exit(1)
 			}
-			changedFiles++
+			if err := os.Rename(tmp, files[i]); err != nil {
+				os.Remove(tmp)
+				logger.Printf("Error writing %s: %v\n", files[i], err)
+				os.Exit(1)
+			}
 		}
 	}
 

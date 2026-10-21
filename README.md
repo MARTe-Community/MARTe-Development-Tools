@@ -83,6 +83,9 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   mdt refactor --check -P .    # CI: fail when a file would change
   mdt refactor -n file.marte   # dry run to stdout
   ```
+  By default the tool builds the original and the refactored files and
+  compares the outputs; on any difference it refuses to write (nothing is
+  reverted because nothing was written). `--no-verify` skips the check.
 - **Graph**: Open an interactive signal-flow graph in the browser.
   ```bash
   mdt graph [-P folder_path] [-p project_name] [-port PORT] [-vVAR=VAL] [files...]
