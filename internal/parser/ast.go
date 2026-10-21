@@ -505,6 +505,14 @@ type CopyOption struct {
 	Value    Value
 }
 
+// CopyMember is one signal inside a grouped endpoint, with its options.
+type CopyMember struct {
+	Position Position
+	Endpoint CopyEndpoint
+	Alias    string
+	Options  []CopyOption
+}
+
 // CopyItem is one copy line inside a copy group.
 type CopyItem struct {
 	Position Position
@@ -522,6 +530,11 @@ type CopyItem struct {
 	// Per-signal options copied into the generated entries.
 	SrcOptions []CopyOption
 	DstOptions []CopyOption
+	// Grouped endpoints: `(a, b) -> c`. When set, the members are copied as
+	// one contiguous memory block (the IOGAM copies whole memory, not
+	// pairwise), and Src/Dst hold the first member for position reporting.
+	SrcGroup []CopyMember
+	DstGroup []CopyMember
 }
 
 func (c *CopyItem) Pos() Position { return c.Position }

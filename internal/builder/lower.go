@@ -52,20 +52,60 @@ func (r LowerReport) String() string {
 }
 
 // copyPair is one resolved copy edge.
-type copyPair struct {
-	srcDS     string
-	srcSignal string
-	srcAlias  string
-	dstDS     string
-	dstSignal string
-	dstAlias  string
-	typ       string
-	dim       int
-	position  parser.Position
-	srcOpts   []parser.CopyOption
-	dstOpts   []parser.CopyOption
+// copyEntry is one signal entry generated for an IOGAM.
+type copyEntry struct {
+	ds     string
+	signal string
+	alias  string
+	typ    string
+	dim    int
+	opts   []parser.CopyOption
+	pos    parser.Position
 }
 
+// copyOp is one copy item resolved: a contiguous source block mapped onto a
+// contiguous destination block. IOGAM copies whole memory, so entries inside
+// an op keep their order.
+type copyOp struct {
+	srcs []copyEntry
+	dsts []copyEntry
+	pos  parser.Position
+}
+
+func (o copyOp) grouped() bool { return len(o.srcs) != 1 || len(o.dsts) != 1 }
+
+// typeSize returns the byte size of a scalar MARTe type, or 0 if unknown.
+func typeSize(typ string) int {
+	switch strings.TrimSpace(typ) {
+	case "uint8", "int8", "char8", "bool":
+		return 1
+	case "uint16", "int16":
+		return 2
+	case "uint32", "int32", "float32":
+		return 4
+	case "uint64", "int64", "float64":
+		return 8
+	}
+	return 0
+}
+
+// entrySize returns the byte size of an entry, or 0 when it cannot be
+// determined (unknown type).
+func entrySize(e copyEntry) int {
+	base := typeSize(e.typ)
+	if base == 0 {
+		return 0
+	}
+	dim := e.dim
+	if dim <= 0 {
+		dim = 1
+	}
+	return base * dim
+}
+
+// lowerSugar rewrites copy groups and `from` wiring into ordinary MARTe
+// configuration (signal declarations, IOGAMs and, when needed,
+// GAMDataSource buffers). It runs after validation and before writing.
 // lowerAll lowers every root of the tree (the root node plus isolated files).
 func (b *Builder) lowerAll() (LowerReport, error) {
 	var total LowerReport
@@ -109,9 +149,6 @@ func Lower(tree *index.ProjectTree) (LowerReport, error) {
 	return rep, nil
 }
 
-// lowerSugar rewrites copy groups and `from` wiring into ordinary MARTe
-// configuration (signal declarations, IOGAMs and, when needed,
-// GAMDataSource buffers). It runs after validation and before writing.
 func (b *Builder) lowerSugar(root *index.ProjectNode) (LowerReport, error) {
 	var rep LowerReport
 	if root == nil || b.tree == nil {
@@ -400,19 +437,29 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 }
 
 // resolveGroup expands a copy group into resolved pairs.
-func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyPair, error) {
-	var pairs []copyPair
+func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyOp, error) {
+	var ops []copyOp
+	anyGroup := false
 	for _, item := range group.Items {
-		srcs, err := l.resolveSourceList(item.Src)
-		if err != nil {
-			return nil, fmt.Errorf("%d:%d: %v", item.Position.Line, item.Position.Column, err)
+		srcGroup, dstGroup := item.SrcGroup, item.DstGroup
+		if len(srcGroup) > 0 || len(dstGroup) > 0 {
+			anyGroup = true
 		}
+
 		isRange := (item.Src.ByIndex && item.Src.IndexEnd > item.Src.Index) ||
 			(item.Dst.ByIndex && item.Dst.IndexEnd > item.Dst.Index)
 		if isRange {
+			if len(srcGroup) > 0 || len(dstGroup) > 0 {
+				return nil, fmt.Errorf("%d:%d: a signal range cannot be used inside a group",
+					item.Position.Line, item.Position.Column)
+			}
 			if !item.Dst.ByIndex || !item.Src.ByIndex {
 				return nil, fmt.Errorf("%d:%d: a signal range needs index ranges on both sides",
 					item.Position.Line, item.Position.Column)
+			}
+			srcs, err := l.resolveSourceList(item.Src)
+			if err != nil {
+				return nil, fmt.Errorf("%d:%d: %v", item.Position.Line, item.Position.Column, err)
 			}
 			dsts, err := l.resolveDestinationRange(item.Dst, srcs, item.Type, item.Dim)
 			if err != nil {
@@ -423,8 +470,8 @@ func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyP
 					item.Position.Line, item.Position.Column, len(srcs), len(dsts))
 			}
 			for i := range srcs {
-				if p, ok := l.pair(item, srcs[i], dsts[i]); ok {
-					pairs = append(pairs, p)
+				if p, ok := l.singleOp(item, srcs[i], dsts[i]); ok {
+					ops = append(ops, p)
 				} else {
 					*redundant++
 				}
@@ -432,6 +479,27 @@ func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyP
 			continue
 		}
 
+		if len(srcGroup) > 0 || len(dstGroup) > 0 {
+			op, ok, err := l.groupOp(item)
+			if err != nil {
+				return nil, fmt.Errorf("%d:%d: %v", item.Position.Line, item.Position.Column, err)
+			}
+			if ok {
+				ops = append(ops, op)
+			} else {
+				*redundant++
+			}
+			continue
+		}
+
+		srcs, err := l.resolveSourceList(item.Src)
+		if err != nil {
+			return nil, fmt.Errorf("%d:%d: %v", item.Position.Line, item.Position.Column, err)
+		}
+		if len(srcs) != 1 {
+			return nil, fmt.Errorf("%d:%d: source range against a single destination",
+				item.Position.Line, item.Position.Column)
+		}
 		typ, dim := srcs[0].typ, srcs[0].dim
 		if t, d, ok := optionType(item.SrcOptions); ok {
 			typ, dim = t, d
@@ -445,48 +513,142 @@ func (l *lowerer) resolveGroup(group *parser.CopyGroup, redundant *int) ([]copyP
 		if err != nil {
 			return nil, fmt.Errorf("%d:%d: %v", item.Position.Line, item.Position.Column, err)
 		}
-		if len(srcs) != 1 {
-			return nil, fmt.Errorf("%d:%d: source range against a single destination",
-				item.Position.Line, item.Position.Column)
-		}
-		if p, ok := l.pair(item, srcs[0], dst); ok {
-			pairs = append(pairs, p)
+		if p, ok := l.singleOp(item, srcs[0], dst); ok {
+			ops = append(ops, p)
 		} else {
 			*redundant++
 		}
 	}
-	return pairs, nil
+	if anyGroup {
+		if err := validateBlockLayout(ops); err != nil {
+			return nil, err
+		}
+	}
+	return ops, nil
 }
 
-// pair builds a copyPair, reporting ok=false for a redundant copy.
-func (l *lowerer) pair(item parser.CopyItem, src, dst signalRef) (copyPair, bool) {
-	p := copyPair{
-		srcDS:     src.ds,
-		srcSignal: src.signal,
-		srcAlias:  item.SrcAlias,
-		dstDS:     dst.ds,
-		dstSignal: dst.signal,
-		dstAlias:  item.DstAlias,
-		typ:       src.typ,
-		dim:       src.dim,
-		position:  item.Position,
-		srcOpts:   item.SrcOptions,
-		dstOpts:   item.DstOptions,
-	}
-	if typ, dim, ok := optionType(item.SrcOptions); ok {
-		p.typ, p.dim = typ, dim
-	} else if typ, dim, ok := optionType(item.DstOptions); ok {
-		p.typ, p.dim = typ, dim
-	} else if p.typ == "" {
-		p.typ, p.dim = dst.typ, dst.dim
-	}
+// singleOp builds a one-to-one op, reporting ok=false for a redundant copy.
+func (l *lowerer) singleOp(item parser.CopyItem, src, dst signalRef) (copyOp, bool) {
+	srcEntry := entryFromSignal(src, item.SrcAlias, item.SrcOptions, item.Position)
+	dstEntry := entryFromSignal(dst, item.DstAlias, item.DstOptions, item.Position)
 	if item.Type != "" {
-		p.typ, p.dim = item.Type, item.Dim
+		srcEntry.typ, srcEntry.dim = item.Type, item.Dim
 	}
-	if p.srcDS == p.dstDS && p.srcSignal == p.dstSignal && p.srcAlias == "" && p.dstAlias == "" {
-		return p, false
+	if src.aliasEmpty(item) && dst.aliasEmpty(item) &&
+		src.ds == dst.ds && src.signal == dst.signal {
+		return copyOp{}, false
 	}
-	return p, true
+	return copyOp{srcs: []copyEntry{srcEntry}, dsts: []copyEntry{dstEntry}, pos: item.Position}, true
+}
+
+func (r signalRef) aliasEmpty(item parser.CopyItem) bool {
+	return item.SrcAlias == "" && item.DstAlias == ""
+}
+
+// groupOp resolves a grouped item `(a, b, …) -> (c, …)`.
+func (l *lowerer) groupOp(item parser.CopyItem) (copyOp, bool, error) {
+	op := copyOp{pos: item.Position}
+	for _, m := range item.SrcGroup {
+		refs, err := l.resolveSourceList(m.Endpoint)
+		if err != nil {
+			return op, false, err
+		}
+		if len(refs) != 1 {
+			return op, false, fmt.Errorf("a group member cannot be a range")
+		}
+		op.srcs = append(op.srcs, entryFromSignal(refs[0], m.Alias, m.Options, m.Position))
+	}
+	if len(op.srcs) == 0 {
+		// Single source used inside a destination group.
+		refs, err := l.resolveSourceList(item.Src)
+		if err != nil {
+			return op, false, err
+		}
+		if len(refs) != 1 {
+			return op, false, fmt.Errorf("a group needs a single source signal")
+		}
+		op.srcs = append(op.srcs, entryFromSignal(refs[0], item.SrcAlias, item.SrcOptions, item.Position))
+	}
+
+	for _, m := range item.DstGroup {
+		typ, dim := "", 0
+		if t, d, ok := optionType(m.Options); ok {
+			typ, dim = t, d
+		} else if t, d, ok := optionType(item.SrcOptions); ok {
+			typ, dim = t, d
+		}
+		ref, err := l.resolveDestination(m.Endpoint, m.Alias, typ, dim, 0)
+		if err != nil {
+			return op, false, err
+		}
+		op.dsts = append(op.dsts, entryFromSignal(ref, m.Alias, m.Options, m.Position))
+	}
+	if len(op.dsts) == 0 {
+		typ, dim := "", 0
+		if t, d, ok := optionType(item.SrcOptions); ok {
+			typ, dim = t, d
+		}
+		ref, err := l.resolveDestination(item.Dst, item.DstAlias, typ, dim, item.DstAt)
+		if err != nil {
+			return op, false, err
+		}
+		op.dsts = append(op.dsts, entryFromSignal(ref, item.DstAlias, item.DstOptions, item.Position))
+	}
+	return op, true, nil
+}
+
+// entryFromSignal builds an entry, applying Type/NumberOfElements options.
+func entryFromSignal(ref signalRef, alias string, opts []parser.CopyOption, pos parser.Position) copyEntry {
+	e := copyEntry{ds: ref.ds, signal: ref.signal, alias: alias, typ: ref.typ, dim: ref.dim, opts: opts, pos: pos}
+	if t, d, ok := optionType(opts); ok {
+		e.typ, e.dim = t, d
+	}
+	return e
+}
+
+// validateBlockLayout checks that every op maps the same byte range on both
+// sides: an IOGAM copies its whole input memory to its output memory, so the
+// cumulative offsets must match and each op must move an equal number of
+// bytes.
+func validateBlockLayout(ops []copyOp) error {
+	inOff, outOff := 0, 0
+	for _, op := range ops {
+		inSize, outSize := 0, 0
+		for _, e := range op.srcs {
+			sz := entrySize(e)
+			if sz == 0 {
+				return fmt.Errorf("%d:%d: cannot determine the byte size of '%s' (declare Type)",
+					e.pos.Line, e.pos.Column, e.signal)
+			}
+			inSize += sz
+		}
+		for _, e := range op.dsts {
+			sz := entrySize(e)
+			if sz == 0 {
+				return fmt.Errorf("%d:%d: cannot determine the byte size of '%s' (declare Type)",
+					e.pos.Line, e.pos.Column, e.signal)
+			}
+			outSize += sz
+		}
+		if inOff != outOff {
+			return fmt.Errorf("%d:%d: copy block starts at byte %d on the input side and %d on the output side",
+				op.pos.Line, op.pos.Column, inOff, outOff)
+		}
+		if inSize != outSize {
+			if op.grouped() {
+				return fmt.Errorf("%d:%d: copy group moves %d input bytes into %d output bytes",
+					op.pos.Line, op.pos.Column, inSize, outSize)
+			}
+			return fmt.Errorf("%d:%d: signal copy moves %d input bytes into %d output bytes",
+				op.pos.Line, op.pos.Column, inSize, outSize)
+		}
+		inOff += inSize
+		outOff += outSize
+	}
+	if inOff != outOff {
+		return fmt.Errorf("copy block totals differ: %d input bytes vs %d output bytes", inOff, outOff)
+	}
+	return nil
 }
 
 // optionType extracts Type/NumberOfElements from a signal's options.
@@ -550,7 +712,7 @@ type signalRef struct {
 
 func (l *lowerer) resolveSourceList(ep parser.CopyEndpoint) ([]signalRef, error) {
 	if ep.IsDS {
-		return []signalRef{{ds: ep.Object, signal: ep.Signal}}, nil
+		return []signalRef{l.dsSignalRef(ep.Object, ep.Signal)}, nil
 	}
 	gam := l.byName[index.NormalizeName(ep.Object)]
 	if gam == nil {
@@ -590,7 +752,7 @@ func (l *lowerer) resolveSourceList(ep parser.CopyEndpoint) ([]signalRef, error)
 
 func (l *lowerer) resolveDestination(ep parser.CopyEndpoint, alias, typ string, dim, at int) (signalRef, error) {
 	if ep.IsDS {
-		return signalRef{ds: ep.Object, signal: ep.Signal}, nil
+		return l.dsSignalRef(ep.Object, ep.Signal), nil
 	}
 	gam := l.byName[index.NormalizeName(ep.Object)]
 	if gam == nil {
@@ -623,6 +785,28 @@ func (l *lowerer) resolveDestination(ep parser.CopyEndpoint, alias, typ string, 
 			ep.Index, ep.Object, len(names))
 	}
 	return l.signalRefOf(inputs.Children[names[ep.Index-1]])
+}
+
+// dsSignalRef resolves `DS::Signal` to its declared type when the
+// DataSource and signal are known; unknown ones keep empty type metadata.
+func (l *lowerer) dsSignalRef(ds, signal string) signalRef {
+	ref := signalRef{ds: ds, signal: signal}
+	node := l.byName[index.NormalizeName(ds)]
+	if node == nil {
+		return ref
+	}
+	signals, ok := node.Children["Signals"]
+	if !ok {
+		return ref
+	}
+	sig, ok := signals.Children[index.NormalizeName(signal)]
+	if !ok {
+		return ref
+	}
+	if resolved, err := l.signalRefOf(sig); err == nil {
+		ref.typ, ref.dim = resolved.typ, resolved.dim
+	}
+	return ref
 }
 
 func (l *lowerer) signalRefOf(sig *index.ProjectNode) (signalRef, error) {
@@ -1019,7 +1203,7 @@ func (l *lowerer) bufContainer(buf *index.ProjectNode) *index.ProjectNode {
 }
 
 // emitCopyGAM synthesizes the IOGAM object for a resolved group.
-func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []copyPair, pos parser.Position, rep *LowerReport, insertAt int, insertFrag *index.Fragment) error {
+func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, ops []copyOp, pos parser.Position, rep *LowerReport, insertAt int, insertFrag *index.Fragment) error {
 	obj := &parser.ObjectNode{
 		Position: pos,
 		Name:     &parser.ReferenceValue{Position: pos, Value: "+" + name},
@@ -1032,56 +1216,40 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []cop
 
 	usedIn := map[string]bool{}
 	usedOut := map[string]bool{}
-	for _, p := range pairs {
-		inName := p.srcAlias
-		if inName == "" {
-			inName = p.srcSignal
+	appendEntry := func(container *parser.ObjectNode, e copyEntry, side string, used map[string]bool) {
+		entryName := e.alias
+		if entryName == "" {
+			entryName = e.signal
 		}
-		// A copy group may read the same signal for several destinations;
-		// IOGAM signal lists are keyed by name, so give the extra reads an
-		// alias instead of colliding.
-		baseIn := inName
-		for i := 2; usedIn[inName]; i++ {
-			inName = fmt.Sprintf("%s%d", baseIn, i)
+		base := entryName
+		for i := 2; used[entryName]; i++ {
+			entryName = fmt.Sprintf("%s%d", base, i)
 		}
-		usedIn[inName] = true
-		in := &parser.ObjectNode{Position: p.position, Name: &parser.ReferenceValue{Position: p.position, Value: inName}}
-		in.Subnode.Definitions = append(in.Subnode.Definitions, &parser.Field{
-			Position: p.position, Name: "DataSource", Value: &parser.ReferenceValue{Position: p.position, Value: p.srcDS},
+		used[entryName] = true
+		entry := &parser.ObjectNode{Position: e.pos, Name: &parser.ReferenceValue{Position: e.pos, Value: entryName}}
+		entry.Subnode.Definitions = append(entry.Subnode.Definitions, &parser.Field{
+			Position: e.pos, Name: "DataSource", Value: &parser.ReferenceValue{Position: e.pos, Value: e.ds},
 		})
-		if inName != p.srcSignal {
-			in.Subnode.Definitions = append(in.Subnode.Definitions, &parser.Field{
-				Position: p.position, Name: "Alias", Value: &parser.StringValue{Position: p.position, Value: p.srcSignal, Quoted: true},
+		if entryName != e.signal {
+			entry.Subnode.Definitions = append(entry.Subnode.Definitions, &parser.Field{
+				Position: e.pos, Name: "Alias", Value: &parser.StringValue{Position: e.pos, Value: e.signal, Quoted: true},
 			})
 		}
-		for _, o := range p.srcOpts {
-			in.Subnode.Definitions = append(in.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
+		for _, o := range e.opts {
+			entry.Subnode.Definitions = append(entry.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
 		}
-		inputs.Subnode.Definitions = append(inputs.Subnode.Definitions, in)
+		container.Subnode.Definitions = append(container.Subnode.Definitions, entry)
+		_ = side
+	}
 
-		outName := p.dstAlias
-		if outName == "" {
-			outName = p.dstSignal
+	for _, op := range ops {
+		for _, e := range op.srcs {
+			appendEntry(inputs, e, "in", usedIn)
 		}
-		baseOut := outName
-		for i := 2; usedOut[outName]; i++ {
-			outName = fmt.Sprintf("%s%d", baseOut, i)
+		for _, e := range op.dsts {
+			appendEntry(outputs, e, "out", usedOut)
 		}
-		usedOut[outName] = true
-		out := &parser.ObjectNode{Position: p.position, Name: &parser.ReferenceValue{Position: p.position, Value: outName}}
-		out.Subnode.Definitions = append(out.Subnode.Definitions, &parser.Field{
-			Position: p.position, Name: "DataSource", Value: &parser.ReferenceValue{Position: p.position, Value: p.dstDS},
-		})
-		if outName != p.dstSignal {
-			out.Subnode.Definitions = append(out.Subnode.Definitions, &parser.Field{
-				Position: p.position, Name: "Alias", Value: &parser.StringValue{Position: p.position, Value: p.dstSignal, Quoted: true},
-			})
-		}
-		for _, o := range p.dstOpts {
-			out.Subnode.Definitions = append(out.Subnode.Definitions, &parser.Field{Position: o.Position, Name: o.Name, Value: o.Value})
-		}
-		outputs.Subnode.Definitions = append(outputs.Subnode.Definitions, out)
-		rep.Copies++
+		rep.Copies += len(op.srcs)
 	}
 	obj.Subnode.Definitions = append(obj.Subnode.Definitions, inputs, outputs)
 	if insertAt >= 0 && insertFrag != nil {

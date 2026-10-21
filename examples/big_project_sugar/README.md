@@ -6,8 +6,8 @@ project is kept unchanged next to it.
 
 ## What changed
 
-Every IOGAM except `EPICSOutputGAM` was replaced by a named copy group with
-the same GAM name, position and pair order — 22 groups, 302 copy pairs.
+Every IOGAM was replaced by a named copy group with the same GAM name,
+position and pair order — 23 groups, 388 copy items (369 active).
 Per-signal options (`Type`, `Samples`, `Frequency`, `Ranges`, `Value`,
 `Trigger`, `NumberOfElements`) are carried by the copy items:
 
@@ -18,8 +18,21 @@ copy DecimateGAM {
 }
 ```
 
-`EPICSOutputGAM` stays as written: its input and output lists differ in
-length (67 inputs, 69 outputs), so it cannot be expressed as 1:1 copy pairs.
+`EPICSOutputGAM` has 67 inputs and 69 outputs; the two 64-bit `Pulse*Time`
+inputs are copied into two 32-bit halves each, expressed with grouped
+endpoints:
+
+```marte
+copy EPICSOutputGAM {
+  …
+  DDB1::PulseStartTime { Type = uint64 } ->
+    (EPICSCAOutput::PulseStartTimeL { Type = uint32 }, EPICSCAOutput::PulseStartTimeH { Type = uint32 })
+}
+```
+
+The two implicit signals that the original annotated with
+`//! implicit: …` are covered by a file-level `//! allow(implicit)` in
+`thread1/epics.marte`.
 
 One pipeline groups the two unconditional ADC publishers, binding the 19
 source signals once:

@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -511,5 +512,153 @@ func TestCopyPerSignalOptions(t *testing.T) {
 	buf = buf[:strings.Index(buf, "}\n")]
 	if !strings.Contains(buf, "Type = float64") {
 		t.Errorf("buffer signal type not inferred from the destination option:\n%s", buf)
+	}
+}
+
+const groupFixture = `#package T
+
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = Src
+    +TDS = { Class = TimingDataSource }
+    +Src = {
+      Class = EPICSPVAInput
+      Signals = {
+        A = { Type = uint32 }
+        B = { Type = uint8 }
+        C = { Type = uint8 }
+      }
+    }
+    +Dst = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      Signals = {
+        D = { Type = uint32 }
+        E = { Type = uint16 }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    %s
+  }
+  Scheduler = { Class = GAMScheduler  TimingDataSource = TDS }
+  +States = {
+    Class = ReferenceContainer
+    +Run = {
+      Class = RealTimeState
+      +Th = {
+        Class = RealTimeThread
+        CPUs = 0x1
+        Functions = { Blocks }
+      }
+    }
+  }
+}
+`
+
+// blockOf returns the full `+name = { … }` block from a built output.
+func blockOf(t *testing.T, out, name string) string {
+	t.Helper()
+	start := strings.Index(out, "+"+name+" = {")
+	if start < 0 {
+		t.Fatalf("%s not found:\n%s", name, out)
+	}
+	depth := 0
+	for i := start; i < len(out); i++ {
+		switch out[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return out[start : i+1]
+			}
+		}
+	}
+	t.Fatalf("unterminated block %s", name)
+	return ""
+}
+
+// Packing groups: two uint8 inputs become one uint16 output through a single
+// memory copy (IOGAM copies the whole input block to the output block).
+func TestCopyGroupPacking(t *testing.T) {
+	src := fmt.Sprintf(groupFixture, `    copy Blocks {
+      (Src::A, Src::B, Src::C) -> (Dst::D, Dst::E)
+    }`)
+	out, _, err := buildSugar(t, src, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	block := blockOf(t, out, "Blocks")
+	for _, want := range []string{"A = {", "B = {", "C = {", "D = {", "E = {"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("entry %q missing:\n%s", want, block)
+		}
+	}
+	// Input and output lists keep the declared order.
+	if !(strings.Index(block, "A = {") < strings.Index(block, "B = {") &&
+		strings.Index(block, "B = {") < strings.Index(block, "C = {")) {
+		t.Errorf("input order changed:\n%s", block)
+	}
+	if !(strings.Index(block, "D = {") < strings.Index(block, "E = {")) {
+		t.Errorf("output order changed:\n%s", block)
+	}
+}
+
+// Unpacking: one uint16 input feeds two uint8 outputs.
+func TestCopyGroupUnpacking(t *testing.T) {
+	src := fmt.Sprintf(groupFixture, `    copy Blocks {
+      Dst::E -> (Src::B, Src::C)
+    }`)
+	// E is read from a GAMDataSource this fixture does not produce; the
+	// library build still lowers the group, which is what is checked here.
+	out, _, err := buildSugar(t, src, nil)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	block := blockOf(t, out, "Blocks")
+	if !strings.Contains(block, "E = {") || !strings.Contains(block, "B = {") || !strings.Contains(block, "C = {") {
+		t.Errorf("unpacking entries missing:\n%s", block)
+	}
+}
+
+// A group whose byte sizes do not match is rejected.
+func TestCopyGroupSizeMismatch(t *testing.T) {
+	src := fmt.Sprintf(groupFixture, `    copy Blocks {
+      (Src::A, Src::B) -> (Dst::E)
+    }`)
+	_, _, err := buildSugar(t, src, nil)
+	if err == nil || !strings.Contains(err.Error(), "moves 5 input bytes into 2 output bytes") {
+		t.Fatalf("expected a size mismatch error, got %v", err)
+	}
+}
+
+// Group members without a known type cannot be size-checked.
+func TestCopyGroupUnknownSize(t *testing.T) {
+	src := strings.Replace(groupFixture, `A = { Type = uint32 }`, `A = { }`, 1)
+	src = strings.Replace(src, `%s`, `    copy Blocks { (Src::A, Src::B, Src::C) -> (Dst::D, Dst::E) }`, 1)
+	_, _, err := buildSugar(t, src, nil)
+	if err == nil || !strings.Contains(err.Error(), "cannot determine the byte size") {
+		t.Fatalf("expected an unknown-size error, got %v", err)
+	}
+}
+
+// `-O` must not reorder the entries of a block IOGAM (the memory mapping is
+// positional).
+func TestOptimizerKeepsBlockOrder(t *testing.T) {
+	src := fmt.Sprintf(groupFixture, `    copy Blocks {
+      (Src::A, Src::B, Src::C) -> (Dst::D, Dst::E)
+    }`)
+	out, rep := buildWithOptimize(t, src, true, nil)
+	if rep.MergedIOGAMs != 0 {
+		t.Errorf("block IOGAM was merged: %s", rep)
+	}
+	block := blockOf(t, out, "Blocks")
+	if !(strings.Index(block, "A = {") < strings.Index(block, "B = {") &&
+		strings.Index(block, "B = {") < strings.Index(block, "C = {")) {
+		t.Errorf("optimizer reordered a block IOGAM:\n%s", block)
 	}
 }

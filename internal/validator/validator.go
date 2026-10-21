@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -1466,6 +1467,22 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 	}
 
 	if targetNode == nil {
+		if os.Getenv("MDT_SIG_DEBUG") != "" {
+			src := "object"
+			for _, f := range signalNode.Fragments {
+				switch f.Source.(type) {
+				case *parser.SignalShorthand:
+					src = "shorthand"
+				}
+			}
+			fmt.Fprintf(os.Stderr, "[SIG] %s src=%s pragmas=%v fields=%v\n", signalNode.RealName, src, signalNode.Pragmas, func() []string {
+				k := []string{}
+				for f := range signalNode.Fields {
+					k = append(k, f)
+				}
+				return k
+			}())
+		}
 		v.report(signalNode, "implicit_signal", LevelWarning,
 			fmt.Sprintf("Implicitly Defined Signal: '%s' is defined in GAM '%s' but not in DataSource '%s'", targetSignalName, gamNode.RealName, dsName),
 			v.getNodePosition(signalNode), v.getNodeFile(signalNode))

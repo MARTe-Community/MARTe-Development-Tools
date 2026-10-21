@@ -87,6 +87,7 @@ name in the thread, or move it into the list.
 | `at N` | destination | generated declaration is placed at 1-based position `N` |
 | `: type[dim]` | item | type for signals that declare none |
 | `{ Name = value … }` | both | per-signal options emitted verbatim into the generated entry (`Type`, `NumberOfElements`, `Samples`, `Frequency`, `Ranges`, `Value`, `Trigger`, `Comparator`, …) |
+| `(a, b) -> (c, d)` | both | grouped endpoints: a contiguous memory block (see below) |
 
 Per-signal options follow the endpoint, before `->` for the source and
 after the destination alias for the destination:
@@ -103,6 +104,40 @@ copy DecimateGAM {
 `Type`/`NumberOfElements` options also drive type inference for
 synthesized destination signals; other options are copied through
 unchanged (their values are evaluated like any field).
+
+### Grouped endpoints (memory blocks)
+
+An IOGAM does not copy signal *pairs*: `Setup()` only requires that the
+total input memory size equals the total output memory size, and `Execute()`
+copies the whole input memory to the output memory. Entry order therefore
+defines the byte mapping, which allows packing and unpacking:
+
+```marte
+copy Pack {
+  (Src::A, Src::B, Src::C) -> (Dst::D, Dst::E)
+}
+```
+
+With `A: uint32`, `B: uint8`, `C: uint8` (6 bytes) and `D: uint32`,
+`E: uint16` (6 bytes), the generated IOGAM has three inputs and two outputs
+and maps bytes 0–3 to `D` and bytes 4–5 to `E` in one memory copy. The
+reverse form (`Dst::E -> (Src::B, Src::C)`) unpacks one signal into two.
+Members may carry the same per-signal options; aliases are allowed too.
+
+Validation when any group is present:
+
+* every signal must have a determinable byte size (`Type` + elements), else
+  the build fails with the position of the offending signal;
+* each op must move the same number of bytes on both sides (`moves N input
+  bytes into M output bytes` otherwise);
+* the cumulative byte offset of every op must match on both sides, and the
+  totals must match (an IOGAM copies one contiguous block);
+* pairing order is the declaration order on each side.
+
+The optimizer never reorders or merges a block IOGAM's entries: the byte
+mapping is positional. `mdt build -O` still merges adjacent IOGAMs only when
+their input/output counts are equal and the merge keeps whole blocks in
+order.
 
 ### Lowering rules
 

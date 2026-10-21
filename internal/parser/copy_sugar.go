@@ -45,14 +45,24 @@ func (p *Parser) parseCopyGroup(startTok Token, name string) (Definition, bool) 
 // parseCopyItem parses `src [as alias] -> dst [as alias] [at n] [: type[dim]]`.
 func (p *Parser) parseCopyItem() (CopyItem, bool) {
 	item := CopyItem{}
-	src, ok := p.parseCopyEndpoint()
-	if !ok {
-		return item, false
+	if p.peek().Type == TokenSymbol && p.peek().Value == "(" {
+		members, ok := p.parseCopyGroupMembers()
+		if !ok {
+			return item, false
+		}
+		item.SrcGroup = members
+		item.Src = members[0].Endpoint
+		item.Position = members[0].Position
+	} else {
+		src, ok := p.parseCopyEndpoint()
+		if !ok {
+			return item, false
+		}
+		item.Src = src
+		item.Position = src.Position
 	}
-	item.Src = src
-	item.Position = src.Position
 
-	if p.peek().Type == TokenAs {
+	if item.SrcGroup == nil && p.peek().Type == TokenAs {
 		p.next()
 		nameTok := p.next()
 		if nameTok.Type != TokenIdentifier {
@@ -62,7 +72,7 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.SrcAlias = nameTok.Value
 	}
 
-	if p.peek().Type == TokenLBrace {
+	if item.SrcGroup == nil && p.peek().Type == TokenLBrace {
 		opts, ok := p.parseCopyOptions()
 		if !ok {
 			return item, false
@@ -76,13 +86,22 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 	}
 	p.next()
 
-	dst, ok := p.parseCopyEndpoint()
-	if !ok {
-		return item, false
+	if p.peek().Type == TokenSymbol && p.peek().Value == "(" {
+		members, ok := p.parseCopyGroupMembers()
+		if !ok {
+			return item, false
+		}
+		item.DstGroup = members
+		item.Dst = members[0].Endpoint
+	} else {
+		dst, ok := p.parseCopyEndpoint()
+		if !ok {
+			return item, false
+		}
+		item.Dst = dst
 	}
-	item.Dst = dst
 
-	if p.peek().Type == TokenAs {
+	if item.DstGroup == nil && p.peek().Type == TokenAs {
 		p.next()
 		nameTok := p.next()
 		if nameTok.Type != TokenIdentifier {
@@ -92,7 +111,7 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.DstAlias = nameTok.Value
 	}
 
-	if p.peek().Type == TokenLBrace {
+	if item.DstGroup == nil && p.peek().Type == TokenLBrace {
 		opts, ok := p.parseCopyOptions()
 		if !ok {
 			return item, false
@@ -100,7 +119,7 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.DstOptions = opts
 	}
 
-	if p.peek().Type == TokenIdentifier && p.peek().Value == "at" {
+	if item.DstGroup == nil && p.peek().Type == TokenIdentifier && p.peek().Value == "at" {
 		p.next()
 		numTok := p.next()
 		if numTok.Type != TokenNumber {
@@ -135,6 +154,53 @@ func (p *Parser) parseCopyItem() (CopyItem, bool) {
 		item.Type, item.Dim = splitTypeAndDim(joinTypeTokens(typeTokens))
 	}
 	return item, true
+}
+
+// parseCopyGroupMembers parses `(endpoint [as name] [{opts}], …)`.
+func (p *Parser) parseCopyGroupMembers() ([]CopyMember, bool) {
+	p.next() // consume '('
+	var members []CopyMember
+	for {
+		t := p.peek()
+		if t.Type == TokenSymbol && t.Value == ")" {
+			p.next()
+			if len(members) == 0 {
+				p.addError(t.Position, "empty signal group")
+				return nil, false
+			}
+			return members, true
+		}
+		if t.Type == TokenEOF {
+			p.addError(t.Position, "unexpected EOF, expected )")
+			return nil, false
+		}
+		if t.Type == TokenComma {
+			p.next()
+			continue
+		}
+		ep, ok := p.parseCopyEndpoint()
+		if !ok {
+			return nil, false
+		}
+		member := CopyMember{Position: ep.Position, Endpoint: ep}
+		if p.peek().Type == TokenAs {
+			p.next()
+			nameTok := p.next()
+			if nameTok.Type != TokenIdentifier {
+				p.addError(nameTok.Position, "expected alias name after 'as'")
+				return nil, false
+			}
+			member.Alias = nameTok.Value
+		}
+		if p.peek().Type == TokenLBrace {
+			opts, ok := p.parseCopyOptions()
+			if !ok {
+				return nil, false
+			}
+			member.Options = opts
+		}
+		members = append(members, member)
+	}
 }
 
 // parseCopyOptions parses `{ Name = value, … }` per-signal options.

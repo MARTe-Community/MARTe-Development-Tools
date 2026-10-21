@@ -15,6 +15,7 @@ validation.
 | Aliases | `src as A`, `-> dst as B` | `A = { DataSource = …, Alias = "src" }` |
 | Placement | `-> Filter.In at 1` | generated declaration at 1-based index 1 |
 | Per-signal options | `src { Samples = @n  Ranges = { {0,0} } }`, `dst { Trigger = 1 }` | copied verbatim into the signal entry |
+| Grouped endpoints | `(a, b) -> c`, `a -> (b, c)` | one memory-block copy (pack/unpack) with byte-size validation |
 | Direct wiring | `In = from Acq.T1` | `In = { DataSource = DDB, Alias = "T1" }` (no GAM) |
 | Pipeline macro | `gam P { in …, out … }` + `+X = { Class = P, ports }` | body GAMs (instance-prefixed) + scheduled wiring |
 | Fusion | `fuse A with B` | inlined expression, `B` removed (single-consumer signals) |
@@ -54,12 +55,12 @@ The other 25 files are unchanged.
 
 | Metric | Value |
 |---|---:|
-| IOGAMs replaced by named copy groups | **22** |
-| Copy pairs written in source | **321** |
-| Active pairs in the default build | 302 |
-| Pairs in inactive `#if @sdn_enabled` groups | 19 (3 groups) |
-| Aliased entries (`as`) | 24 |
-| IOGAMs left as written | 1 (`EPICSOutputGAM`: 67 inputs vs 69 outputs) |
+| IOGAMs replaced by named copy groups | **23 (all)** |
+| Copy items written in source | **388** |
+| Active items in the default build | 369 |
+| Items in inactive `#if @sdn_enabled` groups | 19 (3 groups) |
+| Aliased entries (`as`) | 29 |
+| Grouped (memory-block) items | 2 (`PulseStartTime`, `PulseStopTime`: 64-bit → 2×32-bit) |
 
 Groups by the options they use:
 
@@ -69,24 +70,23 @@ Groups by the options they use:
 | `Type` only | 4 |
 | `Samples` / `Frequency` | 6 |
 | `Ranges` | 4 |
-| mixed (`Type`+`Trigger`, `Type`+`NumberOfElements`+`Value`, …) | 4 |
-| **total** | **22** |
+| mixed (`Type`+`Trigger`, `Type`+`NumberOfElements`+`Value`, …) | 5 |
+| **total** | **23** |
 
 Option kinds present (a group can use several):
 
 | Option | Groups |
 |---|---:|
+| `Type` | 6 |
 | `Frequency` | 6 |
-| `Type` | 5 |
 | `Ranges` | 5 |
 | `Samples` | 3 |
 | `Trigger` | 2 |
-| `NumberOfElements` | 1 |
-| `Value` | 1 |
+| `NumberOfElements` | 2 |
+| `Value` | 2 |
 
-Emitted configuration: 20 active IOGAM objects with **740 signal entries**
-(604 from converted pairs, 136 from the unconverted GAM), 6 GAMDataSources,
-40 threads, 7 states.
+Emitted configuration: 20 active IOGAM objects with **740 signal entries**,
+6 GAMDataSources, 40 threads, 7 states.
 
 ## Feature usage across the examples
 
@@ -139,17 +139,18 @@ optimizer can merge.
 
 | Area | Files | Lines |
 |---|---|---:|
-| Parser (copy groups, options, endpoints) | `internal/parser/copy_sugar.go` | 344 |
+| Parser (copy groups, options, grouped endpoints) | `internal/parser/copy_sugar.go` | 410 |
 | Parser (pipelines) | `internal/parser/pipeline.go` | 101 |
-| Lowering (wiring, copy groups, buffers) | `internal/builder/lower.go` | 1 190 |
+| Lowering (wiring, copy groups, blocks, buffers) | `internal/builder/lower.go` | 1 358 |
 | Pipeline expansion | `internal/builder/pipeline.go` | 430 |
 | Expression-GAM fusion | `internal/builder/fuse.go` | 428 |
-| Docs | `docs/COPY_SUGAR.md` | 227 |
-| Tests (unit/integration) | `copy_sugar_test.go` 515, `pipeline_test.go` 190, `big_project_refactor_test.go` 237, `conditional_blocks_test.go` 83 | 1 025 |
+| Docs | `docs/COPY_SUGAR.md` | 262 |
+| Tests (unit/integration) | `copy_sugar_test.go` 664, `pipeline_test.go` 190, `big_project_refactor_test.go` 237, `conditional_blocks_test.go` 83 | 1 174 |
 | Tests (e2e) | `test/e2e/copy_sugar_test.go` | 98 |
 
-Test count: 21 new tests on the branch (15 copy/options/fusion, 3 pipeline,
-1 conditional-activation regression, 1 big-project equivalence, 1 e2e).
+Test count: 27 new tests on the branch (20 copy/options/groups/fusion,
+3 pipeline, 1 conditional-activation regression, 1 big-project equivalence,
+1 optimizer block-order, 1 e2e).
 Full suites: `go test ./test/...` green (≈3.7 s), `go test ./test/e2e/…`
 green (≈1.7 s), `go vet` clean.
 
@@ -178,8 +179,9 @@ green (≈1.7 s), `go vet` clean.
 
 ## Limitations
 
-- `EPICSOutputGAM` cannot be expressed with copy groups: 67 inputs vs 69
-  outputs is not 1:1.
+- Grouped endpoints are validated for total byte size and per-op offsets,
+  but not for type-level reinterpretation (a `uint16` output may cover two
+  `uint8` inputs by design — that is the packing use case).
 - Pipeline instances inside `#if`/`#foreach` are not expanded (generated
   references would be unconditional).
 - No nested pipeline instantiation.
