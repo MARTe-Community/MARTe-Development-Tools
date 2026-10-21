@@ -1,0 +1,246 @@
+#package jada_gyro.RTApp.Functions
+
++GAMRealTimeStateMachine = {
+  Class = JARTStateMachineGAM
+  ConditionTrigger = 1
+  mhvps_hvon = 4
+  aps_hvon = 1
+  aps_swon = 16
+  bps_hvon = 2
+  bps_swon = 8
+  InputSignals = {
+    Time = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    PLC_ON = {
+      DataSource = DDB3
+    }
+    MHVPS_DT = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    APS_HVON_DT = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    APS_SWON_DT = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    BPS_HVON_DT = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    BPS_SWON_DT = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    SHOTLEN = {
+      DataSource = DDB3
+      Type = uint32
+    }
+    FAST_STOP = {
+      DataSource = DDB3
+    }
+    MODE_SHOTLEN_FLAG = {
+      DataSource = DDB3
+    }
+    SHORT_PULSE_MODE = {
+      DataSource = DDB3
+    }
+    MHVPS_MODSW = {
+      DataSource = DDB3
+    }
+    // Add 20210121
+    FAST_PAUSE = {
+      DataSource = DDB3
+    }
+    MHVPS_READY = {
+      DataSource = DDB3
+    }
+  }
+  OutputSignals = {
+    RTSMValue = {
+      DataSource = DDB3
+      Type = uint32
+      Trigger = 1
+    }
+    BEAM_ON_STAT = {
+      DataSource = DDB3
+    }
+    HVARMED = {
+      DataSource = DDB3
+    }
+    HVINJECTION = {
+      DataSource = DDB3
+    }
+    RFON = {
+      DataSource = DDB3
+    }
+    BeamONTime = {
+      Alias = BEAM_ON_TIME
+      DataSource = DDB3
+    }
+    RFONTime = {
+      Alias = RFON_TIME
+      DataSource = DDB3
+      Type = uint32
+    }
+    SHOT_ID = {
+      DataSource = DDB3
+    }
+    APS_HVON = {
+      DataSource = DDB3
+    }
+    APS_SWON = {
+      DataSource = DDB3
+    }
+    BPS_HVON = {
+      DataSource = DDB3
+    }
+    BPS_SWON = {
+      DataSource = DDB3
+    }
+    MHVPS_HVON = {
+      DataSource = DDB3
+    }
+    NI6259Value = {
+      DataSource = NI6259_DIO_P0
+      Type = uint32
+      Trigger = 1
+    }
+  }
+}
+#if @sdn_enabled
+  +GAMSDNRealTimeStateMachine = {
+    Class = JASDNRTStateMachineGAM
+    ConditionTrigger = 1
+    mhvps_hvon = 4
+    aps_hvon = 1
+    aps_swon = 16
+    bps_hvon = 2
+    bps_swon = 8
+    InputSignals = {
+      Time = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      PLC_ON = {
+        DataSource = DDB3
+      }
+      MHVPS_DT = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      APS_HVON_DT = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      APS_SWON_DT = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      BPS_HVON_DT = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      BPS_SWON_DT = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      SHOTLEN = {
+        DataSource = DDB3
+        Type = uint32
+      }
+      FAST_STOP = {
+        DataSource = DDB3
+      }
+      MODE_SHOTLEN_FLAG = {
+        DataSource = DDB3
+      }
+      Command = {
+        DataSource = Th2Bridge
+        Type = uint16
+      }
+    }
+    OutputSignals = {
+      RTSMValue = {
+        DataSource = DDB3
+        Trigger = 1
+      }
+      BeamON = {
+        Alias = BEAM_ON_STAT
+        DataSource = DDB3
+        Type = uint8
+      }
+      HVARMED = {
+        DataSource = DDB3
+      }
+      HVINJECTION = {
+        DataSource = DDB3
+      }
+      RFON = {
+        DataSource = DDB3
+      }
+      BeamONTime = {
+        Alias = BEAM_ON_TIME
+        DataSource = DDB3
+        Type = uint32
+      }
+      RFONTime = {
+        Alias = RFON_TIME
+        DataSource = DDB3
+        Type = uint32
+      }
+      SHOT_ID = {
+        DataSource = DDB3
+      }
+    }
+  }
+#end
+
++StoreStartPulseTime = {
+  Class = "IOExt::TriggerEnableGAM"
+  NumberOfTriggers = 1
+  ResetCycles = 1
+  InputSignals = {
+    PLC_ON = {
+      DataSource = DDB3
+    }
+    AbsoluteTime = {
+      DataSource = DDB3
+    }
+    PulseStartTime_1 = {
+      DataSource = DDB3
+    }
+  }
+  OutputSignals = {
+    PulseStartTime = {
+      DataSource = DDB3
+    }
+  }
+}
+
++StoreStopPulseTime = {
+  Class = "IOExt::TriggerEnableGAM"
+  NumberOfTriggers = 1
+  Negated = 1
+  ResetCycles = 1
+  InputSignals = {
+    PLC_ON = {
+      DataSource = DDB3
+    }
+    AbsoluteTime = {
+      DataSource = DDB3
+    }
+    PulseStopTime_1 = {
+      DataSource = DDB3
+    }
+  }
+  OutputSignals = {
+    PulseStopTime = {
+      DataSource = DDB3
+    }
+  }
+}

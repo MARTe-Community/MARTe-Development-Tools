@@ -1,0 +1,262 @@
+#package jada_gyro.RTApp
+
++Data = {
+  +Th2Bridge = {
+    Class = RealTimeThreadAsyncBridge
+    NumberOfBuffers = 5
+    Signals = {
+      Command = {
+        Type = uint16
+      }
+      RFON = {
+        Type = uint32
+      }
+      Time = {
+        Type = uint32
+      }
+      HVInjection = {
+        Type = uint32
+      }
+    }
+  }
+  #if @sdn_enabled
+    //# SDN subscriber
+    +SDNCommands = {
+      Class = SDN::SDNSubscriber
+      Topic = "ECPC2SCUJA"
+      Interface = @SDN_IFACE
+      CPUs = 0x200
+      Locked = 1
+      Timeout = 2
+      Signals = {
+        //! unused: SDN header has no use in this appliation 
+        Header = {
+          Type = uint8
+          NumberOfElements = 48
+        }
+        //! unused: not used for nothing
+        Dummy = {
+          Type = uint8
+          NumberOfElements = 4
+        }
+        ESDNTime = {
+          Type = uint32
+          NumberOfElements = 1
+        }
+        Command = {
+          Type = uint16
+          NumberOfDimensions = 1
+          NumberOfElements = 64
+        }
+      }
+    }
+    +DDB2 = {
+      Signals = {
+        WaveformPacketID = {
+          Type = uint16
+        }
+        ESDNTime = {
+          Type = uint32
+        }
+      }
+    }
+    +SDNReply = {
+      Class = SDN::SDNPublisher
+      Topic = "SCUJA2ECPC"
+      Interface = @SDN_IFACE
+      CPUs = 0x200 // changed from 0x100
+      Port = 2000
+      Locked = 1
+      Signals = {
+        //! unused: SDN header not used
+        Header = {
+          Type = uint8
+          NumberOfElements = 48
+        }
+        //! unused: not used anywhere
+        Dummy = {
+          Type = uint8
+          NumberOfElements = 4
+        }
+        ESDNTime = {
+          Type = uint32
+        }
+        //! unused: why?
+        ReplyStatus = {
+          Type = uint16
+        }
+        ReplyWaveformAck = {
+          Type = uint16
+        }
+        // Status (26Bytes?) is not assigned
+        // GyrotronA measurements
+        // 56Bytes are used as Gyrotron1 Measurements (verified on 2020/10/22)
+        GYA_MHVPS_MESVOLT = {
+          Type = float32
+        }
+        GYA_MHVPS_MESCURR = {
+          Type = float32
+        }
+        GYA_BPS_MESVOLT = {
+          Type = float32
+        }
+        GYA_BPS_MESCURR = {
+          Type = float32
+        }
+        GYA_APS_MESVOLT = {
+          Type = float32
+        }
+        GYA_APS_MESCURR = {
+          Type = float32
+        }
+        GYA_ARC1_MESVOLT = {
+          Type = float32
+        }
+        GYA_ARC2_MESVOLT = {
+          Type = float32
+        }
+        GYA_ARC3_MESVOLT = {
+          Type = float32
+        }
+        GYA_MCPS_CURR_MON = {
+          Type = float32
+        }
+        GYA_GCPS_CURR_MON = {
+          Type = float32
+        }
+        GYA_FHPS_MEAS_ACI = {
+          Type = float32
+        }
+        GYA_CCPS_MEAS_DCI = {
+          Type = float32
+        }
+      }
+    }
+  #end
+}
++Functions = {
+  #if @sdn_enabled
+    +SDNCommandGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Command = {
+          DataSource = SDNCommands
+          NumberOfDimensions = 1
+          NumberOfElements = 64
+          Ranges = { { 0, 0 } }
+        }
+        ESDNTime = {
+          DataSource = SDNCommands
+          NumberOfDimensions = 1
+          NumberOfElements = 1
+        }
+      }
+      OutputSignals = {
+        Command = {
+          DataSource = Th2Bridge
+        }
+        ESDNTime = {
+          DataSource = DDB2
+        }
+      }
+    }
+    +SDNReplyGAM = {
+      Class = IOGAM
+      InputSignals = {
+        ESDNTime = {
+          DataSource = DDB2
+        }
+        WaveformPacketID = {
+          DataSource = DDB2
+        }
+        GY_BPS_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_BPS_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_APS_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_APS_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC1_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC2_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_ARC3_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MHV_V_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MHV_I_MEAS = {
+          DataSource = Th4Bridge
+        }
+        GY_MCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+        }
+        GY_GCPS_CURR_MON = {
+          DataSource = EPICSCAInput
+        }
+        GY_FHPS_MEAS_ACI = {
+          DataSource = EPICSCAInput
+        }
+        GY_CCPS_MEAS_DCI = {
+          DataSource = EPICSCAInput
+        }
+      }
+      OutputSignals = {
+        ESDNTime = {
+          DataSource = SDNReply
+        }
+        ReplyWaveformAck = {
+          DataSource = SDNReply
+        }
+        GYA_BPS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_BPS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_APS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_APS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_ARC1_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_ARC2_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_ARC3_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_MHVPS_MESVOLT = {
+          DataSource = SDNReply
+        }
+        GYA_MHVPS_MESCURR = {
+          DataSource = SDNReply
+        }
+        GYA_MCPS_CURR_MON = {
+          DataSource = SDNReply
+        }
+        GYA_GCPS_CURR_MON = {
+          DataSource = SDNReply
+        }
+        GYA_FHPS_MEAS_ACI = {
+          DataSource = SDNReply
+        }
+        GYA_CCPS_MEAS_DCI = {
+          DataSource = SDNReply
+          Trigger = 1
+        }
+      }
+    }
+  #end
+}

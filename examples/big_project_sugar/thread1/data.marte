@@ -1,0 +1,145 @@
+#package jada_gyro.RTApp.Data
+
+
++DDB1 = {
+  Signals = {
+    //# This should be in epics but is not
+    FAST_STOP = {
+      Type = uint32
+    }
+    PREP_TIME_WF = {
+      Type = int32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    MHVPS_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    BPS_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    APS_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    MCPS_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    GCPS_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    FHPS_A_PREP_WF = {
+      Type = float32
+      NumberOfElements = 8000
+      NumberOfDimensions = 1
+    }
+    GYA_PREPRO_TIME = {
+      Type = int32
+    }
+    FHPS_A_PrePro = {
+      Type = float32
+    }
+    CSV_LOADED = {
+      Type = uint32
+    }
+    CSV_ERR = {
+      Type = uint32
+    }
+    GCPS_TRG_CURR_SET = {
+      Type = float32
+    }
+    MCPS_TRG_CURR_SET = {
+      Type = float32
+    }
+    BPS_OUT = {
+      Type = float32
+    }
+    APS_OUT = {
+      Type = float32
+    }
+    APS_TEMP = {
+      Type = float32
+    }
+    MHVPS_OUT = {
+      Type = float32
+    }
+    MCPS_OUT = {
+      Type = float32
+    }
+    GCPS_OUT = {
+      Type = float32
+    }
+    BPS_REF = {
+      Type = float32
+    }
+    APS_REF = {
+      Type = float32
+    }
+    MHVPS_REF = {
+      Type = float32
+    }
+    //# FHPS Rump Up completed
+    FHPS_A_RU = {
+      Type = uint8
+    }
+    PXI_FAULT = {
+      Type = uint8
+    }
+    PCF_FAULT = {
+      Type = uint8
+    }    
+    TRIGGER_DAN_ONPULSE = {
+      Type = uint8
+    }    
+  }
+}
+
++Th1Bridge = {
+  Class = RealTimeThreadAsyncBridge
+  NumberOfBuffers = 5
+  Signals = {
+    APS_OUT = {
+      Type = float32
+    }
+    BPS_OUT = {
+      Type = float32
+    }
+    MHVPS_OUT = {
+      Type = float32
+    }
+    PLC_STANDBY = {
+      Type = uint8
+    }
+    FHPS_A_PrePro = {
+      Type = float32
+    }
+    PXI_FAULT = {
+      Type = uint8
+    }
+    PCF_FAULT = {
+      Type = uint8
+    }
+    MCPS_RU_COMPLETED = {
+      Type = uint8
+    }
+    
+    MCPS_RD_COMPLETED = {
+      Type = uint8
+    }
+    CCPS_IN_OPERATION = {
+      Type = uint8
+    }
+    TRIGGER_DAN_ONPULSE = {
+      Type = uint8
+    }    
+  }
+}

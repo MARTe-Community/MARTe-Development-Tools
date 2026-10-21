@@ -1,0 +1,44 @@
+#package jada_gyro.RTApp.Functions
+
+//# Reset HVPS outputs. ToDo: Fix to access NI d.s.
++HVPSsOffGAM = {
+  Class = ConstantGAM
+  OutputSignals = {
+    MHVPS_HVON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    BPS_HVON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    BPS_SWON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    APS_HVON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    APS_SWON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    HVARMED = {
+      DataSource = DDB3
+      Default = 0
+    }
+    HVINJECTION = {
+      DataSource = DDB3
+      Default = 0
+    }
+    RFON = {
+      DataSource = DDB3
+      Default = 0
+    }
+    BEAM_ON_STAT = {
+      DataSource = DDB3
+      Default = 0
+    }
+  }
+}

@@ -1,0 +1,28 @@
+#package jada_gyro.RTApp
+
++Functions = {
+  //# GAM for trianguler waveform generation.
+  +CCPSWaveformGAM = {
+    Class = JATriangleWaveGAM
+    InputSignals = {
+      EPICSCAInput::CCPS_OUTPUT_FREQ as Frequency
+      EPICSCAInput::CCPS_OUTPUT_AMP as Amplitude
+      EPICSCAInput::CCPS_OUTPUT_OFFS as Offset
+      Th1Bridge::PLC_STANDBY as PLCSTANDBY
+    }
+    OutputSignals = {
+      DDB6::CCPS_REF
+    }
+  }
+}
+
++Data = {
+  +DDB6 = {
+    AllowNoProducers = 1
+    Signals = {
+      CCPS_REF = {
+        Type = float32
+      }
+    }
+  }
+}

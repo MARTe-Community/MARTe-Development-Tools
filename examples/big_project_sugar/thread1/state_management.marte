@@ -1,0 +1,539 @@
+#package jada_gyro.RTApp
+
++Data = {
+  +DDB1 = {
+    Signals = {
+      //# Fast controller state variable
+      //#  - 0: Init
+      //#  - 1: Error
+      //#  - 3: Wait Standby
+      //#  - 4: Wait Ready
+      //#  - 5: Wait Permit
+      //#  - 6: Wait HVON
+      //#  - 7: Wait HVON PREP
+      //#  - 8: Wait HVON SDN
+      //#  - 9: Wait HVON SDN PREP
+      PCF_STATE = {
+        Type = uint32
+      }
+    }
+  }
+}
++Functions = {
+  //# GAM That publish state of the system
+  //# The values will be updated by messages coming from
+  //# the statemachine
+  +StateGAM = {
+    Class = ConstantGAM
+    OutputSignals = {
+      PCF_STATE = {
+        DataSource = DDB1
+        Default = @state_none
+      }
+      PCF_FAULT = {
+        DataSource = DDB1
+        Default = 1
+      }
+      TRIGGER_DAN_ONPULSE = {
+        DataSource = DDB1
+        Default = 0
+      }
+    }
+  }
+  //# From any state to Error state.
+  +GoErrorGAM = {
+    Class = JAMessageGAM
+    Operation = "OR"
+    InputSignals = {
+      PXI_FAULT = {
+        DataSoruce = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+    // PLC_ITL = {
+    //   DataSource = DDB1
+    //   Type = uint8
+    //   Comparator = "EQUALS"
+    //   Value = 1
+    // }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoError
+    }
+  }
+
+  //# From any state to Error state.
+  +GoErrorHVGAM = {
+    Class = JAMessageGAM
+    Operation = "OR"
+    InputSignals = {
+      GYA_APS_FLT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      GYA_BPS_FLT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MHVPS_OV = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MHVPS_OC = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MHVPS_FLT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      PXI_FAULT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MIS_ITL = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      PLC_ITL = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoError
+    }
+  }
+  //# Reset Error GAM
+  +ResetErrorGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      RESET_FLT = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      PXI_FAULT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    // PLC_ITL = {
+    //   DataSource = DDB1
+    //   Type = uint8
+    //   Comparator = "EQUALS"
+    //   Value = 0
+    // }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitStandby
+    }
+  }
+  //# Go to wait standby
+  +GoWaitStandbyGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_SELECT = {
+        DataSource = EPICSCAInput
+        Comparator = "EQUALS"
+        Type = uint32
+        Value = 1
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitStandby
+    }
+  }
+  +GoDisabledGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_SELECT = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoDisabled
+    }
+  }
+  //# GAM in WaitReady state. Check MCPS,GCPS,FHPS state for state transition.
+  +GoWaitReadyGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      MCPS_ACT_RB = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 3
+      }
+      MCPS_CURR_MON = {
+        DataSource = EPICSCAInput
+        Type = float32
+        Comparator = "GREATER"
+        Value = 0.0
+      }
+      GCPS_ACT_RB = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 3
+      }
+      GCPS_CURR_MON = {
+        DataSource = EPICSCAInput
+        Type = float32
+        Comparator = "GREATER"
+        Value = 0.0
+      }
+      FHPS_RU = {
+        DataSource = EPICSCAInput
+        Comparator = "EQUALS"
+        Type = uint32
+        Value = 1
+      }
+      GY_FHPS_MEAS_ACV = {
+        DataSource = EPICSCAInput
+        Type = float32
+        Comparator = "GREATER"
+        Value = 0.0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitReady
+    }
+  }
+  //# GAM in WaitReady state. Check PLC_READY and CCPS_IN_OPERATION status.
+  +GoWaitPermitGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_CC_OP_SELECTED = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      PLC_READY = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MIS_ITL = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitPermit
+    }
+  }
+  +GoWaitStandbyFromReadyGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_STANDBY = {
+        DataSource = DDB1
+        Type = uint8
+        Value = 0
+        Comparator = "EQUALS"
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitStandby
+    }
+  }
+  //# GAM in WaitPermit state. Check Permit and States of Operation Modes.
+  +GoWaitReadyFromWaitPermitGAM = {
+    Class = JAMessageGAM
+    Operation = "OR"
+    InputSignals = {
+      PLC_STANDBY = {
+        DataSource = DDB1
+        Type = uint8
+        Value = 0
+        Comparator = "EQUALS"
+      }
+      PLC_READY = {
+        DataSource = DDB1
+        Type = uint8
+        Value = 0
+        Comparator = "EQUALS"
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitReady
+    }
+  }
+  +GoWaitHVONGAM = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_SYNCMODE = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      PREP_MODE = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      PLC_PERMIT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 1
+      }
+      MIS_ITL = {
+        DataSource = EPICSCAInput
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 0
+      }
+
+      PLC_ITL = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitHVON
+    }
+  }
+  #if @prep_enabled
+    +GoWaitHVON_PREP_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_PREP
+      }
+    }
+  #end
+  #if @sdn_enabled
+    +GoWaitHVON_SDN_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MIS_ITL = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+
+        PLC_ITL = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_SDN
+      }
+    }
+  #end
+  #if (@prep_enabled && @sdn_enabled)
+    +GoWaitHVON_SDN_PREP_GAM = {
+      Class = JAMessageGAM
+      Operation = "AND"
+      InputSignals = {
+        PLC_SYNCMODE = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PREP_MODE = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        PLC_PERMIT = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 1
+        }
+        MIS_ITL = {
+          DataSource = EPICSCAInput
+          Type = uint32
+          Comparator = "EQUALS"
+          Value = 0
+        }
+
+        PLC_ITL = {
+          DataSource = DDB1
+          Type = uint8
+          Comparator = "EQUALS"
+          Value = 0
+        }
+      }
+      +Event = {
+        Class = Message
+        Destination = StateMachine
+        Function = GoWaitHVON_SDN_PREP
+      }
+    }
+  #end
+  //# GAM in WaitHVON_xx states. If PLC_READY is zero, goto WaitStandby.
+  +FromWaitHVONToWaitStandby = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_READY = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitStandby
+    }
+  }
+  //# GAM in WaitHVON_xx states. If PLC_PERMIT is zero, goto WaitPermit.
+  +FromWaitHVONToWaitPermit = {
+    Class = JAMessageGAM
+    Operation = "AND"
+    InputSignals = {
+      PLC_PERMIT = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      APS_HVON = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      BPS_HVON = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      MHVPS_HVON = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      BPS_SWON = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+      APS_SWON = {
+        DataSource = DDB1
+        Type = uint8
+        Comparator = "EQUALS"
+        Value = 0
+      }
+    }
+    +Event = {
+      Class = Message
+      Destination = StateMachine
+      Function = GoWaitPermit
+    }
+  }
+}

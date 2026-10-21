@@ -1,0 +1,117 @@
+#package jada_gyro.RTApp
+
+
++Functions = {
+
+  //# Flat FHPS Setpoint.
+  +FHPS_A_SetpointGAM = {
+    Class = IOGAM
+    InputSignals = {
+      FHPS_A_AUTO_TAGV = {
+        DataSource = EPICSCAInput
+        Type = float32
+      }
+    }
+    OutputSignals = {
+      FHPS_A_TAGV = {
+        DataSource = DDB6
+      }
+    }
+  }
+
+  //# Filament heating rampup reference generator
+  +FHPS_A_RampupGAM = {
+    Class = JARampupGAM
+    InputSignals = {
+      Command = {
+        Alias = FHPS_A_AUTO_START
+        DataSource = EPICSCAInput
+        Type = uint32
+      }
+      RampSetPoint = {
+        Alias = FHPS_A_TAGV
+        DataSource = DDB6
+      }
+      RampRate = {
+        Alias = FHPS_A_AUTO_TIME
+        DataSource = EPICSCAInput
+        Type = float32
+      }
+      ManualMode = {
+        Alias = FHPS_A_MANM
+        DataSource = EPICSCAInput
+        Type = uint32
+      }
+      ManualSetPoint = {
+        Alias = FHPS_A_PrePro
+        DataSource = Th1Bridge
+      }
+      PLCStandbyState = {
+        Alias = PLC_STANDBY
+        DataSource = Th1Bridge
+      }
+    }
+    OutputSignals = {
+      Reference = {
+        Alias = FHPS_A_REF
+        DataSource = DDB6 // probably to be direct analog output
+      }
+      State = {
+        Alias = FHPS_A_AUTO_STAT
+        DataSource = DDB6
+      }
+    }
+  }
+  +FHPS_A_StateGAM = {
+    Class = JAConditionalSignalUpdateGAM
+    Operation = "AND"
+    InputSignals = {
+      FHPS_A_AUTO_STAT = {
+        DataSource = DDB6
+        Type = uint32
+        Comparator = "EQUALS"
+        Value = 3
+      }
+    }
+    OutputSignals = {
+      FHPS_A_RU = {
+        DataSource = WGAsyncBridge
+        Type = uint8
+        DefaultValue = 0
+        Value = 1
+      }
+    }
+  }
+  +FHPS_A_GainGAM = {
+    Class = ScaleGAM
+    InputSignals = {
+      FHPS_A_REF = {
+        DataSource = DDB6
+        Factor = 15
+      }
+    }
+    OutputSignals = {
+      FHPS_A_SCALED = {
+        DataSource = DDB6
+      }
+    }
+  }
+}
++Data = {
+  +DDB6 = {
+    Signals = {
+      FHPS_A_REF = {
+        Type = float32
+      }
+      FHPS_A_SCALED = {
+        Type = float32
+      }
+      FHPS_A_TAGV = {
+        Type = float32
+      }
+      FHPS_A_AUTO_STAT = {
+        Type = uint32
+      }
+    }
+  }
+}

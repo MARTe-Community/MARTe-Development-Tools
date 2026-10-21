@@ -1,0 +1,99 @@
+#package jada_gyro.RTApp.Functions
+
+// GAM for prepro
++WFRecordGAM = {
+  Class = JAWFRecordGAM
+  Directory = "../Configurations" // TODO: Enter directory path for prepro files.
+  InputSignals = {
+    CSV_LOAD = {
+      DataSource = EPICSCAInput
+   }
+   Filename = {
+      Alias = CSV_NAME
+      DataSource = EPICSCAInput
+    }
+  }
+  OutputSignals = {
+    PREP_TIME_WF = {
+      DataSource = DDB1
+    }
+    MHVPS_PREP_WF = {
+      DataSource = DDB1
+    }
+    BPS_PREP_WF = {
+      DataSource = DDB1
+    }
+    APS_PREP_WF = {
+      DataSource = DDB1
+    }
+    MCPS_PREP_WF = {
+      DataSource = DDB1
+    }
+    GCPS_PREP_WF = {
+      DataSource = DDB1
+    }
+    FHPS_A_PREP_WF = {
+      DataSource = DDB1
+    }
+  }
+}
++PreProgrammedGAM = {
+  Class = JAPreProgrammedGAM
+  Directory = "../Configurations" // TODO: Enter the directory path for prepro files.
+  PreProgrammedPeriodMs = 1 // Parameter update periods in ms.
+  InputSignals = {
+    CSV_LOAD = {
+      DataSource = EPICSCAInput
+    }
+    Filename = {
+      Alias = CSV_NAME
+      DataSource = EPICSCAInput
+    }
+    FHPS_REF = {
+      Alias = FHPS_A_AUTO_TAGV
+      DataSource = EPICSCAInput
+      Type = float32
+    }
+    RFON = {
+      DataSource = DDB1
+    }
+  }
+  OutputSignals = {
+    GYA_PREPRO_TIME = {
+      DataSource = DDB1
+      Type = int32
+    }
+    MHVPS_REF = {
+      DataSource = DDB1
+      Type = float32
+    }
+    BPS_REF = {
+      DataSource = DDB1
+      Type = float32
+    }
+    APS_REF = {
+      DataSource = DDB1
+      Type = float32
+    }
+    MCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+    GCPS_TRG_CURR_SET = {
+      DataSource = DDB1
+      Type = float32
+    }
+    FHPS_A_PrePro = {
+      DataSource = DDB1
+      Type = float32
+    }
+    CSV_LOADED = {
+      DataSource = DDB1
+      Type = uint32
+    }
+    CSV_ERR = {
+      DataSource = DDB1
+      Type = uint32
+    }
+  }
+}

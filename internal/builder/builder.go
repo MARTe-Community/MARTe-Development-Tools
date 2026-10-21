@@ -164,8 +164,6 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range node.Fragments {
 						if f.IsConditional && f.BranchID == id+":then" {
 							b.activeFragments[f] = true
-						} else if f.IsConditional {
-							b.activeFragments[f] = false
 						}
 					}
 					processEval(b.tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node, false)

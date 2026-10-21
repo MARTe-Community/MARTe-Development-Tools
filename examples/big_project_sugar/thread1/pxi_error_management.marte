@@ -1,0 +1,43 @@
+#package jada_gyro.RTApp.Functions
+
+
++PXIErrorGAM = {
+  Class = JAConditionalSignalUpdateGAM
+  Operation = "OR"
+  InputSignals = {
+    PXI6368_Status_3 = {
+      Alias = PXI6368_Status
+      DataSource = Th4Bridge
+      Comparator = "EQUALS"
+      Type = uint32
+      Value = 3
+    }
+    PXI6368_Status_4 = {
+      Alias = PXI6368_Status
+      DataSource = Th4Bridge
+      Comparator = "EQUALS"
+      Type = uint32
+      Value = 4
+    }
+    PXI6528_Status = {
+      DataSource = DDB1
+      Comparator = "GREATER"
+      Type = uint32
+      Value = 0
+    }
+    PXI6259_Status = {
+      DataSource = DDB1
+      Comparator = "GREATER"
+      Type = uint32
+      Value = 1
+    }
+  }
+  OutputSignals = {
+    PXI_FAULT = {
+      DataSource = DDB1
+      Type = uint8
+      DefaultValue = 0
+      Value = 1
+    }
+  }
+}

@@ -1,0 +1,155 @@
+#package jada_gyro.RTApp.Functions
+
+//# Copy data from DDB1 to EPICSCAOutput DataSource.
++EPICSOutputGAM = {
+  Class = IOGAM
+  InputSignals = {
+    DDB1::PCF_STATE: uint32
+    //! implicit: unkown signal
+    DDB1::MCPS_ACT_SP: uint32 = {
+      Value = 0
+    }
+    //! implicit: unkown signal
+    DDB1::GCPS_ACT_SP: uint32 = {
+      Value = 0
+    }
+    DDB1::BPS_OUT
+    DDB1::APS_OUT
+    DDB1::MCPS_OUT
+    DDB1::GCPS_OUT
+    WGAsyncBridge::FHPS_A_REF: float32
+    DDB1::CSV_LOADED: uint32
+    DDB1::CSV_ERR: uint32
+    DDB1::ELAPSED_TIME: uint32
+    DDB1::HVARMED: uint8
+    DDB1::HVINJECTION: uint8
+    DDB1::RFON: uint8
+    DDB1::MHVPS_OUT: float32
+    DDB1::PREP_TIME_WF: int32[8000]
+    DDB1::MHVPS_PREP_WF: float32[8000]
+    DDB1::BPS_PREP_WF: float32[8000]
+    DDB1::APS_PREP_WF: float32[8000]
+    DDB1::MCPS_PREP_WF: float32[8000]
+    DDB1::GCPS_PREP_WF: float32[8000]
+    DDB1::FHPS_A_PREP_WF: float32[8000]
+    WGAsyncBridge::CCPS_REF: float32
+    DDB1::FAST_STOP: uint32 as MHVPS_STOP
+    DDB1::FAST_STOP: uint32 as APS_STOP
+    DDB1::FAST_STOP: uint32 as BPS_STOP
+    DDB1::BEAM_ON_TIME: uint32
+    DDB1::PCF_FAULT: uint8
+    DDB1::PCF_FAULT: uint8 as PCF_FAULT_Sync
+    DDB1::PXI_FAULT: uint8
+    DDB1::PXI_FAULT: uint8 as PXI_FAULT_Sync
+    DDB1::BEAM_ON_STAT: uint8
+    DDB1::SHOT_ID: uint32
+    WGAsyncBridge::FHPS_A_AUTO_STAT: uint32
+    DDB1::APS_HVON: uint8
+    DDB1::APS_SWON: uint8
+    DDB1::BPS_HVON: uint8
+    DDB1::BPS_SWON: uint8
+    DDB1::MHVPS_HVON: uint8
+    DDB1::TRIGGER: uint8
+    DDB1::ECPC_MOD: uint8
+    DDB1::PLC_PERMIT: uint8
+    DDB1::PLC_OP_SELECTED: uint8
+    DDB1::PLC_CC_OP_SELECTED: uint8
+    DDB1::PLC_SYNCMODE: uint8
+    DDB1::PLC_ITL: uint8
+    DDB1::PLC_STANDBY: uint8
+    DDB1::PLC_READY: uint8
+    DDB1::PLC_ON: uint8
+    DDB1::GYA_APS_FLT: uint8
+    DDB1::GYA_APS_READY: uint8
+    DDB1::GYA_BPS_FLT: uint8
+    DDB1::GYA_BPS_READY: uint8
+    DDB1::MHVPS_FLT: uint8
+    DDB1::MHVPS_READY: uint8
+    DDB1::MHVPS_OC: uint8
+    DDB1::MHVPS_OV: uint8
+    DDB1::CRIO_RV1: uint8
+    DDB1::CRIO_RV2: uint8
+    DDB1::CRIO_RV3: uint8
+    DDB1::FAST_TRIP: uint8
+    DDB1::PXI6259_Status: uint32
+    DDB1::PXI6683_Status: uint8
+    DDB1::PXI6683_PtpdStatus: uint8
+    // 6683_SYNCLOST
+    DDB1::PXI6528_Status: uint32
+    DDB1::PulseStartTime: uint64
+    DDB1::PulseStopTime: uint64
+  }
+  OutputSignals = {
+    EPICSCAOutput::PCF_STATE: uint32
+    EPICSCAOutput::MCPS_ACT_SP: uint32
+    EPICSCAOutput::GCPS_ACT_SP: uint32
+    EPICSCAOutput::BPS_REF: float32
+    EPICSCAOutput::APS_REF: float32
+    EPICSCAOutput::MCPS_TRG_CURR_SET: float32
+    EPICSCAOutput::GCPS_TRG_CURR_SET: float32
+    EPICSCAOutput::FHPS_REF: float32
+    EPICSCAOutput::CSV_LOADED: uint32
+    EPICSCAOutput::CSV_ERR: uint32
+    EPICSCAOutput::ELAPSED_TIME: uint32
+    EPICSCAOutput::HVARMED: uint8  
+    EPICSCAOutput::HVINJECTION: uint8
+    EPICSCAOutput::RFON: uint8
+    EPICSCAOutput::MHVPS_REF: float32
+    EPICSCAOutput::PREP_TIME_WF: int32[8000]
+    EPICSCAOutput::MHVPS_PREP_WF: float32[8000]
+    EPICSCAOutput::BPS_PREP_WF: float32[8000]
+    EPICSCAOutput::APS_PREP_WF: float32[8000]
+    EPICSCAOutput::MCPS_PREP_WF: float32[8000]
+    EPICSCAOutput::GCPS_PREP_WF: float32[8000]
+    EPICSCAOutput::FHPS_PREP_WF: float32[8000]
+    EPICSCAOutput::CCPS_REF: float32
+    EPICSCAOutput::MHVPS_STOP: uint32
+    EPICSCAOutput::APS_STOP: uint32
+    EPICSCAOutput::BPS_STOP: uint32
+    EPICSCAOutput::BEAM_ON_TIME: uint32
+    EPICSCAOutput::PCF_FLT: uint8
+    Th1Bridge::PCF_FAULT: uint8 as PCF_FAULT_Sync
+    EPICSCAOutput::PXI_FLT: uint8
+    Th1Bridge::PXI_FAULT: uint8 as PXI_FAULT_Sync
+    EPICSCAOutput::BEAM_ON_STAT: uint8
+    EPICSCAOutput::SHOT_ID: uint32
+    EPICSCAOutput::FHPS_AUTO_STAT: uint32
+    EPICSCAOutput::APS_HVON: uint8
+    EPICSCAOutput::APS_SWON: uint8
+    EPICSCAOutput::BPS_HVON: uint8
+    EPICSCAOutput::BPS_SWON: uint8
+    EPICSCAOutput::MHVPS_HVON: uint8
+    EPICSCAOutput::EXT_TRIGGER: uint8
+    EPICSCAOutput::ECPC_MHVPS_MOD: uint8
+    EPICSCAOutput::PLC_PERMIT: uint8
+    EPICSCAOutput::PLC_OP_SELECTED: uint8
+    EPICSCAOutput::CCPS_IN_OP: uint8
+    EPICSCAOutput::PLC_SYNCMODE: uint8
+    EPICSCAOutput::PLC_ITL: uint8
+    EPICSCAOutput::PLC_STANDBY: uint8
+    EPICSCAOutput::PLC_READY: uint8
+    EPICSCAOutput::PLC_ON: uint8
+    EPICSCAOutput::APS_FLT: uint8
+    EPICSCAOutput::APS_READY: uint8
+    EPICSCAOutput::BPS_FLT: uint8
+    EPICSCAOutput::BPS_READY: uint8
+    EPICSCAOutput::MHPS_FLT: uint8
+    EPICSCAOutput::MHPS_READY: uint8
+    EPICSCAOutput::MHPS_OC: uint8
+    EPICSCAOutput::MHPS_OV: uint8
+    EPICSCAOutput::CRIO_RV1: uint8
+    EPICSCAOutput::CRIO_RV2: uint8
+    EPICSCAOutput::CRIO_RV3: uint8
+    EPICSCAOutput::FAST_ITL: uint8
+    // FAST_PAUSE
+    EPICSCAOutput::PXI_6259_STATE: uint32
+    EPICSCAOutput::PXI_6683_STATE: uint8
+    EPICSCAOutput::PXI_6683_SYNC: uint8
+    // PXI_6683_SYNCLOST 
+    EPICSCAOutput::PXI_6528_STATE: uint32
+    EPICSCAOutput::PulseStartTimeL: uint32
+    EPICSCAOutput::PulseStartTimeH: uint32
+    EPICSCAOutput::PulseStopTimeL: uint32
+    EPICSCAOutput::PulseStopTimeH: uint32
+  }
+}

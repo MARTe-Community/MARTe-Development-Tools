@@ -1,0 +1,195 @@
+#package jada_gyro.RTApp
+
++Data = {
+  #if @sdn_enabled
+    //# Timer used for publsihing SDN data
+    +TimerSDN = {
+      Class = LinuxTimer
+      SleepNature = "Busy"
+      SleepPercentage = 40
+      ExecutionMode = "RealTimeThread"
+      +SystemClockTimeProvider = {
+        Class = "IOExt::SystemClockTimeProvider"
+      }
+      Signals = {
+        Counter = {
+          Type = uint32
+        }
+        Time = {
+          Type = uint32
+        }
+      }
+    }
+  #end
+  //# Fast Timer for thread 3 (RTStateMachineGAM execution cycle.)
+  +FastTimer = {
+    Class = LinuxTimer
+    SleepNature = "Busy"
+    SleepPercentage = 40
+    ExecutionMode = "RealTimeThread"
+    +SystemClockTimeProvider = {
+      Class = IOExt::SystemClockTimeProvider
+    }
+    Signals = {
+      Counter = {
+        Type = uint32
+      }
+      Time = {
+        Type = uint32
+      }
+      AbsoluteTime = {
+        Type = uint64
+      }
+    }
+  }
+  //# Fast Timer for thread 3 (RTStateMachineGAM execution cycle.)
+  +WGTimer = {
+    Class = LinuxTimer
+    SleepNature = "Busy"
+    SleepPercentage = 40
+    ExecutionMode = "RealTimeThread"
+    +SystemClockTimeProvider = {
+      Class = IOExt::SystemClockTimeProvider
+    }
+    Signals = {
+      Counter = {
+        Type = uint32
+      }
+      Time = {
+        Type = uint32
+      }
+    }
+  }
+  // Add signals to existing ddb
+  +DDB2 = {
+    Signals = {
+      Time = {
+        Type = uint32
+      }
+      Counter = {
+        Type = uint32
+      }
+    }
+  }
+  +DDB3 = {
+    Signals = {
+      Counter = {
+        Type = uint32
+      }
+      Time = {
+        Type = uint32
+      }
+      AbsoluteTime = {
+        Type = uint64
+      }
+      PulseStartTime_1 = {
+        Type = uint64
+        Default = 0
+      }
+      PulseStartTime = {
+        Type = uint64
+      }
+      PulseStopTime_1 = {
+        Type = uint64
+        Default = 0
+      }
+      PulseStopTime = {
+        Type = uint64
+      }
+    }
+  }
+  +DDB6 = {
+    Signals = {
+      Time = {
+        Type = uint32
+      }
+      Counter = {
+        Type = uint32
+      }
+    }
+  }
+}
++Functions = {
+  #if @sdn_enabled
+    //# Timer for SDN thread.
+    +TimeSDNGAM = {
+      Class = IOGAM
+      InputSignals = {
+        Time = {
+          DataSource = TimerSDN
+        }
+        Counter = {
+          DataSource = TimerSDN
+          Frequency = @slow_clock
+        }
+      }
+      OutputSignals = {
+        Time = {
+          DataSource = DDB2
+        }
+        Counter = {
+          DataSource = DDB2
+        }
+      }
+    }
+  #end
+  //# GAM for realtime statemachine
+  +FastTimerGAM = {
+    Class = IOGAM
+    InputSignals = {
+      Counter = {
+        DataSource = FastTimer
+        Frequency = @fast_clock
+      }
+      Time = {
+        DataSource = FastTimer
+      }
+      AbsoluteTime = {
+        DataSource = FastTimer
+      }
+      PCF_FAULT = {
+        DataSource = Th1Bridge
+      }
+      PXI_FAULT = {
+        DataSource = Th1Bridge
+      }
+    }
+    OutputSignals = {
+      Counter = {
+        DataSource = DDB3
+      }
+      Time = {
+        DataSource = DDB3
+      }
+      AbsoluteTime = {
+        DataSource = DDB3
+      }
+      PCF_FLT = {
+        DataSource = DDB3
+      }
+      PXI_FLT = {
+        DataSource = DDB3
+      }
+    }
+  }
+  +WGTimerGAM = {
+    Class = IOGAM
+    InputSignals = {
+      Time = {
+        DataSource = WGTimer
+      }
+      Counter = {
+        DataSource = WGTimer
+        Frequency = @wg_clock
+      }
+    }
+    OutputSignals = {
+      Time = {
+        DataSource = DDB6
+      }
+      Counter = {
+        DataSource = DDB6
+      }
+    }
+  }
+}

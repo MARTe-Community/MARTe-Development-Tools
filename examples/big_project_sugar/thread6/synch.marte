@@ -1,0 +1,148 @@
+#package jada_gyro.RTApp
+
++Data = {
+  +WGAsyncBridge = {
+    Class = RealTimeThreadAsyncBridge
+    NumberOfBuffers = 5
+    Signals = {
+      CCPS_REF = {
+        Type = float32
+      }
+      FHPS_A_REF = {
+        Type = float32
+      }
+      FHPS_A_AUTO_STAT = {
+        Type = uint32
+      }
+      FHPS_A_RU = {
+        Type = uint8
+      }
+      //# Not consumed right now
+      FHPS_B_RU = {
+        Type = uint8
+      }
+    }
+  }
+  +NI6259_AO = {
+    Class = NI6259DAC
+    DeviceName = "/dev/pxi6259" // Mandatory
+    BoardId = 1 // Mandatory
+    SamplingFrequency = @wg_clock
+    Signals = {
+      CCPS_REF = {
+        Type = float32 // Mandatory. Only type that is supported.
+        ChannelId = 0 // Mandatory. The channel number.
+        OutputPolarity = "Bipolar" // Optional. Possible values: Bipolar, Unipolar. Default value Unipolar.
+      }
+      FHPS_A_REF = {
+        Type = float32
+        ChannelId = 1
+        OutputPolarity = "Bipolar"
+      }
+      FHPS_B_REF = {
+        Type = float32
+        ChannelId = 2
+        OutputPolarity = "Bipolar"
+      }
+    }
+  }
+  +NI6368_AO = {
+    Class = "NI6368::NI6368DAC"
+    DeviceName = "/dev/pxie-6368" // Mandatory
+    BoardId = 0 // Mandatory
+    IsMultiplexed = 0
+    SamplingFrequency = @wg_clock
+    Signals = {
+      BPS_VREF = {
+        Type = float32
+        ChannelId = 0
+        OutputRange = 10
+        OutputGain = 0.25
+      }
+      APS_VREF = {
+        Type = float32
+        ChannelId = 1
+        OutputRange = 10
+      }
+      MAIN_VREF = {
+        Type = float32
+        ChannelId = 2
+        OutputRange = 10
+      }
+    }
+  }
+}
++Functions = {
+  +WGProducerGAM = {
+    Class = IOGAM
+    InputSignals = {
+      CCPS_REF = {
+        DataSource = DDB6
+      }
+      CCPS_REF_OUT = {
+        Alias = CCPS_REF
+        DataSource = DDB6
+      }
+      FHPS_A_SCALED = {
+        DataSource = DDB6
+      }
+      DDB6::FHPS_B_SCALED
+      BPS_VREF = {
+        Alias = BPS_OUT
+        Type = float32
+        DataSource = Th1Bridge
+      }
+      APS_VREF = {
+        Alias = APS_OUT
+        Type = float32
+        DataSource = Th1Bridge
+      }
+      MAIN_VREF = {
+        Alias = MHVPS_OUT
+        Type = float32
+        DataSource = Th1Bridge
+      }
+      FHPS_A_REF_OUT = {
+        Alias = FHPS_A_REF
+        DataSource = DDB6
+      }
+      FHPS_A_AUTO_STAT = {
+        DataSource = DDB6
+      }
+    }
+    OutputSignals = {
+      CCPS_REF = {
+        DataSource = WGAsyncBridge
+      }
+      CCPS_REF_OUT = {
+        Alias = CCPS_REF
+        DataSource = NI6259_AO
+      }
+      FHPS_REF_A_OUT = {
+        Alias = FHPS_A_REF
+        DataSource = NI6259_AO
+        Trigger = 1
+      }
+      NI6259_AO::FHPS_B_REF
+      BPS_VREF = {
+        Type = float32
+        DataSource = NI6368_AO
+      }
+      APS_VREF = {
+        Type = float32
+        DataSource = NI6368_AO
+      }
+      MAIN_VREF = {
+        Type = float32
+        DataSource = NI6368_AO
+        Trigger = 1
+      }
+      FHPS_A_REF = {
+        DataSource = WGAsyncBridge
+      }
+      FHPS_A_AUTO_STAT = {
+        DataSource = WGAsyncBridge
+      }
+    }
+  }
+}

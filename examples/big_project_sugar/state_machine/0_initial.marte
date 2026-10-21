@@ -1,0 +1,66 @@
+#package jada_gyro.StateMachine
+
++INITIAL = {
+  Class = ReferenceContainer
+  +Start = {
+    Class = StateMachineEvent
+    NextState = "WAITSTANDBY"
+    NextStateError = "ERROR"
+    #if @web_service
+      +StartHttpServer = {
+        Class = Message
+        Destination = WebServer
+        Function = "Start"
+        Mode = "ExpectsReply"
+      }
+    #end
+    +PrepareNextStateMsg = {
+      Class = Message
+      Destination = RTApp
+      Mode = "ExpectsReply"
+      Function = "PrepareNextState"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        param1 = WaitStandby
+      }
+    }
+    +StartNextStateExecutionMsg = {
+      Class = Message
+      Destination = RTApp
+      Function = "StartNextStateExecution"
+      Mode = "ExpectsReply"
+    }
+    +SetState = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_STATE
+        SignalValue = @state_standby
+      }
+    }
+    +SetFault = {
+      Class = Message
+      Destination = RTApp.Functions.StateGAM
+      Function = "SetOutput"
+      +Parameters = {
+        Class = ConfigurationDatabase
+        SignalName = PCF_FAULT
+        SignalValue = 0
+      }
+    }
+    +OpenDANWriterDIO = {
+      Class = Message
+      Destination = RTApp.Data.DANDIODataSource
+      Function = "OpenStream"
+      Mode = "ExpectsReply"
+    }
+    +OpenDANWriterAI = {
+      Class = Message
+      Destination = RTApp.Data.FastAnalogDAN
+      Function = "OpenStream"
+      Mode = "ExpectsReply"
+    }
+  }
+}

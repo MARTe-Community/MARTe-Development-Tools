@@ -1,0 +1,86 @@
+#package jada_gyro
+
+#if @web_service
+  +WebRoot = {
+    Class = HttpObjectBrowser
+    Root = "."
+    +ObjectBrowse = {
+      Class = HttpObjectBrowser
+      Root = "/"
+    }
+    +ResourcesHtml = {
+      Class = HttpDirectoryResource
+      BaseDir = "/opt/marte2-core/Resources/HTTP"
+    }
+  }
+
+  +WebServer = {
+    Class = HttpService
+    Port = 8084
+    WebRoot = WebRoot
+    Timeout = 0
+    ListenMaxConnections = 255
+    AcceptTimeout = 1000
+    MaxNumberOfThreads = 8
+    MinNumberOfThreads = 1
+  }
+#end
+
+#if @debug_service
+  +DebugService = {
+    Class = DebugService
+    ControlPort = 8080
+    UdpPort = 8081
+    LogPort = 8082
+    StreamIP = "127.0.0.1"
+  }
+#end
+
+//# Main Operational State Machine
++StateMachine = {
+  Class = StateMachine
+}
+
+//# MARTe RealTime Application
++RTApp = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB1
+    //# GAM Datasource for Thread 1
+    +DDB1 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+    }
+    //# GAMDatasource for thread 2
+    +DDB2 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+    }
+    //# GAMDatasource for thread 3
+    +DDB3 = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      ResetUnusedVariablesAtStateChange = 0
+    }
+    +DDB6 = {
+      Class = GAMDataSource
+    }
+    +Timings = {
+      Class = TimingDataSource
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+  }
+  +States = {
+    Class = ReferenceContainer
+  }
+  +Scheduler = {
+    Class = FastScheduler
+    NoWait = 1
+    TimingDataSource = Timings
+  }
+}

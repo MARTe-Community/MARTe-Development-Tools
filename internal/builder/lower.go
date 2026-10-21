@@ -345,7 +345,16 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 			l.seq++
 			name = fmt.Sprintf("MdtCopy%d", l.seq)
 		}
-		if err := l.emitCopyGAM(owner, name, pairs, p.group.Position, rep); err != nil {
+		// Drop the sugar definition first so the generated GAM can take its
+		// slot without shifting it.
+		var insertFrag *index.Fragment
+		insertAt := -1
+		if p.frag != nil {
+			insertAt = p.index
+			insertFrag = p.frag
+			p.frag.Definitions[p.index] = nil
+		}
+		if err := l.emitCopyGAM(owner, name, pairs, p.group.Position, rep, insertAt, insertFrag); err != nil {
 			return err
 		}
 
@@ -360,10 +369,6 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 		if p.arr != nil {
 			p.arr.Elements[p.arrIndex] = ref
 			l.tree.IndexValue(p.file, ref)
-		} else {
-			// The group definition is replaced by the synthesized object
-			// definition; drop the sugar node itself.
-			p.frag.Definitions[p.index] = nil
 		}
 	}
 	// Drop the sugar definitions removed above.
@@ -789,6 +794,33 @@ func (l *lowerer) ensureSignalContainer(gam *index.ProjectNode, name string) *in
 	return gam
 }
 
+// insertDefinitionInFrag inserts def at index of a specific fragment.
+func (l *lowerer) insertDefinitionInFrag(owner *index.ProjectNode, frag *index.Fragment, index int, def parser.Definition) {
+	if index < 0 || index > len(frag.Definitions) {
+		index = len(frag.Definitions)
+	}
+	frag.Definitions = append(frag.Definitions, nil)
+	copy(frag.Definitions[index+1:], frag.Definitions[index:])
+	frag.Definitions[index] = def
+	l.indexDefinitionCond(owner, def, frag.File, frag.IsConditional)
+}
+
+// insertDefinition places def at index of the owner's active fragment,
+// keeping the generated GAM where the sugar was written.
+func (l *lowerer) insertDefinition(owner *index.ProjectNode, index int, def parser.Definition) {
+	frag := l.activeFragmentOf(owner, owner.File)
+	if frag == nil {
+		return
+	}
+	if index < 0 || index > len(frag.Definitions) {
+		index = len(frag.Definitions)
+	}
+	frag.Definitions = append(frag.Definitions, nil)
+	copy(frag.Definitions[index+1:], frag.Definitions[index:])
+	frag.Definitions[index] = def
+	l.indexDefinitionCond(owner, def, frag.File, frag.IsConditional)
+}
+
 // appendDefinition adds def to the (first active) fragment of node and
 // rebuilds the index subtree for it.
 func (l *lowerer) appendDefinition(node *index.ProjectNode, def parser.Definition, file string) {
@@ -797,7 +829,7 @@ func (l *lowerer) appendDefinition(node *index.ProjectNode, def parser.Definitio
 		return
 	}
 	frag.Definitions = append(frag.Definitions, def)
-	l.indexDefinition(node, def, frag.File)
+	l.indexDefinitionCond(node, def, frag.File, frag.IsConditional)
 }
 
 // insertSignalDefinition inserts def so it becomes the at-th (1-based)
@@ -845,6 +877,10 @@ func (l *lowerer) activeFragmentOf(node *index.ProjectNode, file string) *index.
 // indexDefinition builds the child nodes for a synthesized definition, the
 // same shape the index produces for parsed files.
 func (l *lowerer) indexDefinition(parent *index.ProjectNode, def parser.Definition, file string) {
+	l.indexDefinitionCond(parent, def, file, false)
+}
+
+func (l *lowerer) indexDefinitionCond(parent *index.ProjectNode, def parser.Definition, file string, conditional bool) {
 	switch d := def.(type) {
 	case *parser.ObjectNode:
 		name := index.NormalizeName(literalText(d.Name))
@@ -854,14 +890,15 @@ func (l *lowerer) indexDefinition(parent *index.ProjectNode, def parser.Definiti
 		child, ok := parent.Children[name]
 		if !ok {
 			child = &index.ProjectNode{
-				Name:      name,
-				RealName:  literalText(d.Name),
-				Parent:    parent,
-				Children:  map[string]*index.ProjectNode{},
-				Variables: map[string]index.VariableInfo{},
-				Fields:    map[string][]index.EvaluatedField{},
-				Metadata:  map[string]string{},
-				File:      file,
+				Name:          name,
+				RealName:      literalText(d.Name),
+				Parent:        parent,
+				Children:      map[string]*index.ProjectNode{},
+				Variables:     map[string]index.VariableInfo{},
+				Fields:        map[string][]index.EvaluatedField{},
+				Metadata:      map[string]string{},
+				IsConditional: conditional,
+				File:          file,
 			}
 			if parent.Children == nil {
 				parent.Children = map[string]*index.ProjectNode{}
@@ -885,7 +922,7 @@ func (l *lowerer) indexDefinition(parent *index.ProjectNode, def parser.Definiti
 			l.b.activeFragments[frag] = true
 		}
 		for _, sub := range d.Subnode.Definitions {
-			l.indexDefinition(child, sub, file)
+			l.indexDefinitionCond(child, sub, file, conditional)
 		}
 	case *parser.Field:
 		if parent.Fields == nil {
@@ -936,7 +973,7 @@ func (l *lowerer) bufContainer(buf *index.ProjectNode) *index.ProjectNode {
 }
 
 // emitCopyGAM synthesizes the IOGAM object for a resolved group.
-func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []copyPair, pos parser.Position, rep *LowerReport) error {
+func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []copyPair, pos parser.Position, rep *LowerReport, insertAt int, insertFrag *index.Fragment) error {
 	obj := &parser.ObjectNode{
 		Position: pos,
 		Name:     &parser.ReferenceValue{Position: pos, Value: "+" + name},
@@ -995,7 +1032,13 @@ func (l *lowerer) emitCopyGAM(owner *index.ProjectNode, name string, pairs []cop
 		rep.Copies++
 	}
 	obj.Subnode.Definitions = append(obj.Subnode.Definitions, inputs, outputs)
-	l.appendDefinition(owner, obj, owner.File)
+	if insertAt >= 0 && insertFrag != nil {
+		l.insertDefinitionInFrag(owner, insertFrag, insertAt, obj)
+	} else if insertAt >= 0 {
+		l.insertDefinition(owner, insertAt, obj)
+	} else {
+		l.appendDefinition(owner, obj, owner.File)
+	}
 	return nil
 }
 
