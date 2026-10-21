@@ -222,3 +222,6 @@ condition fails; the build proceeds without fusion.
 * LSP completion/hover/definition for `copy`/`from`/`gam`.
 * Nested pipeline instantiation (a `gam` body instantiating another
   pipeline).
+* Pipeline instances inside `#if`/`#foreach` blocks: expansion produces
+  unconditional references to conditional definitions, so instantiate
+  pipelines outside conditional blocks (copy groups work there).
