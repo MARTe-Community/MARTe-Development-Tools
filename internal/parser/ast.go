@@ -312,6 +312,10 @@ type TypeField struct {
 	// InlineType holds the parsed structured type when the field's type is
 	// an anonymous struct (`field: { ... }`). nil otherwise.
 	InlineType *TypeDefinition
+	// DefaultValue is the field's default value (`field: type = value`).
+	// Fields without one must be provided by the variable's initializer or
+	// an override.
+	DefaultValue Value
 }
 
 func (f *TypeField) Pos() Position { return f.Position }

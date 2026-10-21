@@ -222,6 +222,12 @@ mdt build -vADC_A='{ board_id = 7 }' config.marte
 
 - Overrides are validated against the type (an unknown field or an
   out-of-range value is an error).
+- Fields can carry **defaults** (`field: type = value`). A variable with
+  no initializer takes the field defaults; an initializer or override
+  overrides them field-by-field. Fields without a default must be provided
+  by the initializer or an override (validation reports missing ones).
+- The formatter prints structured types multi-line (one field per line,
+  nested types indented) and preserves field defaults.
 - **Anonymous structured types** can be written inline on the variable —
   no named declaration needed. The value may then come entirely from an
   override:
@@ -229,7 +235,7 @@ mdt build -vADC_A='{ board_id = 7 }' config.marte
 ```marte
 var hardware: {
   address: uint16
-  port: uint16
+  port: uint16 = 1234
   sample_rate: uint8
 }
 
@@ -240,6 +246,10 @@ Signals = {
 }
 ```
 
+Fields can carry defaults inline (`port: uint16 = 1234`); a variable
+without an initializer takes them, and `-vhardware='{ port = 4321 }'`
+overrides them field-by-field.
+
 ```console
 mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.marte
 ```
@@ -247,6 +257,10 @@ mdt build -vhardware='{ address = 4660, port = 1234, sample_rate = 10 }' app.mar
 - Inline structured types also work as field types of named `type`
   declarations, and for `let` constants. A structured variable with no
   default and no override is reported as a warning.
+- **Editor support**: typing `@hardware.` completes the field names (with
+  their types); go-to-definition on `@hardware.port` jumps to the `port`
+  field in the type; go-to-references on the `port` field lists every
+  `@…​.port` usage.
 
 ## 7. Conditionals
 

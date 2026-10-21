@@ -1286,6 +1286,9 @@ func (p *Parser) parseTypeDefinition(startTok Token) (Definition, bool) {
 			if t.Position.Line > fieldLine {
 				break
 			}
+			if t.Type == TokenEqual {
+				break // field default follows
+			}
 			if t.Type == TokenEqual && p.peekN(1).Type == TokenSymbol && p.peekN(1).Value == "~" {
 				p.next()
 				p.next()
@@ -1300,11 +1303,23 @@ func (p *Parser) parseTypeDefinition(startTok Token) (Definition, bool) {
 			return nil, false
 		}
 
-		def.Fields = append(def.Fields, &TypeField{
+		field := &TypeField{
 			Position: fieldName.Position,
 			Name:     fieldName.Value,
 			TypeExpr: joinTypeTokens(typeTokens),
-		})
+		}
+
+		// Field default: `field: type = value`.
+		if p.peek().Type == TokenEqual {
+			p.next()
+			dv, dvOK := p.parseValue()
+			if !dvOK {
+				return nil, false
+			}
+			field.DefaultValue = dv
+		}
+
+		def.Fields = append(def.Fields, field)
 	}
 }
 
@@ -1462,6 +1477,9 @@ func (p *Parser) parseStructTypeFields(openTok Token) (*TypeDefinition, bool) {
 			if t.Position.Line > fieldLine {
 				break
 			}
+			if t.Type == TokenEqual {
+				break // field default follows
+			}
 			if t.Type == TokenEqual && p.peekN(1).Type == TokenSymbol && p.peekN(1).Value == "~" {
 				p.next()
 				p.next()
@@ -1477,6 +1495,17 @@ func (p *Parser) parseStructTypeFields(openTok Token) (*TypeDefinition, bool) {
 		}
 
 		field.TypeExpr = joinTypeTokens(typeTokens)
+
+		// Field default: `field: type = value`.
+		if p.peek().Type == TokenEqual {
+			p.next()
+			dv, dvOK := p.parseValue()
+			if !dvOK {
+				return nil, false
+			}
+			field.DefaultValue = dv
+		}
+
 		def.Fields = append(def.Fields, field)
 
 		if p.peek().Type == TokenComma {

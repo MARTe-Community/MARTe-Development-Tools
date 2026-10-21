@@ -76,6 +76,25 @@ func (f *Formatter) formatConfig(config *parser.Configuration) {
 	f.flushRemainingComments(0)
 }
 
+// writeStructTypeFields prints the fields of a structured type block at the
+// given indentation, one per line, including field defaults and nested
+// anonymous struct types.
+func (f *Formatter) writeStructTypeFields(typ *parser.TypeDefinition, indent int) {
+	inner := strings.Repeat("  ", indent+1)
+	for _, field := range typ.Fields {
+		fmt.Fprintf(f.writer, "\n%s%s: %s", inner, field.Name, field.TypeExpr)
+		if field.DefaultValue != nil {
+			fmt.Fprint(f.writer, " = ")
+			f.formatValue(field.DefaultValue, indent+1)
+		}
+		if field.InlineType != nil {
+			fmt.Fprintf(f.writer, " {")
+			f.writeStructTypeFields(field.InlineType, indent+1)
+			fmt.Fprintf(f.writer, "\n%s}", inner)
+		}
+	}
+}
+
 func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 	indentStr := strings.Repeat("  ", indent)
 	switch d := def.(type) {
@@ -127,9 +146,7 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		return d.Subnode.EndPosition.Line
 	case *parser.TypeDefinition:
 		fmt.Fprintf(f.writer, "%stype %s {", indentStr, d.Name)
-		for _, field := range d.Fields {
-			fmt.Fprintf(f.writer, "\n%s  %s: %s,", indentStr, field.Name, field.TypeExpr)
-		}
+		f.writeStructTypeFields(d, indent)
 		fmt.Fprintf(f.writer, "\n%s}", indentStr)
 		return d.Position.Line
 	case *parser.VariableDefinition:
@@ -137,7 +154,13 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		if d.IsConst {
 			macro = "#let"
 		}
-		fmt.Fprintf(f.writer, "%s%s %s: %s", indentStr, macro, d.Name, d.TypeExpr)
+		if d.InlineType != nil {
+			fmt.Fprintf(f.writer, "%s%s %s: {", indentStr, macro, d.Name)
+			f.writeStructTypeFields(d.InlineType, indent)
+			fmt.Fprintf(f.writer, "\n%s}", indentStr)
+		} else {
+			fmt.Fprintf(f.writer, "%s%s %s: %s", indentStr, macro, d.Name, d.TypeExpr)
+		}
 		if d.DefaultValue != nil {
 			fmt.Fprint(f.writer, " = ")
 			endLine := f.formatValue(d.DefaultValue, indent)

@@ -1319,6 +1319,43 @@ func HandleCompletion(params CompletionParams) *CompletionList {
 
 	prefix := lineStr[:col]
 
+	// Struct field completion: `@var.` or `@var.partial` suggests the fields
+	// of the variable's structured type (dotted paths walk nested structs).
+	memberRe := regexp.MustCompile(`@(\w+)\.([\w.]*)$`)
+	if matches := memberRe.FindStringSubmatch(prefix); matches != nil {
+		varName, memberPath := matches[1], matches[2]
+		container := tree.GetNodeContaining(path, parser.Position{Line: params.Position.Line + 1, Column: col + 1})
+		if container == nil {
+			if iso, ok := tree.IsolatedFiles[path]; ok {
+				container = iso
+			} else {
+				container = tree.Root
+			}
+		}
+		typ := tree.StructTypeForVariableName(varName, container)
+		if typ == nil {
+			return nil
+		}
+		for _, seg := range strings.Split(memberPath, ".") {
+			if seg == "" {
+				continue
+			}
+			field := typ.Field(seg)
+			if field == nil || field.InlineType == nil {
+				return nil
+			}
+			typ = field.InlineType
+		}
+		items := make([]CompletionItem, 0, len(typ.Fields))
+		for _, field := range typ.Fields {
+			items = append(items, CompletionItem{Label: field.Name, Kind: 5, Detail: field.TypeExpr})
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		return &CompletionList{Items: items}
+	}
+
 	// Case 4: Top-level keywords/macros
 	if strings.HasPrefix(prefix, "#") && !strings.Contains(prefix, " ") {
 		return &CompletionList{
@@ -1821,6 +1858,14 @@ func HandleDefinition(params DefinitionParams) any {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
+
+	// Go-to-definition on a struct member usage (`@var.member`): jump to the
+	// field declaration in the variable's structured type.
+	if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+		if locs := structFieldDefinition(tree, params.TextDocument.URI, text, path, line, col); len(locs) > 0 {
+			return locs
+		}
+	}
 
 	res := tree.Query(path, line, col)
 	if res == nil {
@@ -2439,6 +2484,175 @@ func getGAMSignalPeers(tree *index.ProjectTree, sigNode *index.ProjectNode, dire
 	return peers
 }
 
+// memberUsageAt reports the variable and member names when the cursor sits
+// on the member part of a `@var.member` expression. lineIdx and col are
+// 0-based LSP positions into text.
+func memberUsageAt(text string, lineIdx, col int) (varName, member string, ok bool) {
+	lines := strings.Split(text, "\n")
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		return "", "", false
+	}
+	lineStr := lines[lineIdx]
+	re := regexp.MustCompile(`@(\w+)\.(\w+)`)
+	for _, loc := range re.FindAllStringSubmatchIndex(lineStr, -1) {
+		if col >= loc[4] && col <= loc[5] {
+			return lineStr[loc[2]:loc[3]], lineStr[loc[4]:loc[5]], true
+		}
+	}
+	return "", "", false
+}
+
+// structFieldDefinition resolves go-to-definition for a `@var.member` usage,
+// returning the field declaration's location. Returns nil when the cursor is
+// not on a member usage or the field does not exist.
+func structFieldDefinition(tree *index.ProjectTree, uri, text, path string, line, col int) []Location {
+	varName, member, ok := memberUsageAt(text, line-1, col-1)
+	if !ok {
+		return nil
+	}
+	container := tree.GetNodeContaining(path, parser.Position{Line: line, Column: col})
+	if container == nil {
+		if iso, ok := tree.IsolatedFiles[path]; ok {
+			container = iso
+		} else {
+			container = tree.Root
+		}
+	}
+	typ := tree.StructTypeForVariableName(varName, container)
+	if typ == nil {
+		return nil
+	}
+	field := typ.Field(member)
+	if field == nil {
+		return nil
+	}
+	return []Location{{
+		URI: uri,
+		Range: Range{
+			Start: Position{Line: field.Position.Line - 1, Character: field.Position.Column - 1},
+			End:   Position{Line: field.Position.Line - 1, Character: field.Position.Column - 1 + len(field.Name)},
+		},
+	}}
+}
+
+// structFieldReferences returns find-references for struct fields. The cursor
+// can sit on a `@var.member` usage or on the field declaration itself; the
+// result lists every `@var.member` usage across the workspace.
+func structFieldReferences(tree *index.ProjectTree, params ReferenceParams, text, path string, line, col int) []Location {
+	var varNames []string
+	var member string
+	if varName, m, ok := memberUsageAt(text, line-1, col-1); ok {
+		varNames = []string{varName}
+		member = m
+	} else if typ, fieldName, found := fieldDeclarationAt(tree, line, col); found {
+		member = fieldName
+		varNames = variablesOfType(tree, typ)
+	}
+	if member == "" || len(varNames) == 0 {
+		return nil
+	}
+
+	var locations []Location
+	seen := make(map[string]bool)
+	for _, varName := range varNames {
+		for _, ref := range tree.MemberReferences(varName, member) {
+			key := fmt.Sprintf("%s:%d:%d", ref.File, ref.Position.Line, ref.Position.Column)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			locations = append(locations, Location{
+				URI: "file://" + ref.File,
+				Range: Range{
+					Start: Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1},
+					End:   Position{Line: ref.Position.Line - 1, Character: ref.Position.Column - 1 + len(member)},
+				},
+			})
+		}
+	}
+	return locations
+}
+
+// fieldDeclarationAt reports the structured type and field name when the
+// cursor sits on a field declaration of a named type (tree.Types) or of an
+// inline struct type declared on a variable. line and col are 1-based.
+func fieldDeclarationAt(tree *index.ProjectTree, line, col int) (*parser.TypeDefinition, string, bool) {
+	for _, typ := range tree.Types {
+		if name, ok := fieldDeclarationIn(typ, line, col); ok {
+			return typ, name, true
+		}
+	}
+	for _, node := range lspNodes(tree) {
+		for _, info := range node.Variables {
+			if info.Def == nil || info.Def.InlineType == nil {
+				continue
+			}
+			if name, ok := fieldDeclarationIn(info.Def.InlineType, line, col); ok {
+				return info.Def.InlineType, name, true
+			}
+		}
+	}
+	return nil, "", false
+}
+
+func fieldDeclarationIn(typ *parser.TypeDefinition, line, col int) (string, bool) {
+	for _, f := range typ.Fields {
+		if f.Position.Line != line {
+			continue
+		}
+		if col >= f.Position.Column && col < f.End().Column {
+			return f.Name, true
+		}
+	}
+	return "", false
+}
+
+// variablesOfType returns the names of all variables whose structured type is
+// typ (the same type declaration), across the whole tree.
+func variablesOfType(tree *index.ProjectTree, typ *parser.TypeDefinition) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, node := range lspNodes(tree) {
+		for _, info := range node.Variables {
+			if info.Def == nil || seen[info.Def.Name] {
+				continue
+			}
+			varDefType := info.Def.InlineType
+			if varDefType == nil {
+				varDefType = tree.Types[info.Def.TypeExpr]
+			}
+			if varDefType == typ {
+				seen[info.Def.Name] = true
+				names = append(names, info.Def.Name)
+			}
+		}
+	}
+	return names
+}
+
+// lspNodes collects every node in the tree: the root hierarchy plus any
+// isolated (package-less) files.
+func lspNodes(tree *index.ProjectTree) []*index.ProjectNode {
+	var nodes []*index.ProjectNode
+	seen := make(map[*index.ProjectNode]bool)
+	var visit func(n *index.ProjectNode)
+	visit = func(n *index.ProjectNode) {
+		if n == nil || seen[n] {
+			return
+		}
+		seen[n] = true
+		nodes = append(nodes, n)
+		for _, child := range n.Children {
+			visit(child)
+		}
+	}
+	visit(tree.Root)
+	for _, iso := range tree.IsolatedFiles {
+		visit(iso)
+	}
+	return nodes
+}
+
 func HandleReferences(params ReferenceParams) []Location {
 	view := GlobalSession.ViewOf(params.TextDocument.URI)
 	if view == nil {
@@ -2450,6 +2664,14 @@ func HandleReferences(params ReferenceParams) []Location {
 	path := uriToPath(params.TextDocument.URI)
 	line := params.Position.Line + 1
 	col := params.Position.Character + 1
+
+	// Find-references for struct fields: from a `@var.member` usage or from
+	// the field declaration itself, return all `@var.member` usages.
+	if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
+		if locs := structFieldReferences(tree, params, text, path, line, col); locs != nil {
+			return locs
+		}
+	}
 
 	res := tree.Query(path, line, col)
 	if res == nil {

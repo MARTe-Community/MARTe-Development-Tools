@@ -508,6 +508,12 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 						if _, ok := b.variables[vdef.Name]; !ok || vdef.IsConst {
 							b.variables[vdef.Name] = vdef.DefaultValue
 						}
+					} else if def := tree.EffectiveStructDefault(vdef); def != nil {
+						// Structured type with field defaults and no
+						// initializer: the variable takes the defaults.
+						if _, ok := b.variables[vdef.Name]; !ok {
+							b.variables[vdef.Name] = def
+						}
 					}
 				}
 			}

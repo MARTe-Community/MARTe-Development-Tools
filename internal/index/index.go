@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,9 @@ type ProjectTree struct {
 	TemplateFiles  map[string]string // Maps template name to the file it came from
 	// Types holds structured type declarations (`type Name { ... }`) by name.
 	Types map[string]*parser.TypeDefinition
+	// MemberRefs records struct field usages through variables
+	// (`@var.member`), keyed by "varName.member".
+	MemberRefs map[string][]MemberReference
 	// knownFiles tracks which files already contribute to the tree. A file
 	// that is not in here has nothing to remove, so AddFile can skip the
 	// tree-wide removal walks. Without it, adding N files costs O(N x nodes)
@@ -204,6 +208,66 @@ func (pt *ProjectTree) ScanDirectory(rootPath string) error {
 // override is not a struct literal, in which case callers keep their existing
 // whole-value replacement behaviour. Unknown fields are not rejected here;
 // validation flags them against the type.
+// IsNilValue reports whether v carries a typed nil pointer (e.g. a nil
+// *parser.MapValue assigned to a Value interface). Such values behave like an
+// absent value but defeat plain `v != nil` checks.
+func IsNilValue(v parser.Value) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
+}
+
+// EffectiveStructDefault returns the value a structured variable takes when
+// neither an initializer nor an override applies: the field defaults declared
+// in its type. Fields without defaults are omitted (validation flags them as
+// missing). Returns nil when the type carries no field defaults.
+func (pt *ProjectTree) EffectiveStructDefault(vdef *parser.VariableDefinition) *parser.MapValue {
+	var typ *parser.TypeDefinition
+	if vdef != nil {
+		if vdef.InlineType != nil {
+			typ = vdef.InlineType
+		} else if pt.Types != nil {
+			typ = pt.Types[strings.TrimSpace(vdef.TypeExpr)]
+		}
+	}
+	if typ == nil {
+		return nil
+	}
+	m := pt.structFieldDefaults(typ)
+	if m == nil {
+		return nil // avoid a typed-nil in the parser.Value interface
+	}
+	return m
+}
+
+func (pt *ProjectTree) structFieldDefaults(typ *parser.TypeDefinition) *parser.MapValue {
+	has := false
+	values := make(map[string]parser.Value)
+	for _, f := range typ.Fields {
+		if f.DefaultValue != nil {
+			values[f.Name] = f.DefaultValue
+			has = true
+			continue
+		}
+		nested := f.InlineType
+		if nested == nil && pt.Types != nil {
+			nested = pt.Types[strings.TrimSpace(f.TypeExpr)]
+		}
+		if nested != nil {
+			if sub := pt.structFieldDefaults(nested); sub != nil {
+				values[f.Name] = sub
+				has = true
+			}
+		}
+	}
+	if !has {
+		return nil
+	}
+	return parser.NewMapValue(parser.Position{}, values)
+}
+
 func (pt *ProjectTree) MergeStructOverride(vdef *parser.VariableDefinition, override parser.Value) (parser.Value, bool) {
 	if vdef == nil || override == nil {
 		return nil, false
@@ -219,7 +283,11 @@ func (pt *ProjectTree) MergeStructOverride(vdef *parser.VariableDefinition, over
 	if !ok {
 		return nil, false
 	}
-	return pt.mergeStructFields(typ, vdef.DefaultValue, ov), true
+	base := vdef.DefaultValue
+	if base == nil {
+		base = pt.structFieldDefaults(typ)
+	}
+	return pt.mergeStructFields(typ, base, ov), true
 }
 
 // mergeStructFields overlays the override's fields onto the default struct,
@@ -287,6 +355,14 @@ type Reference struct {
 	TargetVariable *parser.VariableDefinition
 	TargetTemplate *parser.TemplateDefinition
 	IsVariable     bool
+}
+
+// MemberReference records one usage of a struct field through a variable
+// (`@var.member`). Position points at the member identifier itself (not the
+// variable), so LSP features can span exactly the field name.
+type MemberReference struct {
+	Position parser.Position
+	File     string
 }
 
 type ProjectNode struct {
@@ -370,6 +446,7 @@ func NewProjectTree() *ProjectTree {
 		Templates:      make(map[string]*parser.TemplateDefinition),
 		TemplateFiles:  make(map[string]string),
 		Types:          make(map[string]*parser.TypeDefinition),
+		MemberRefs:     make(map[string][]MemberReference),
 		knownFiles:     make(map[string]struct{}),
 	}
 }
@@ -387,6 +464,7 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	// Remove references for this file
 	delete(pt.FileReferences, file)
 	delete(pt.knownFiles, file)
+	pt.pruneFileMemberReferences(file)
 
 	// Rebuild legacy References slice (if needed, or deprecate usage)
 	pt.rebuildLegacyReferences()
@@ -602,6 +680,7 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 		delete(pt.FileReferences, file)
 	}
 	pt.knownFiles[file] = struct{}{}
+	pt.pruneFileMemberReferences(file)
 
 	// Collect global pragmas
 	for _, p := range config.Pragmas {
@@ -1315,6 +1394,11 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 		}
 		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
 		pt.References = append(pt.References, ref)
+	case *parser.MemberAccess:
+		pt.IndexValue(file, v.Base)
+		if base, ok := v.Base.(*parser.VariableReferenceValue); ok {
+			pt.recordMemberReference(file, base, v.Member)
+		}
 	case *parser.BinaryExpression:
 		pt.IndexValue(file, v.Left)
 		pt.IndexValue(file, v.Right)
@@ -1347,6 +1431,11 @@ func (pt *ProjectTree) IndexExpressionVariables(file string, val parser.Value) {
 		}
 		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
 		pt.References = append(pt.References, ref)
+	case *parser.MemberAccess:
+		pt.IndexExpressionVariables(file, v.Base)
+		if base, ok := v.Base.(*parser.VariableReferenceValue); ok {
+			pt.recordMemberReference(file, base, v.Member)
+		}
 	case *parser.BinaryExpression:
 		pt.IndexExpressionVariables(file, v.Left)
 		pt.IndexExpressionVariables(file, v.Right)
@@ -1365,6 +1454,17 @@ func (pt *ProjectTree) IndexExpressionVariables(file string, val parser.Value) {
 			pt.IndexExpressionVariables(file, e)
 		}
 	}
+}
+
+// recordMemberReference records a `@var.member` usage under the
+// "varName.member" key. The stored position points at the member identifier:
+// the variable reference starts at its `@` and spans len(Name) columns, so
+// the member begins one column later.
+func (pt *ProjectTree) recordMemberReference(file string, base *parser.VariableReferenceValue, member string) {
+	pos := base.Position
+	pos.Column += len(base.Name) + 1
+	key := strings.TrimPrefix(base.Name, "@") + "." + member
+	pt.MemberRefs[key] = append(pt.MemberRefs[key], MemberReference{Position: pos, File: file})
 }
 
 func (pt *ProjectTree) RebuildIndex() {
@@ -1665,6 +1765,11 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 				if existing == nil {
 					ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
 				}
+			} else if def := pt.EffectiveStructDefault(d); def != nil && !IsNilValue(def) {
+				existing := ctx.Resolve(d.Name)
+				if existing == nil {
+					ctx.Variables[d.Name] = def
+				}
 			}
 		default:
 			result = append(result, EvaluatedDefinition{Def: d, Ctx: ctx, File: file})
@@ -1706,9 +1811,6 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 		}
 	case *parser.MethodCall:
 		recv := pt.EvaluateValue(v.Base, ctx)
-		if os.Getenv("MDT_TRACE_METHODS") != "" {
-			pt.traceMethod(v.Method, recv, v.Args, nil)
-		}
 		if recv == nil {
 			return v
 		}
@@ -2208,6 +2310,78 @@ func (pt *ProjectTree) resolveVariable(ctx *ProjectNode, name string) *VariableI
 	return nil
 }
 
+// StructTypeForVariable returns the structured type of the variable varName
+// visible from node: the inline type of a `var v: { ... }` declaration, or
+// the named type from Types for `var v: Name`. The lookup walks up the node
+// chain like resolveVariable, falling back to the root. Returns nil when the
+// variable is unknown or has no structured type.
+func (pt *ProjectTree) StructTypeForVariable(varName string, node *ProjectNode) *parser.TypeDefinition {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.structTypeForVariable(varName, node)
+}
+
+// StructTypeForVariableName resolves varName's structured type in the given
+// scope node, falling back to the tree root when node is nil.
+func (pt *ProjectTree) StructTypeForVariableName(varName string, node *ProjectNode) *parser.TypeDefinition {
+	return pt.StructTypeForVariable(varName, node)
+}
+
+func (pt *ProjectTree) structTypeForVariable(varName string, node *ProjectNode) *parser.TypeDefinition {
+	curr := node
+	for curr != nil {
+		if info, ok := curr.Variables[varName]; ok {
+			return pt.structTypeOfDef(info.Def)
+		}
+		curr = curr.Parent
+	}
+	if pt.Root != nil {
+		if info, ok := pt.Root.Variables[varName]; ok {
+			return pt.structTypeOfDef(info.Def)
+		}
+	}
+	return nil
+}
+
+func (pt *ProjectTree) structTypeOfDef(def *parser.VariableDefinition) *parser.TypeDefinition {
+	if def == nil {
+		return nil
+	}
+	if def.InlineType != nil {
+		return def.InlineType
+	}
+	if def.TypeExpr == "" {
+		return nil
+	}
+	return pt.Types[def.TypeExpr]
+}
+
+// MemberReferences returns the recorded usages of `varName.member`
+// (`@varName.member` expressions) across all indexed files.
+func (pt *ProjectTree) MemberReferences(varName, member string) []MemberReference {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	return pt.MemberRefs[varName+"."+member]
+}
+
+// pruneFileMemberReferences drops member usages recorded for file, keeping
+// the map consistent when a file is removed or re-indexed.
+func (pt *ProjectTree) pruneFileMemberReferences(file string) {
+	for key, refs := range pt.MemberRefs {
+		kept := make([]MemberReference, 0, len(refs))
+		for _, r := range refs {
+			if r.File != file {
+				kept = append(kept, r)
+			}
+		}
+		if len(kept) == 0 {
+			delete(pt.MemberRefs, key)
+		} else {
+			pt.MemberRefs[key] = kept
+		}
+	}
+}
+
 func (pt *ProjectTree) Evaluate(val parser.Value, ctx *ProjectNode) parser.Value {
 	pt.mu.RLock()
 	defer pt.mu.RUnlock()
@@ -2221,6 +2395,9 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		if info := pt.resolveVariable(ctx, name); info != nil {
 			if info.Def.DefaultValue != nil {
 				return pt.evaluate(info.Def.DefaultValue, ctx)
+			}
+			if def := pt.EffectiveStructDefault(info.Def); def != nil && !IsNilValue(def) {
+				return def
 			}
 		}
 		return v
@@ -2356,6 +2533,14 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	// Clone Types
 	for k, v := range pt.Types {
 		newPT.Types[k] = v
+	}
+
+	// Clone MemberRefs (slices are copied so appends on either tree stay
+	// independent, like FileReferences above).
+	for k, v := range pt.MemberRefs {
+		newRefs := make([]MemberReference, len(v))
+		copy(newRefs, v)
+		newPT.MemberRefs[k] = newRefs
 	}
 
 	// Clone knownFiles: without it the clone would believe it holds no files
@@ -2880,20 +3065,4 @@ func (pt *ProjectTree) ResolveFields(activeFragments map[*Fragment]bool) {
 			}
 		}
 	})
-}
-
-func (pt *ProjectTree) traceMethod(method string, recv parser.Value, args []parser.Value, _ *ProjectNode) {
-	fmt.Fprintf(os.Stderr, "[TRACE] method %s recv=%T(%v) args=%v\n", method, recv, renderScalarish(recv), args)
-}
-
-func renderScalarish(v parser.Value) string {
-	switch t := v.(type) {
-	case *parser.StringValue:
-		return t.Value
-	case *parser.MapValue:
-		return fmt.Sprintf("map{%d keys}", len(t.Keys))
-	case *parser.ArrayValue:
-		return fmt.Sprintf("list{%d}", len(t.Elements))
-	}
-	return fmt.Sprintf("%T", v)
 }

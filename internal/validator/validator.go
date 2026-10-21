@@ -2490,6 +2490,9 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 					// (or, for structured types, merges into) the default, so
 					// overrides are checked against the declared type too.
 					effective := vdef.DefaultValue
+					if effective == nil {
+						effective = v.Tree.EffectiveStructDefault(vdef)
+					}
 					if ov, ok := v.Overrides[vdef.Name]; ok {
 						effective = ov
 					}
@@ -2497,13 +2500,13 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 					// A structured variable with no value anywhere would render
 					// as an unresolved reference downstream; say so here.
 					isStructType := vdef.InlineType != nil || v.isDeclaredType(vdef.TypeExpr)
-					if isStructType && effective == nil {
+					if isStructType && (effective == nil || index.IsNilValue(effective)) {
 						v.report(node, "missing_struct_value", LevelWarning,
 							fmt.Sprintf("Structured variable '%s' has no default value and no override", vdef.Name),
 							vdef.Position, frag.File)
 					}
 
-					if effective != nil {
+					if effective != nil && !index.IsNilValue(effective) {
 						valInterface := v.ValueToInterface(effective, node)
 						valVal := ctx_cue.Encode(valInterface)
 
@@ -2668,6 +2671,8 @@ func (v *Validator) setOverrideValue(name, valStr string, def *parser.VariableDe
 	}
 	if def != nil {
 		if merged, ok := v.Tree.MergeStructOverride(def, ovVal); ok {
+			// MergeStructOverride already falls back to the type's field
+			// defaults when the variable has no initializer.
 			v.Overrides[name] = merged
 			v.Variables[name] = merged
 			return

@@ -132,6 +132,7 @@ var hardware: {
 	pt := newIndexFromSource(t, src)
 	v := validator.NewValidator(pt, ".", nil)
 	v.MissingFilesAreWarnings = true
+	v.Activate(context.Background())
 	v.ValidateProject(context.Background())
 	sawWarn := false
 	sawErr := false
@@ -291,6 +292,65 @@ func validateWithOverrides(t *testing.T, src string, overrides map[string]string
 	t.Helper()
 	pt := newIndexFromSource(t, src)
 	v := validator.NewValidator(pt, ".", overrides)
+	v.Activate(context.Background())
 	v.ValidateProject(context.Background())
 	return v.Diagnostics
+}
+
+// TestInlineStructFieldDefaults covers `field: type = default`: a variable
+// with no initializer takes the field defaults, and a partial override
+// replaces only the given fields.
+func TestInlineStructFieldDefaults(t *testing.T) {
+	src := `#package T
+
+var hardware: {
+  address: uint16 = 4660
+  port: uint16 = 1234
+  sample_rate: uint8
+}
+
++App = {
+  Class = ReferenceContainer
+  Address = @hardware.address
+  Port = @hardware.port
+}
+`
+	build := func(t *testing.T, overrides map[string]string) string {
+		t.Helper()
+		dir := t.TempDir()
+		file := filepath.Join(dir, "main.marte")
+		if err := os.WriteFile(file, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		b := builder.NewBuilder([]string{file}, overrides)
+		out := filepath.Join(dir, "out.marte")
+		f, err := os.Create(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if err := b.Build(f); err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		content, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(content)
+	}
+
+	res := build(t, nil)
+	for _, want := range []string{"Address = 4660", "Port = 1234"} {
+		if !strings.Contains(res, want) {
+			t.Errorf("expected %q with pure defaults, got:\n%s", want, res)
+		}
+	}
+
+	res = build(t, map[string]string{"hardware": `{ address = 1 }`})
+	if !strings.Contains(res, "Address = 1") {
+		t.Errorf("override not applied, got:\n%s", res)
+	}
+	if !strings.Contains(res, "Port = 1234") {
+		t.Errorf("partial override dropped the other field default, got:\n%s", res)
+	}
 }
