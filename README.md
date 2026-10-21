@@ -66,8 +66,11 @@ go install github.com/marte-community/marte-dev-tools/cmd/mdt@latest
   ```
 - **Build**: Merge project files into a single output.
   ```bash
-  mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-o output.marte] [-vVAR=VAL] <input_files...>
+  mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-O] [-o output.marte] [-vVAR=VAL] <input_files...>
   ```
+  `-O`/`--optimize` merges adjacent IOGAMs, drops identity copy GAMs and
+  orders signals to reduce signal-copy overhead (see
+  [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md)).
 - **Format**: Format configuration files.
   ```bash
   mdt fmt path/to/file.marte

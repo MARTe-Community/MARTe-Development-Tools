@@ -15,9 +15,13 @@ import (
 )
 
 type Builder struct {
-	Files           []string
-	Overrides       map[string]string
-	ProjectRoot     string // Directory containing .marte_schema.cue (derived from Files)
+	Files       []string
+	Overrides   map[string]string
+	ProjectRoot string // Directory containing .marte_schema.cue (derived from Files)
+	// Optimize enables MARTe-oriented output optimisations (IOGAM merging,
+	// signal ordering). See optimize.go.
+	Optimize        bool
+	OptimizeReport  OptimizeReport
 	variables       map[string]parser.Value
 	tree            *index.ProjectTree
 	activeNodes     map[*index.ProjectNode]bool
@@ -419,6 +423,10 @@ func (b *Builder) Build(f *os.File) error {
 		} else {
 			return fmt.Errorf("project '%s' not found in indexed tree", expectedProject)
 		}
+	}
+
+	if b.Optimize {
+		b.OptimizeReport = b.optimize(rootNode)
 	}
 
 	b.writeNodeBody(f, rootNode, 0, nil)

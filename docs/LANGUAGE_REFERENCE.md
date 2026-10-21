@@ -427,7 +427,7 @@ same `Name: Type` form instead of a nested `Type = …` object:
 | Command                                              | Purpose                             |
 | ---------------------------------------------------- | ----------------------------------- |
 | `mdt check [-P dir] [-p project] [-j vars.{json,yaml,toml}] [-vVAR=VAL] files…` | validate        |
-| `mdt build [-P dir] [-j vars.{json,yaml,toml}] [-o out] [-vVAR=VAL] files…` | evaluate + merge |
+| `mdt build [-P dir] [-j vars.{json,yaml,toml}] [-o out] [-O] [-vVAR=VAL] files…` | evaluate + merge |
 | `mdt fmt files…`                                     | canonical formatting                |
 | `mdt graph`                                          | signal-flow graph (DOT/HTML)        |
 | `mdt lsp`                                            | language server                     |
@@ -439,6 +439,11 @@ same `Name: Type` form instead of a nested `Type = …` object:
 - `-P <dir>` and a file list both work for `check` and `build`; passing
   a bare directory as an input behaves like `-P <dir>` (the directory is
   scanned recursively for `*.marte` files).
+- `-O`/`--optimize` optimises the generated application: adjacent IOGAMs
+  are merged, identity copy GAMs are dropped, and DataSource/GAM signals
+  are ordered by consumer to reduce signal-copy (memcpy) overhead. The
+  summary is printed to stderr (or stdout with `-o`). See
+  [OPTIMIZATIONS.md](OPTIMIZATIONS.md).
 - `-j vars.<ext>` loads variable overrides from a flat file. The
   format is chosen by the extension: `.json`, `.yaml`/`.yml` or `.toml`:
 

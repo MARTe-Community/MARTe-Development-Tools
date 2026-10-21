@@ -63,6 +63,10 @@ Flags:
                    .toml (format chosen by extension; repeatable)
   -o <output>      Write merged output to file (default: stdout)
   -vVAR=VAL        Override a #var variable value
+  -O, --optimize   Optimise the generated MARTe application:
+                   merge adjacent IOGAMs, drop identity copy GAMs, and
+                   order DataSource/GAM signals by consumer to reduce
+                   signal-copy (memcpy) overhead. A summary is printed.
   -h, --help       Show this help message
 
 Precedence: -vVAR=VAL > earlier -j files > later -j files.
@@ -293,6 +297,7 @@ func runBuild(args []string) {
 	root_path := ""
 	projectFilter := ""
 	varsFiles := []string{}
+	optimize := false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -315,6 +320,8 @@ func runBuild(args []string) {
 			outputFile = args[i+1]
 			logger.SetOutput(os.Stdout)
 			i++
+		} else if arg == "--optimize" || arg == "-O" {
+			optimize = true
 		} else {
 			files = append(files, arg)
 		}
@@ -338,7 +345,7 @@ func runBuild(args []string) {
 
 	files = expandDirectoryInputs(files)
 	if len(files) < 1 {
-		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-o output] [-vVAR=VAL] <input_files...>")
+		logger.Println("Usage: mdt build [-P folder_path] [-p project_name] [-j vars.{json,yaml,toml}] [-o output] [-O] [-vVAR=VAL] <input_files...>")
 		os.Exit(1)
 	}
 
@@ -412,6 +419,7 @@ func runBuild(args []string) {
 
 	// 2. Perform Build
 	b := builder.NewBuilder(filteredFiles, overrides)
+	b.Optimize = optimize
 
 	var out *os.File = os.Stdout
 	if outputFile != "" {
@@ -428,6 +436,13 @@ func runBuild(args []string) {
 	if err != nil {
 		logger.Printf("Build failed: %v\n", err)
 		os.Exit(1)
+	}
+	if optimize {
+		if b.OptimizeReport.Empty() {
+			logger.Println("Optimisations: none applicable")
+		} else {
+			logger.Printf("Optimisations: %s\n", b.OptimizeReport)
+		}
 	}
 }
 
