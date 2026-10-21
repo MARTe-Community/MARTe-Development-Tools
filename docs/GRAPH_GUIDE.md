@@ -24,6 +24,7 @@ mdt graph -port 8080
 
 # Override variables (same syntax as mdt check / build)
 mdt graph -P . -vMY_VAR=42
+mdt graph -P . -j vars.yaml      # overrides from a JSON/YAML/TOML file
 ```
 
 The command starts an HTTP server, prints the URL, and opens it in the default browser. The graph reloads automatically whenever a `.marte` file in the scanned directory changes. Pan and zoom are preserved across reloads.

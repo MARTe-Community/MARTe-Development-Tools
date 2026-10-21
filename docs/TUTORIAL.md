@@ -149,6 +149,13 @@ Merge all files into a single configuration file.
 mdt build -o final_app.marte src/*.marte
 ```
 
+If you keep variable values in a file (JSON, YAML or TOML), pass it with
+`-j` instead of many `-v` flags:
+
+```bash
+mdt build -j vars.yaml -o final_app.marte src/*.marte
+```
+
 Or using Make:
 
 ```bash

@@ -144,6 +144,43 @@ You can override variable values during build (only for `#var`):
 mdt build -vMyVar=200 src/*.marte
 ```
 
+For many values, put them in a file and pass it with `-j`. JSON, YAML and
+TOML are supported; the format is chosen from the extension:
+
+```json
+// vars.json
+{ "MyVar": 200, "HostName": "localhost", "Channels": [1, 2] }
+```
+
+```yaml
+# vars.yaml
+MyVar: 200
+HostName: localhost
+Channels: [1, 2]
+```
+
+```toml
+# vars.toml
+MyVar = 200
+HostName = "localhost"
+Channels = [1, 2]
+```
+
+```bash
+mdt build -j vars.yaml src/*.marte
+mdt check -P . -j vars.toml
+mdt graph -P . -j vars.json
+```
+
+All three forms yield the same MARTe values: numbers and booleans stay
+bare, strings stay quoted, arrays become lists. Files are flat objects
+(no nested tables); `null`, timestamps and nested objects are rejected
+with the file and variable named, and an unknown extension is an error
+rather than a silent no-op.
+
+Precedence: `-vVAR=VAL` beats every file; among repeated `-j` flags the
+later file wins.
+
 ## 5. Comments and Documentation
 
 - Line comments: `// This is a comment`

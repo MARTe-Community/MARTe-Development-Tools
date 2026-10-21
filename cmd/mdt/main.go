@@ -59,9 +59,16 @@ Parse, validate, and merge .marte files into a single output file.
 Flags:
   -P <folder>      Scan folder recursively for .marte files
   -p <project>     Only process files belonging to this project (package prefix)
+  -j <file>        Load variable overrides from a file: .json, .yaml/.yml or
+                   .toml (format chosen by extension; repeatable)
   -o <output>      Write merged output to file (default: stdout)
   -vVAR=VAL        Override a #var variable value
   -h, --help       Show this help message
+
+Precedence: -vVAR=VAL > earlier -j files > later -j files.
+Variable files are flat objects ("Name": value); values keep their type
+(numbers bare, strings quoted, arrays as lists). Nested objects, nulls
+and timestamps are rejected.
 `
 
 const helpCheck = `Usage: mdt check [flags] [files...]
@@ -71,8 +78,15 @@ Validate .marte files and report diagnostics (errors and warnings).
 Flags:
   -P <folder>      Scan folder recursively for .marte files
   -p <project>     Only process files belonging to this project (package prefix)
+  -j <file>        Load variable overrides from a file: .json, .yaml/.yml or
+                   .toml (format chosen by extension; repeatable)
   -vVAR=VAL        Override a #var variable value
   -h, --help       Show this help message
+
+Precedence: -vVAR=VAL > earlier -j files > later -j files.
+Variable files are flat objects ("Name": value); values keep their type
+(numbers bare, strings quoted, arrays as lists). Nested objects, nulls
+and timestamps are rejected.
 `
 
 const helpFmt = `Usage: mdt fmt <files...>
@@ -105,6 +119,8 @@ Flags:
   -P <folder>          Scan folder recursively for .marte files
   -p <project>         Only process files belonging to this project
   -port <PORT>         Port for the interactive web server (default: random)
+  -j <file>            Load variable overrides from a file: .json, .yaml/.yml
+                       or .toml (format chosen by extension; repeatable)
   -vVAR=VAL            Override a #var variable value
   -o <OUTPUT>          Write static graph to file (.dot, .svg, .html, .md)
   --state=STATE        Filter graph to a specific state (for static output)

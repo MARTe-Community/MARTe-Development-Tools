@@ -36,6 +36,7 @@ func runGraph(args []string) {
 	projectFilter := ""
 	port := 0
 	overrides := make(map[string]string)
+	varsFiles := []string{}
 	// Static output flags
 	outputPath := ""
 	stateFilter := ""
@@ -75,6 +76,9 @@ func runGraph(args []string) {
 			simplified = 1
 		case strings.HasPrefix(arg, "--simplified="):
 			fmt.Sscanf(arg[len("--simplified="):], "%d", &simplified)
+		case arg == "-j" && i+1 < len(args):
+			varsFiles = append(varsFiles, args[i+1])
+			i++
 		case strings.HasPrefix(arg, "-v"):
 			pair := arg[2:]
 			parts := strings.SplitN(pair, "=", 2)
@@ -85,6 +89,8 @@ func runGraph(args []string) {
 			explicitFiles = append(explicitFiles, arg)
 		}
 	}
+
+	applyVarsFiles(varsFiles, overrides)
 
 	if rootPath == "" && len(explicitFiles) == 0 {
 		rootPath = "."
