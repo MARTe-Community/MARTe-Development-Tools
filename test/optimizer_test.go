@@ -472,3 +472,203 @@ var quotedName = regexp.MustCompile(`'[^']*'`)
 func normalizeMessage(msg string) string {
 	return quotedName.ReplaceAllString(msg, "''")
 }
+
+// DataSources whose layout is fixed by an external API or hardware keep
+// their signal order: FileReader/Writer, SDN and hardware classes.
+func TestOptimizeSkipsFixedOrderDataSources(t *testing.T) {
+	src := `#package T
+
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    +F = {
+      Class = FileReader
+      Signals = {
+        Z = { Type = uint32 }
+        A = { Type = uint32 }
+        B = { Type = uint32 }
+      }
+    }
+    +S = {
+      Class = SDNSubscriber
+      Signals = {
+        Z = { Type = uint32 }
+        A = { Type = uint32 }
+        B = { Type = uint32 }
+      }
+    }
+    +HW = {
+      Class = NI6259ADC
+      Signals = {
+        Z = { Type = uint32 }
+        A = { Type = uint32 }
+        B = { Type = uint32 }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +Use = {
+      Class = MathExpressionGAM
+      InputSignals = {
+        B = { DataSource = F }
+        A = { DataSource = F }
+      }
+      OutputSignals = { Z = { DataSource = S } }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +Run = {
+      Class = RealTimeState
+      +Th = {
+        Class = RealTimeThread
+        CPUs = 0x1
+        Functions = { Use }
+      }
+    }
+  }
+}
+`
+	out, rep := buildWithOptimize(t, src, true, nil)
+	if rep.ReorderedDataSources != 0 {
+		t.Errorf("reordered %d fixed-layout data source(s): %s", rep.ReorderedDataSources, rep)
+	}
+	if rep.FixedOrderSources != 3 {
+		t.Errorf("FixedOrderSources = %d, want 3: %s", rep.FixedOrderSources, rep)
+	}
+	for _, block := range []string{"+F", "+S", "+HW"} {
+		start := strings.Index(out, block+" = {")
+		if start < 0 {
+			t.Fatalf("%s not found in output:\n%s", block, out)
+		}
+		signals := out[start:]
+		signals = signals[:strings.Index(signals, "\n      }")]
+		posZ := strings.Index(signals, "Z = {")
+		posA := strings.Index(signals, "A = {")
+		posB := strings.Index(signals, "B = {")
+		if !(posZ < posA && posA < posB) {
+			t.Errorf("%s: signal order changed (Z=%d A=%d B=%d):\n%s", block, posZ, posA, posB, signals)
+		}
+	}
+}
+
+// EPICS and GAM data sources are reordered: their storage is internal and
+// signals are addressed by name.
+func TestOptimizeReordersEPICSDataSource(t *testing.T) {
+	src := `#package T
+
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    +E = {
+      Class = EPICSCAInput
+      Signals = {
+        Z = { Type = uint32 }
+        A = { Type = uint32 }
+        B = { Type = uint32 }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +Use = {
+      Class = MathExpressionGAM
+      InputSignals = {
+        B = { DataSource = E }
+        A = { DataSource = E }
+      }
+      OutputSignals = { Z = { DataSource = E } }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +Run = {
+      Class = RealTimeState
+      +Th = {
+        Class = RealTimeThread
+        CPUs = 0x1
+        Functions = { Use }
+      }
+    }
+  }
+}
+`
+	out, rep := buildWithOptimize(t, src, true, nil)
+	if rep.ReorderedDataSources != 1 {
+		t.Fatalf("EPICS data source not reordered: %s\n%s", rep, out)
+	}
+	start := strings.Index(out, "+E = {")
+	signals := out[start:]
+	signals = signals[:strings.Index(signals, "\n      }")]
+	posZ := strings.Index(signals, "Z = {")
+	posA := strings.Index(signals, "A = {")
+	posB := strings.Index(signals, "B = {")
+	if !(posA < posZ && posB < posZ) {
+		t.Errorf("consumed signals not moved before the unconsumed one (A=%d B=%d Z=%d):\n%s", posA, posB, posZ, signals)
+	}
+}
+
+// Copy pairs with intra-GAM dependencies (A->B and B->C written by the same
+// IOGAM) must not be reordered.
+func TestOptimizeKeepsIOGAMCopyWithDependencies(t *testing.T) {
+	src := `#package T
+
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    +E = {
+      Class = EPICSCAInput
+      Signals = {
+        A = { Type = uint32 }
+        B = { Type = uint32 }
+        C = { Type = uint32 }
+      }
+    }
+    +G = {
+      Class = GAMDataSource
+      Signals = {
+        C = { Type = uint32 }
+        A = { Type = uint32 }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +Copy = {
+      Class = IOGAM
+      InputSignals = {
+        A = { DataSource = E }
+        B = { DataSource = G }
+      }
+      OutputSignals = {
+        B = { DataSource = G }
+        C = { DataSource = E }
+      }
+    }
+  }
+  +States = {
+    Class = ReferenceContainer
+    +Run = {
+      Class = RealTimeState
+      +Th = {
+        Class = RealTimeThread
+        CPUs = 0x1
+        Functions = { Copy }
+      }
+    }
+  }
+}
+`
+	out, rep := buildWithOptimize(t, src, true, nil)
+	if rep.ReorderedGAMSignals != 0 {
+		t.Errorf("IOGAM with dependent copies was reordered: %s\n%s", rep, out)
+	}
+	iogam := out[strings.Index(out, "Class = IOGAM"):]
+	if strings.Index(iogam, "A = {") > strings.Index(iogam, "B = {") {
+		t.Errorf("input order changed despite the A->B, B->C dependency:\n%s", iogam)
+	}
+}

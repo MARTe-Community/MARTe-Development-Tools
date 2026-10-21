@@ -17,13 +17,14 @@ type OptimizeReport struct {
 	ReorderedDataSources int // DataSources whose signal order changed
 	ReorderedSignals     int // DataSource signals moved
 	ReorderedGAMSignals  int // GAM signal lists reordered
+	FixedOrderSources    int // DataSources left alone (external layout)
 }
 
 // Empty reports whether the optimizer changed anything.
 func (r OptimizeReport) Empty() bool {
 	return r.MergedIOGAMs == 0 && r.RemovedIdentityGAMs == 0 &&
 		r.ReorderedDataSources == 0 && r.ReorderedSignals == 0 &&
-		r.ReorderedGAMSignals == 0
+		r.ReorderedGAMSignals == 0 && r.FixedOrderSources == 0
 }
 
 func (r OptimizeReport) String() string {
@@ -43,6 +44,9 @@ func (r OptimizeReport) String() string {
 	}
 	if r.ReorderedGAMSignals > 0 {
 		parts = append(parts, fmt.Sprintf("grouped %d GAM signal list(s)", r.ReorderedGAMSignals))
+	}
+	if r.FixedOrderSources > 0 {
+		parts = append(parts, fmt.Sprintf("kept the signal order of %d data source(s) with an external layout", r.FixedOrderSources))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -296,9 +300,42 @@ func reorderContainer(container *index.ProjectNode, less func(a, b string) bool)
 
 // --- transform 3: DataSource signal ordering -----------------------------
 
+// reorderableDataSourceClasses lists DataSource classes whose signal storage
+// is private to the implementation and addressed by name, so declaration
+// order carries no semantics. Everything else — FileReader/FileWriter (fixed
+// binary layout on disk), SDN subscriber/publisher (external payload
+// layout), hardware data sources (channel map defined by the hardware
+// configuration) and unknown classes — keeps its signal order.
+var reorderableDataSourceClasses = map[string]bool{
+	"GAMDataSource":  true,
+	"EPICSCAInput":   true,
+	"EPICSCAOutput":  true,
+	"EPICSCAClient":  true,
+	"EPICSPVAInput":  true,
+	"EPICSPVAOutput": true,
+	"EPICSPVA":       true,
+}
+
+// isReorderableDataSource reports whether the DataSource's Signals block may
+// be reordered. Namespaced classes (`DAN::Foo`) are matched on the last
+// segment.
+func isReorderableDataSource(n *index.ProjectNode) bool {
+	cls := nodeClass(n)
+	if idx := strings.LastIndex(cls, "::"); idx != -1 {
+		cls = cls[idx+2:]
+	}
+	return reorderableDataSourceClasses[cls]
+}
+
 func (o *optimizer) reorderDataSources(root *index.ProjectNode, rep *OptimizeReport) {
 	o.tree.Walk(func(n *index.ProjectNode) {
 		if !o.tree.IsDataSource(n) {
+			return
+		}
+		if !isReorderableDataSource(n) {
+			if signals, ok := n.Children["Signals"]; ok && len(signals.Children) > 1 {
+				rep.FixedOrderSources++
+			}
 			return
 		}
 		signals, ok := n.Children["Signals"]
@@ -340,6 +377,11 @@ func (o *optimizer) groupIOGAMCopies(root *index.ProjectNode, rep *OptimizeRepor
 		}
 		if len(inputs.Children) != len(outputs.Children) || len(inputs.Children) < 2 {
 			// Pairing is positional; only reorder when both sides match.
+			return
+		}
+		if !iogamCopiesIndependent(inputs, outputs) {
+			// A pair writes a signal another pair reads (A->B, B->C):
+			// reordering the copies would change what is read.
 			return
 		}
 		key := func(sig string) (string, string) {
@@ -385,6 +427,39 @@ func (o *optimizer) groupIOGAMCopies(root *index.ProjectNode, rep *OptimizeRepor
 			return
 		}
 	})
+}
+
+// iogamCopiesIndependent reports whether reordering the copy pairs is safe:
+// no pair may write a signal that a different pair reads.
+func iogamCopiesIndependent(inputs, outputs *index.ProjectNode) bool {
+	readBy := map[string]int{}
+	for i, name := range orderedNames(inputs) {
+		sig, ok := inputs.Children[name]
+		if !ok {
+			return false
+		}
+		readBy[signalRefKey(sig)] = i
+	}
+	written := orderedNames(outputs)
+	if len(written) != len(readBy) {
+		return false
+	}
+	for i, name := range written {
+		sig, ok := outputs.Children[name]
+		if !ok {
+			return false
+		}
+		if from, ok := readBy[signalRefKey(sig)]; ok && from != i {
+			return false
+		}
+	}
+	return true
+}
+
+// signalRefKey identifies a signal by DataSource and name (the actual
+// storage location), ignoring declaration details.
+func signalRefKey(sig *index.ProjectNode) string {
+	return index.NormalizeName(signalDataSource(sig)) + "|" + sig.Name
 }
 
 // applyIndexOrder rewrites frag's object definitions so that the new slot

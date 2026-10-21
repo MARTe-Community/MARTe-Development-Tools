@@ -65,8 +65,10 @@ Flags:
   -vVAR=VAL        Override a #var variable value
   -O, --optimize   Optimise the generated MARTe application:
                    merge adjacent IOGAMs, drop identity copy GAMs, and
-                   order DataSource/GAM signals by consumer to reduce
-                   signal-copy (memcpy) overhead. A summary is printed.
+                   order signals by consumer to reduce signal-copy
+                   (memcpy) overhead. Only DataSources whose layout is
+                   internal (GAMDataSource, EPICS) are reordered; file,
+                   SDN and hardware sources keep their order.
   -h, --help       Show this help message
 
 Precedence: -vVAR=VAL > earlier -j files > later -j files.

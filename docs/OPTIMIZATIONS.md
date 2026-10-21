@@ -64,6 +64,21 @@ than one `Functions` list are left alone, as are GAMs with doc comments.
 
 ### 3. DataSource signal ordering (fewer, larger copies)
 
+**Only DataSources whose declaration order is free are reordered** — an
+allowlist, because for most classes the order is dictated by an external
+API or the hardware:
+
+| Reordered | Never reordered |
+|---|---|
+| `GAMDataSource` (internal storage) | `FileReader` / `FileWriter` — signal order is the binary layout on disk |
+| `EPICSCAInput` / `EPICSCAOutput` / `EPICSCAClient` (addressed by PV name) | `SDNSubscriber` / `SDNPublisher` — layout fixed by the SDN payload |
+| `EPICSPVAInput` / `EPICSPVAOutput` / `EPICSPVA` (addressed by PV name) | hardware data sources (`NI6259*`, `NI6368*`, `MDS*`, …) — channel map comes from the hardware configuration |
+|  | any unknown/custom class — conservative default |
+
+Namespaced class names (`DAN::Foo`) are matched on their last segment.
+Sources left alone are counted in the report
+(“kept the signal order of N data source(s) with an external layout”).
+
 Signals inside each DataSource's `Signals` block are ordered by **first
 consumer** in the execution order (states → threads → `Functions`), with
 the signal name as tie-breaker. Signals read by the same GAM end up next
@@ -78,6 +93,10 @@ The permutation is applied to `InputSignals` and `OutputSignals`
 identically, so positional pairing (i-th input → i-th output) is
 preserved. Copies reading the same DataSource then run consecutively.
 
+Because IOGAM copies are ordered operations, grouping is skipped when a
+pair writes a signal that another pair reads (e.g. `A→B` and `B→C` in the
+same IOGAM): moving those copies would change what each pair observes.
+
 ### 5. GAM signal grouping
 
 For non-IOGAM GAMs, `InputSignals`/`OutputSignals` entries are grouped by
@@ -89,8 +108,9 @@ grouping keeps per-DataSource copies contiguous.
 * Optimisation runs **after** validation of the plain configuration; the
   optimizer never changes field values, signal types, sizes or classes.
 * Every transform is guarded; anything ambiguous (multi-fragment GAMs,
-  doc comments, extra fields, partially shared function lists) is left
-  untouched and simply not counted in the report.
+  doc comments, extra fields, partially shared function lists, dependent
+  copy pairs, DataSources with an external layout) is left untouched and
+  simply not counted as an optimisation.
 * The optimized output is itself a valid configuration: `mdt check` on it
   produces the same diagnostics as on the plain output (modulo error
   counts that drop because GAMs were merged).
