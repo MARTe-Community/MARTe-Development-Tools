@@ -3551,8 +3551,16 @@ func respond(id any, result any) {
 	send(msg)
 }
 
+// sendMu serializes whole JSON-RPC frames. Validation runs on its own
+// goroutine while handlers answer requests on the reader goroutine, so
+// unsynchronized writes could interleave inside a frame and corrupt the
+// stream (the client then drops or misreads notifications).
+var sendMu sync.Mutex
+
 func send(msg any) {
 	body, _ := json.Marshal(msg)
+	sendMu.Lock()
+	defer sendMu.Unlock()
 	fmt.Fprintf(Output, "Content-Length: %d\r\n\r\n%s", len(body), body)
 }
 

@@ -4,12 +4,39 @@ import (
 	"bytes"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
 )
+
+// syncBuffer is a bytes.Buffer guarded by a mutex: with asynchronous
+// validation the LSP writes diagnostics from a background goroutine while the
+// test reads the captured stream.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // typeText applies one content change per rune, advancing the cursor the way
 // an editor does after each keystroke (newline moves to the next line).
@@ -183,7 +210,7 @@ func TestIncrementalTypingDoesNotPublishTransientErrors(t *testing.T) {
 
 	lsp.ResetTestServer()
 	lsp.GlobalSchema = schema.LoadFullSchema(".")
-	var out bytes.Buffer
+	var out syncBuffer
 	prevOut := lsp.Output
 	lsp.Output = &out
 	defer func() { lsp.Output = prevOut }()
