@@ -93,6 +93,51 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 	return v
 }
 
+// activateBranchChildren marks the fragments of the node's conditional
+// children that belong to branchID. Signal shorthands live as child nodes
+// (one per signal) rather than as definitions of the container, so the
+// branch activation that walks container fragments would otherwise leave
+// them inactive and validation could not tell which branch's signal is in
+// effect.
+func (v *Validator) activateBranchChildren(node *index.ProjectNode, branchID string) {
+	v.muActive.Lock()
+	defer v.muActive.Unlock()
+	for _, child := range node.Children {
+		for _, f := range child.Fragments {
+			if f.IsConditional && f.BranchID == branchID {
+				v.ActiveFragments[f] = true
+			}
+		}
+	}
+}
+
+// nodeActive reports whether the node has a fragment activated by the
+// current evaluation. Nodes without fragments (synthesized containers) and
+// nodes whose fragments were never classified count as active.
+func (v *Validator) nodeActive(node *index.ProjectNode) bool {
+	if len(node.Fragments) == 0 {
+		return true
+	}
+	v.muActive.Lock()
+	defer v.muActive.Unlock()
+	for _, f := range node.Fragments {
+		if v.ActiveFragments[f] {
+			return true
+		}
+	}
+	return false
+}
+
+// isGAMSignalsContainer reports whether node is the InputSignals/OutputSignals
+// container of a GAM, where inactive conditional children must not be
+// validated (they belong to the other branch of the enclosing if/else).
+func (v *Validator) isGAMSignalsContainer(node *index.ProjectNode) bool {
+	if node.Parent == nil || !v.Tree.IsGAM(node.Parent) {
+		return false
+	}
+	return node.RealName == "InputSignals" || node.RealName == "OutputSignals"
+}
+
 func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
 	if v.visited == nil {
 		v.visited = make(map[*index.ProjectNode]map[parser.Definition]bool)
@@ -223,6 +268,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						}
 					}
 					v.muActive.Unlock()
+					v.activateBranchChildren(node, id+":then")
 					processEval(v.Tree.EvaluateDefinitions(d.Then, ed.Ctx, ed.File), node, false)
 				} else {
 					matched := false
@@ -237,6 +283,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 								}
 							}
 							v.muActive.Unlock()
+							v.activateBranchChildren(node, branchID)
 							processEval(v.Tree.EvaluateDefinitions(ei.Body, ed.Ctx, ed.File), node, false)
 							matched = true
 							break
@@ -250,6 +297,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 							}
 						}
 						v.muActive.Unlock()
+						v.activateBranchChildren(node, id+":else")
 						processEval(v.Tree.EvaluateDefinitions(d.Else, ed.Ctx, ed.File), node, false)
 					}
 				}
@@ -1128,7 +1176,14 @@ func (v *Validator) nodeToMapWithDepth(node *index.ProjectNode, depth int) map[s
 
 	// Children as nested maps?
 	if depth > 0 {
+		signalsContainer := v.isGAMSignalsContainer(node)
 		for name, child := range node.Children {
+			if signalsContainer && !v.nodeActive(child) {
+				// Signal from the `#if` branch that was not selected: it
+				// must not count towards InputSize/OutputSize nor be
+				// type-checked.
+				continue
+			}
 			m[name] = v.nodeToMapWithDepth(child, depth-1)
 		}
 	}
@@ -1388,6 +1443,9 @@ func (v *Validator) validateDataSource(node *index.ProjectNode) {
 
 func (v *Validator) validateGAMSignals(gamNode, signalsContainer *index.ProjectNode, direction string) {
 	for _, signal := range signalsContainer.Children {
+		if !v.nodeActive(signal) {
+			continue // belongs to the `#if` branch that was not selected
+		}
 		v.validateGAMSignal(gamNode, signal, direction)
 	}
 }
@@ -1595,7 +1653,7 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 }
 
 func (v *Validator) getEvaluatedMetadata(node *index.ProjectNode, key string) string {
-	if fields, ok := node.Fields[key]; ok && len(fields) > 0 {
+	if fields, ok := v.getFields(node)[key]; ok && len(fields) > 0 {
 		return v.getFieldValue(fields[len(fields)-1], node)
 	}
 	return node.Metadata[key]
@@ -1834,7 +1892,40 @@ func (v *Validator) updateReferenceTarget(file string, pos parser.Position, targ
 // Helpers
 
 func (v *Validator) getFields(node *index.ProjectNode) map[string][]index.EvaluatedField {
-	return node.Fields
+	v.muActive.Lock()
+	defer v.muActive.Unlock()
+
+	activeDefs := make(map[parser.Definition]bool)
+	allDefs := make(map[parser.Definition]bool)
+	hasActiveFragment := false
+	for _, frag := range node.Fragments {
+		active := v.ActiveFragments[frag]
+		if active {
+			hasActiveFragment = true
+		}
+		for _, d := range frag.Definitions {
+			allDefs[d] = true
+			if active {
+				activeDefs[d] = true
+			}
+		}
+	}
+
+	fields := make(map[string][]index.EvaluatedField, len(node.Fields))
+	for name, defs := range node.Fields {
+		for _, f := range defs {
+			// When the node has an active fragment, values from the other,
+			// unselected fragments of the same node (e.g. the two branches
+			// of a signal shorthand) must not shadow or contradict it.
+			// Fields that cannot be traced to any fragment are synthesized
+			// and always kept.
+			if hasActiveFragment && allDefs[f.Raw] && !activeDefs[f.Raw] {
+				continue
+			}
+			fields[name] = append(fields[name], f)
+		}
+	}
+	return fields
 }
 
 func (v *Validator) getFieldValue(f index.EvaluatedField, ctx *index.ProjectNode) string {
@@ -2140,6 +2231,9 @@ func (v *Validator) getGAMDataSources(gam *index.ProjectNode) []*index.ProjectNo
 			return
 		}
 		for _, sig := range container.Children {
+			if !v.nodeActive(sig) {
+				continue // defined in the `#if` branch that was not selected
+			}
 			fields := v.getFields(sig)
 			if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
 				dsName := v.getFieldValue(dsFields[0], sig)
@@ -2263,6 +2357,9 @@ func (v *Validator) processGAMSignalsForOrdering(gam *index.ProjectNode, contain
 		return
 	}
 	for _, sig := range container.Children {
+		if !v.nodeActive(sig) {
+			continue // defined in the `#if` branch that was not selected
+		}
 		fields := v.getFields(sig)
 		var dsNode *index.ProjectNode
 		var sigName string
