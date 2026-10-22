@@ -800,6 +800,11 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			}
 
 			objName := pt.valToString(d.Name)
+			if objName == "" {
+				// See the note in addObjectFragment: nameless placeholders
+				// for unresolved dynamic names are not indexed.
+				continue
+			}
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -953,7 +958,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.SignalShorthand:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
-			pt.addSignalShorthandChild(node, file, d, subDoc, comments, pragmas, conditional)
+			pt.addSignalShorthandChild(node, file, d, subDoc, comments, pragmas, conditional, "")
 		case *parser.ObjectNode:
 			frag.Definitions = append(frag.Definitions, d)
 			frag.DefinitionDocs[d] = subDoc
@@ -964,6 +969,14 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			}
 
 			objName := pt.valToString(d.Name)
+			if objName == "" {
+				// Dynamic name that does not resolve at index time (e.g.
+				// `@signal.name` inside a foreach). The real children are
+				// materialized per iteration during evaluation; creating a
+				// nameless placeholder here only leaks an empty node into
+				// validation and the unused-signal analysis.
+				continue
+			}
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{
@@ -1078,7 +1091,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 // InputSignals or OutputSignals block. It creates a child ProjectNode for the
 // signal (equivalent to a standard +SignalName = { DataSource = … } block) and
 // populates its metadata and fields from the shorthand's components.
-func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d *parser.SignalShorthand, doc string, comments []parser.Comment, pragmas []parser.Pragma, conditional bool) {
+func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d *parser.SignalShorthand, doc string, comments []parser.Comment, pragmas []parser.Pragma, conditional bool, branchID string) {
 	// When "as <NAME>" is used, the node is named <NAME> and the original
 	// SignalName becomes the Alias field value.
 	nodeName := d.SignalName
@@ -1124,6 +1137,7 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 		Pragmas:        fragPragmas,
 		DefinitionDocs: make(map[parser.Definition]string),
 		IsConditional:  conditional,
+		BranchID:       branchID,
 		Source:         d,
 	}
 	// Propagate pragmas directly to the node (mirrors the ObjectNode child path in
@@ -1220,7 +1234,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 
 		switch d := def.(type) {
 		case *parser.SignalShorthand:
-			pt.addSignalShorthandChild(node, file, d, doc, comments, pragmas, conditional)
+			pt.addSignalShorthandChild(node, file, d, doc, comments, pragmas, conditional, branchID)
 		case *parser.Field:
 			pt.IndexValue(file, d.Value)
 			pt.extractFieldMetadata(node, d)
@@ -1238,6 +1252,11 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			}
 
 			objName := pt.valToString(d.Name)
+			if objName == "" {
+				// See the note in addObjectFragment: nameless placeholders
+				// for unresolved dynamic names are not indexed.
+				continue
+			}
 			norm := NormalizeName(objName)
 			if _, ok := node.Children[norm]; !ok {
 				node.Children[norm] = &ProjectNode{

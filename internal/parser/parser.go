@@ -901,6 +901,13 @@ func (p *Parser) isSubnodeLookahead() bool {
 		return true
 	}
 
+	if t1.Type == TokenVariableReference {
+		// `@expr = { … }` — dynamic object name (e.g. `@signal.name`
+		// inside a foreach). Struct literals cannot have `@` keys, so
+		// this can only be a definition.
+		return true
+	}
+
 	// Directives opening a block (`#foreach`, `#if`, `#template`, …)
 	// make the braces a subnode containing definitions.
 	switch t1.Type {
