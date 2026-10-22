@@ -43,12 +43,16 @@ func TestVarsFileLoadJSON(t *testing.T) {
 	}
 }
 
-func TestVarsFileRejectsNestedObjects(t *testing.T) {
+func TestVarsFileNestedObjectsBecomeStructs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vars.json")
 	os.WriteFile(path, []byte(`{"good": 1, "nested": {"a": 2}}`), 0644)
-	if _, err := varsfile.LoadJSON(path); err == nil {
-		t.Error("expected error for nested object value")
+	vars, err := varsfile.LoadJSON(path)
+	if err != nil {
+		t.Fatalf("LoadJSON: %v", err)
+	}
+	if vars["nested"] != "{ a = 2 }" {
+		t.Errorf("nested = %q, want \"{ a = 2 }\"", vars["nested"])
 	}
 }
 
@@ -391,15 +395,25 @@ func TestWithBlockParseErrors(t *testing.T) {
 func TestVarsFileRejectsNullAndShapes(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"null.json":     `{"x": null}`,
-		"arrayobj.json": `{"x": [{"a": 1}]}`,
-		"bad.json":      `{`,
+		"null.json": `{"x": null}`,
+		"bad.json":  `{`,
 	} {
 		path := filepath.Join(dir, name)
 		os.WriteFile(path, []byte(body), 0644)
 		if _, err := varsfile.LoadJSON(path); err == nil {
 			t.Errorf("%s: expected error", name)
 		}
+	}
+
+	// A list of structs is a valid MARTe literal (list of struct bodies).
+	path := filepath.Join(dir, "arrayobj.json")
+	os.WriteFile(path, []byte(`{"x": [{"a": 1}]}`), 0644)
+	vars, err := varsfile.LoadJSON(path)
+	if err != nil {
+		t.Fatalf("LoadJSON: %v", err)
+	}
+	if vars["x"] != "{ { a = 1 } }" {
+		t.Errorf("x = %q, want \"{ { a = 1 } }\"", vars["x"])
 	}
 }
 

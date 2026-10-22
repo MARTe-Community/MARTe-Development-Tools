@@ -18,8 +18,9 @@
 //	CPUMask = [1, 2]
 //
 // Values are converted to MARTe configuration literals so they can flow
-// through the regular override pipeline. Nested objects are rejected:
-// variables are scalars or lists of scalars.
+// through the regular override pipeline. Nested objects become nested MARTe
+// structs (`{ field = value, … }`), so structured variables can be
+// overridden from a variables file; `null` values are rejected.
 package varsfile
 
 import (
@@ -113,8 +114,9 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// toLiteral converts a decoded JSON value to a MARTe configuration
-// literal (a valid right-hand side of `Name = ...`).
+// toLiteral converts a decoded value to a MARTe configuration literal (a
+// valid right-hand side of `Name = ...`). Nested objects become nested
+// structs so structured variables can be overridden from a file.
 func toLiteral(v any) (string, error) {
 	switch t := v.(type) {
 	case bool:
@@ -137,9 +139,8 @@ func toLiteral(v any) (string, error) {
 	case []any:
 		parts := make([]string, 0, len(t))
 		for i, e := range t {
-			switch e.(type) {
-			case map[string]any, []any:
-				return "", fmt.Errorf("element %d: nested objects/arrays are not supported", i)
+			if e == nil {
+				return "", fmt.Errorf("element %d: null is not a valid value", i)
 			}
 			lit, err := toLiteral(e)
 			if err != nil {
@@ -149,7 +150,23 @@ func toLiteral(v any) (string, error) {
 		}
 		return "{ " + strings.Join(parts, ", ") + " }", nil
 	case map[string]any:
-		return "", fmt.Errorf("nested objects are not supported (variables are scalars or lists of scalars)")
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			if t[k] == nil {
+				return "", fmt.Errorf("field %q: null is not a valid value", k)
+			}
+			lit, err := toLiteral(t[k])
+			if err != nil {
+				return "", err
+			}
+			parts = append(parts, fmt.Sprintf("%s = %s", k, lit))
+		}
+		return "{ " + strings.Join(parts, ", ") + " }", nil
 	case nil:
 		return "", fmt.Errorf("null is not a valid variable value")
 	default:

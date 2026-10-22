@@ -12,6 +12,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/index"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 	"github.com/marte-community/marte-dev-tools/internal/validator"
+	"github.com/marte-community/marte-dev-tools/internal/varsfile"
 )
 
 // buildSugar builds src with the experimental copy/wiring sugar.
@@ -660,5 +661,96 @@ func TestOptimizerKeepsBlockOrder(t *testing.T) {
 	if !(strings.Index(block, "A = {") < strings.Index(block, "B = {") &&
 		strings.Index(block, "B = {") < strings.Index(block, "C = {")) {
 		t.Errorf("optimizer reordered a block IOGAM:\n%s", block)
+	}
+}
+
+// A JSON variables file can override structured variables (nested objects
+// become nested MARTe structs and merge field-by-field).
+func TestJSONFileOverridesStructuredVariable(t *testing.T) {
+	src := `#package T
+
+var hardware: {
+  address: uint32 = 1
+  port: uint32 = 2
+  name: string = "dev"
+}
+
++App = {
+  Class = RealTimeApplication
+  +Data = {
+    Class = ReferenceContainer
+    DefaultDataSource = DDB
+    +TDS = { Class = TimingDataSource }
+    +DDB = {
+      Class = GAMDataSource
+      AllowNoProducers = 1
+      Signals = {
+        A = { Type = uint32 }
+      }
+    }
+  }
+  +Functions = {
+    Class = ReferenceContainer
+    +Use = {
+      Class = FilterGAM
+      InputSignals = {
+        A1 = { DataSource = DDB }
+        A2 = { DataSource = DDB }
+      }
+      OutputSignals = {
+        Z = { DataSource = DDB }
+      }
+      Address = @hardware.address
+      Port = @hardware.port
+      Name = @hardware.name
+    }
+  }
+  Scheduler = { Class = GAMScheduler  TimingDataSource = TDS }
+}
+`
+	dir := t.TempDir()
+	varsPath := filepath.Join(dir, "rf01_cfg.json")
+	varsJSON := `{
+  "hardware": {
+    "address": 4660,
+    "port": 1234,
+    "name": "rf01"
+  }
+}`
+	if err := os.WriteFile(varsPath, []byte(varsJSON), 0o644); err != nil {
+		t.Fatalf("write vars: %v", err)
+	}
+	appPath := filepath.Join(dir, "app.marte")
+	if err := os.WriteFile(appPath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+
+	vars, err := varsfile.Load(varsPath)
+	if err != nil {
+		t.Fatalf("load vars: %v", err)
+	}
+	b := builder.NewBuilder([]string{appPath}, vars)
+	out := filepath.Join(dir, "out.marte")
+	f, err := os.Create(out)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := b.Build(f); err != nil {
+		f.Close()
+		t.Fatalf("build: %v", err)
+	}
+	f.Close()
+	content, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{
+		"Address = 4660",
+		"Port = 1234",
+		"Name = \"rf01\"",
+	} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("structured override %q missing:\n%s", want, content)
+		}
 	}
 }

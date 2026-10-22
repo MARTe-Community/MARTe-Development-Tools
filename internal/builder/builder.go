@@ -503,7 +503,9 @@ func (b *Builder) collectVariables(tree *index.ProjectTree) {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
 					if valStr, ok := b.Overrides[vdef.Name]; ok {
 						if !vdef.IsConst {
-							if shouldAutoQuoteWithDef(valStr, vdef) {
+							// Structured variables (inline type or named type)
+							// take struct literals; never auto-quote them.
+							if vdef.InlineType == nil && !isDeclaredTypeName(vdef.TypeExpr) && shouldAutoQuoteWithDef(valStr, vdef) {
 								valStr = "\"" + valStr + "\""
 							}
 							ovVal := parser.ParseValueOverride(valStr)
@@ -839,6 +841,21 @@ func nameReferencesResolved(v parser.Value, ctx *index.EvaluationContext) bool {
 		return nameReferencesResolved(t.Left, ctx) && nameReferencesResolved(t.Right, ctx)
 	case *parser.UnaryExpression:
 		return nameReferencesResolved(t.Right, ctx)
+	}
+	return true
+}
+
+// isDeclaredTypeName reports whether the type expression names a structured
+// type declared with `type Name { ... }` rather than a scalar.
+func isDeclaredTypeName(typeExpr string) bool {
+	t := strings.TrimSpace(typeExpr)
+	if t == "" || strings.ContainsAny(t, "{}[]|") {
+		return false
+	}
+	switch t {
+	case "uint8", "int8", "char8", "bool", "uint16", "int16", "uint32", "int32",
+		"float32", "uint64", "int64", "float64", "string":
+		return false
 	}
 	return true
 }

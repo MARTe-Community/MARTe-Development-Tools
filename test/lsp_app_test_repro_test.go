@@ -78,7 +78,7 @@ func TestLSPAppTestRepro(t *testing.T) {
 		t.Error("LSP missing unresolved variable error")
 	}
 
-    if t.Failed() {
-        t.Log(output)
-    }
+	if t.Failed() {
+		t.Log(output)
+	}
 }

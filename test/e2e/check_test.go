@@ -209,7 +209,7 @@ func TestCheckWithAutoQuote(t *testing.T) {
 }
 `)
 
-	// Run check with unquoted value. 
+	// Run check with unquoted value.
 	// If auto-quote works, it should not report "Unknown reference John"
 	result := tf.RunCheck("-vNAME=John", "config.marte")
 

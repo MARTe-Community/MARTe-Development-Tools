@@ -61,8 +61,8 @@ func TestProjectFilter(t *testing.T) {
 	cmd = exec.Command(binPath, "build", "-p", "ProjectC", file1, file2)
 	out, err = cmd.CombinedOutput()
 	if err != nil {
-		// It might exit with 0 or error depending on implementation. 
-        // My implementation says "No files found for project 'ProjectC'" and os.Exit(0)
+		// It might exit with 0 or error depending on implementation.
+		// My implementation says "No files found for project 'ProjectC'" and os.Exit(0)
 	}
 	if !strings.Contains(string(out), "No files found for project 'ProjectC'") {
 		t.Errorf("Expected 'No files found' message, got: %s", string(out))

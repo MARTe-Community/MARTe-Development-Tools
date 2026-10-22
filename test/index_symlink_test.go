@@ -37,7 +37,7 @@ func TestScanDirectory_Symlinks(t *testing.T) {
 	// 5. Verify Node exists
 	// The file path in index will likely be the resolved path or the linked path depending on traversal?
 	// filepath.Walk usually ignores symlinks to directories. So it might find nothing.
-	
+
 	// Check if we found "+Node"
 	found := false
 	pt.Walk(func(n *index.ProjectNode) {

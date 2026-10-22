@@ -101,23 +101,34 @@ Path: /tmp/x
 	}
 }
 
-// TOML arrays of mixed scalar kinds and inline tables: arrays of scalars
-// work, inline tables (nested objects) are rejected.
-func TestVarsFileTOMLNestedRejected(t *testing.T) {
-	path := writeVarsFile(t, "vars.toml", "[Group]\nEnabled = true\n")
-	if _, err := varsfile.Load(path); err == nil {
-		t.Fatal("expected error for nested TOML table")
-	} else if !strings.Contains(err.Error(), "nested objects") {
-		t.Errorf("error %q does not mention nested objects", err)
+// Nested tables become nested MARTe structs, so structured variables can be
+// overridden from a variables file.
+func TestVarsFileNestedConversion(t *testing.T) {
+	tomlPath := writeVarsFile(t, "vars.toml", "[Group]\nEnabled = true\n")
+	if vars, err := varsfile.Load(tomlPath); err != nil {
+		t.Fatalf("Load(toml): %v", err)
+	} else if vars["Group"] != "{ Enabled = true }" {
+		t.Errorf("toml nested = %q, want \"{ Enabled = true }\"", vars["Group"])
 	}
-}
 
-func TestVarsFileYAMLNestedRejected(t *testing.T) {
-	path := writeVarsFile(t, "vars.yaml", "Group:\n  Enabled: true\n")
-	if _, err := varsfile.Load(path); err == nil {
-		t.Fatal("expected error for nested YAML mapping")
-	} else if !strings.Contains(err.Error(), "nested objects") {
-		t.Errorf("error %q does not mention nested objects", err)
+	yamlPath := writeVarsFile(t, "vars.yaml", "Group:\n  Enabled: true\n")
+	if vars, err := varsfile.Load(yamlPath); err != nil {
+		t.Fatalf("Load(yaml): %v", err)
+	} else if vars["Group"] != "{ Enabled = true }" {
+		t.Errorf("yaml nested = %q, want \"{ Enabled = true }\"", vars["Group"])
+	}
+
+	// Deeply nested values and nested-in-list keep their structure.
+	path := writeVarsFile(t, "vars2.yaml", "Outer:\n  Inner:\n    X: 1\nList:\n  - A\n  - B\n")
+	vars, err := varsfile.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if vars["Outer"] != "{ Inner = { X = 1 } }" {
+		t.Errorf("Outer = %q", vars["Outer"])
+	}
+	if vars["List"] != "{ \"A\", \"B\" }" {
+		t.Errorf("List = %q", vars["List"])
 	}
 }
 

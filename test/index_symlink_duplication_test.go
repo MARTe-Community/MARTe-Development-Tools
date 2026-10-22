@@ -27,14 +27,14 @@ func TestScanDirectory_SymlinkDuplication(t *testing.T) {
 	// The user said "linked folder project".
 	// Case A: root/A/file.marte AND root/B -> root/A.
 	// Scanner visits root/A/file.marte AND root/B/file.marte.
-	
+
 	dirA := filepath.Join(rootDir, "A")
 	os.Mkdir(dirA, 0755)
 	fileA := filepath.Join(dirA, "test.marte")
 	os.WriteFile(fileA, []byte(`#package MyPackage
 	MyField = 10`), 0644)
 
-    // Symlink to FILE
+	// Symlink to FILE
 	linkFile := filepath.Join(rootDir, "link.marte")
 	err = os.Symlink(fileA, linkFile)
 	if err != nil {
@@ -58,9 +58,9 @@ func TestScanDirectory_SymlinkDuplication(t *testing.T) {
 			t.Errorf("Unexpected duplicate error for symlinked file: %s", d.Message)
 		}
 	}
-	
+
 	// Verify we didn't index the same file twice
-	
+
 	if len(pt.IsolatedFiles) != 1 {
 		t.Errorf("Expected 1 isolated files (deduplicated), got %d", len(pt.IsolatedFiles))
 	}

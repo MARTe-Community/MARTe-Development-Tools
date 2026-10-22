@@ -27,7 +27,7 @@ func TestLSPValidationSchema(t *testing.T) {
 }
 `
 	uri := "file://validation.marte"
-	
+
 	// Open document (triggers validation)
 	params := lsp.DidOpenTextDocumentParams{
 		TextDocument: lsp.TextDocumentItem{
@@ -35,18 +35,18 @@ func TestLSPValidationSchema(t *testing.T) {
 			Text: content,
 		},
 	}
-	
+
 	lsp.HandleDidOpen(params)
-	
+
 	// Check output for diagnostics
 	output := buf.String()
-	
+
 	// Parse JSON-RPC notifications
 	lines := strings.Split(output, "Content-Length:")
 	foundUnknownClass := false
 	foundInvalidType := false
 	foundUnresolvedRef := false
-	
+
 	for _, part := range lines {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -58,7 +58,7 @@ func TestLSPValidationSchema(t *testing.T) {
 			continue
 		}
 		jsonStr := part[idx:]
-		
+
 		var msg lsp.JsonRpcMessage
 		if err := json.Unmarshal([]byte(jsonStr), &msg); err == nil {
 			if msg.Method == "textDocument/publishDiagnostics" {
@@ -90,7 +90,7 @@ func TestLSPValidationSchema(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !foundUnknownClass {
 		t.Error("Did not find diagnostic for 'Unknown Class'")
 	}

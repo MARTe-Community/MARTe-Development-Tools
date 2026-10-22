@@ -74,8 +74,9 @@ Flags:
 
 Precedence: -vVAR=VAL > earlier -j files > later -j files.
 Variable files are flat objects ("Name": value); values keep their type
-(numbers bare, strings quoted, arrays as lists). Nested objects, nulls
-and timestamps are rejected.
+(numbers bare, strings quoted, arrays as lists). Nested objects become
+nested structs, so structured variables can be overridden; nulls,
+timestamps and unknown extensions are rejected.
 `
 
 const helpCheck = `Usage: mdt check [flags] [files...]
@@ -92,8 +93,9 @@ Flags:
 
 Precedence: -vVAR=VAL > earlier -j files > later -j files.
 Variable files are flat objects ("Name": value); values keep their type
-(numbers bare, strings quoted, arrays as lists). Nested objects, nulls
-and timestamps are rejected.
+(numbers bare, strings quoted, arrays as lists). Nested objects become
+nested structs, so structured variables can be overridden; nulls,
+timestamps and unknown extensions are rejected.
 `
 
 const helpRefactor = `Usage: mdt refactor [flags] [files...]

@@ -31,7 +31,7 @@ func TestIncrementalCorrectness(t *testing.T) {
 
 	// Edit 2: Delete newline (merge lines)
 	// "1A2345\n67890" -> "1A234567890"
-	// \n is at index 6. 
+	// \n is at index 6.
 	// 0:6 points to \n? "1A2345" length is 6.
 	// So 0:6 is AFTER '5', at '\n'.
 	// 1:0 is AFTER '\n', at '6'.

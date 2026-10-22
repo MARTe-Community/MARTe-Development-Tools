@@ -474,10 +474,11 @@ same `Name: Type` form instead of a nested `Type = …` object:
   ```
 
   All three forms produce the same MARTe literals: booleans and numbers
-  stay bare, strings stay quoted, arrays become lists. Later `-j` files
-  override earlier ones and `-vVAR=value` overrides everything. Nested
-  objects (including TOML tables and YAML mappings), nulls, and timestamps
-  are rejected; unknown extensions are an error rather than a silent no-op.
+  stay bare, strings stay quoted, arrays become lists, and nested objects
+  become nested structs — so structured variables can be overridden from a
+  file. Later `-j` files override earlier ones and `-vVAR=value` overrides
+  everything. `null`, timestamps, and unknown extensions are rejected
+  rather than silently ignored.
 
 ## 12a. Copy and fan-out sugar (experimental)
 

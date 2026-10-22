@@ -62,10 +62,10 @@ func TestLSPReferencesRepro(t *testing.T) {
 	for _, r := range refs {
 		t.Logf("  Ref: %d:%d", r.Range.Start.Line, r.Range.Start.Character)
 	}
-	
+
 	foundUsage1 := false // in MyGAM
 	foundUsage2 := false // in MyGAM2 (string literal)
-	
+
 	for _, r := range refs {
 		// usage in MyGAM is at line 13 (0-indexed), col 25
 		if r.Range.Start.Line == 13 {
@@ -96,10 +96,10 @@ func TestLSPReferencesRepro(t *testing.T) {
 	for _, r := range refsSig {
 		t.Logf("  Ref: %d:%d", r.Range.Start.Line, r.Range.Start.Character)
 	}
-	
+
 	foundSigUsage1 := false // in MyGAM
 	foundSigUsage2 := false // in MyGAM2 (Alias)
-	
+
 	for _, r := range refsSig {
 		if r.Range.Start.Line == 12 { // Sig1 = { ... } in MyGAM
 			foundSigUsage1 = true

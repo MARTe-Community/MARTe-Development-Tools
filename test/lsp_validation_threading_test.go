@@ -62,7 +62,7 @@ func TestLSPValidationThreading(t *testing.T) {
 
 	// Check output
 	output := buf.String()
-	
+
 	// We look for publishDiagnostics notification
 	if !strings.Contains(output, "textDocument/publishDiagnostics") {
 		t.Fatal("Did not receive publishDiagnostics")

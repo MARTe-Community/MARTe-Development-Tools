@@ -16,10 +16,10 @@ func TestLSPIncrementalSync(t *testing.T) {
 	// Documents reset via ResetTestServer
 	var buf bytes.Buffer
 	lsp.Output = &buf
-	
+
 	content := "Line1\nLine2\nLine3"
 	uri := "file://inc.marte"
-	lsp.GetTestDocuments()[uri] = content 
+	lsp.GetTestDocuments()[uri] = content
 
 	// Replace "Line2" (Line 1, 0-5) with "Modified"
 	change := lsp.TextDocumentContentChangeEvent{
@@ -29,19 +29,19 @@ func TestLSPIncrementalSync(t *testing.T) {
 		},
 		Text: "Modified",
 	}
-	
+
 	params := lsp.DidChangeTextDocumentParams{
-		TextDocument: lsp.VersionedTextDocumentIdentifier{URI: uri, Version: 2},
+		TextDocument:   lsp.VersionedTextDocumentIdentifier{URI: uri, Version: 2},
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{change},
 	}
-	
-lsp.HandleDidChange(params)
-	
+
+	lsp.HandleDidChange(params)
+
 	expected := "Line1\nModified\nLine3"
 	if lsp.GetTestDocuments()[uri] != expected {
 		t.Errorf("Incremental update failed. Got:\n%q\nWant:\n%q", lsp.GetTestDocuments()[uri], expected)
 	}
-	
+
 	// Insert at end
 	change2 := lsp.TextDocumentContentChangeEvent{
 		Range: &lsp.Range{
@@ -51,11 +51,11 @@ lsp.HandleDidChange(params)
 		Text: "\nLine4",
 	}
 	params2 := lsp.DidChangeTextDocumentParams{
-		TextDocument: lsp.VersionedTextDocumentIdentifier{URI: uri, Version: 3},
+		TextDocument:   lsp.VersionedTextDocumentIdentifier{URI: uri, Version: 3},
 		ContentChanges: []lsp.TextDocumentContentChangeEvent{change2},
 	}
 	lsp.HandleDidChange(params2)
-	
+
 	expected2 := "Line1\nModified\nLine3\nLine4"
 	if lsp.GetTestDocuments()[uri] != expected2 {
 		t.Errorf("Incremental insert failed. Got:\n%q\nWant:\n%q", lsp.GetTestDocuments()[uri], expected2)
@@ -65,18 +65,18 @@ lsp.HandleDidChange(params)
 func TestLSPLifecycle(t *testing.T) {
 	var buf bytes.Buffer
 	lsp.Output = &buf
-	
+
 	// Shutdown
 	msgShutdown := &lsp.JsonRpcMessage{
 		Method: "shutdown",
-		ID: 1,
+		ID:     1,
 	}
 	lsp.HandleMessage(msgShutdown)
-	
+
 	if !strings.Contains(buf.String(), `"result":null`) {
 		t.Error("Shutdown response incorrect")
 	}
-	
+
 	// Exit
 	if os.Getenv("TEST_LSP_EXIT") == "1" {
 		msgExit := &lsp.JsonRpcMessage{Method: "exit"}
@@ -98,11 +98,11 @@ func TestLSPMalformedParams(t *testing.T) {
 	// Malformed Hover
 	msg := &lsp.JsonRpcMessage{
 		Method: "textDocument/hover",
-		ID: 2,
+		ID:     2,
 		Params: json.RawMessage(`{invalid`),
 	}
 	lsp.HandleMessage(msg)
-	
+
 	output := buf.String()
 	// Should respond with nil result
 	if !strings.Contains(output, `"result":null`) {
@@ -154,7 +154,7 @@ func TestLSPDispatch(t *testing.T) {
 func TestLSPVariableDefinition(t *testing.T) {
 	lsp.ResetTestServer()
 	// Documents reset via ResetTestServer
-	
+
 	content := `
 #var MyVar: int = 10
 +Obj = {
@@ -163,27 +163,27 @@ func TestLSPVariableDefinition(t *testing.T) {
 `
 	uri := "file://var_def.marte"
 	lsp.GetTestDocuments()[uri] = content
-	
+
 	p := parser.NewParser(content)
 	cfg, _ := p.Parse()
 	lsp.GetTestTree().AddFile("var_def.marte", cfg)
 	lsp.GetTestTree().ResolveReferences(nil)
-	
+
 	params := lsp.DefinitionParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 		Position:     lsp.Position{Line: 3, Character: 13},
 	}
-	
+
 	res := lsp.HandleDefinition(params)
 	if res == nil {
 		t.Fatal("Definition not found for variable")
 	}
-	
+
 	locs, ok := res.([]lsp.Location)
 	if !ok || len(locs) == 0 {
 		t.Fatal("Expected location list")
 	}
-	
+
 	if locs[0].Range.Start.Line != 1 {
 		t.Errorf("Expected line 1, got %d", locs[0].Range.Start.Line)
 	}

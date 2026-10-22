@@ -33,7 +33,7 @@ func TestExpressionParsing(t *testing.T) {
 
 	outF, _ := os.CreateTemp("", "out.marte")
 	defer os.Remove(outF.Name())
-	
+
 	err := b.Build(outF)
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)
@@ -47,12 +47,12 @@ func TestExpressionParsing(t *testing.T) {
 	if !strings.Contains(outStr, "Expr1 = 22") {
 		t.Errorf("Expr1 failed. Got:\n%s", outStr)
 	}
-	
+
 	// Expr2: (10 + 2) * 2 = 24
 	if !strings.Contains(outStr, "Expr2 = 24") {
 		t.Errorf("Expr2 failed. Got:\n%s", outStr)
 	}
-	
+
 	// Expr3: 10 - 2 = 8
 	if !strings.Contains(outStr, "Expr3 = 8") {
 		t.Errorf("Expr3 failed. Got:\n%s", outStr)

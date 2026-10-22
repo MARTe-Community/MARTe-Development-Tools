@@ -70,7 +70,7 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
 }
 `
 	uri := "file://app_test.marte"
-	
+
 	// Simulate DidOpen
 	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
 		TextDocument: lsp.TextDocumentItem{
@@ -104,7 +104,7 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
 	if !strings.Contains(output, "Implicitly Defined Signal: 'B'") {
 		t.Error("Missing diagnostic for implicit signal 'B'")
 	}
-	
+
 	// Check Unused GAM Warning (FnA is used in Th1, so should NOT be unused)
 	// Wait, is FnA used?
 	// Functions = { FnA }.
@@ -119,11 +119,11 @@ func TestLSPDiagnosticsAppTest(t *testing.T) {
 	// Then `ref.Target` is nil.
 	// So `FnA` is NOT referenced in Index.
 	// So `CheckUnused` reports "Unused GAM".
-	
+
 	// BUT Validator uses `resolveReference` (FindNode) to verify Functions array.
 	// So Validator knows it is valid.
 	// But `CheckUnused` relies on Index References.
-	
+
 	// If Index doesn't resolve it, `CheckUnused` warns.
 	// Does output contain "Unused GAM: +FnA"?
 	// If so, `resolveScopedName` failed.

@@ -16,7 +16,7 @@ $T1 = { Class = C }
 	uri := "file:///type.marte"
 	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
 		TextDocument: lsp.TextDocumentItem{
-			URI: uri,
+			URI:  uri,
 			Text: content,
 		},
 	})
@@ -96,31 +96,31 @@ func TestLSPCallHierarchy(t *testing.T) {
 	uri := "file:///flow.marte"
 	lsp.HandleDidOpen(lsp.DidOpenTextDocumentParams{
 		TextDocument: lsp.TextDocumentItem{
-			URI: uri,
+			URI:  uri,
 			Text: content,
 		},
 	})
-	
+
 	// Prepare on +GAM2 (Line 10, Col 2) -> Position{Line: 9, Character: 1}
 	prepareParams := lsp.CallHierarchyPrepareParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 		Position:     lsp.Position{Line: 9, Character: 1},
 	}
-	
+
 	items := lsp.HandlePrepareCallHierarchy(prepareParams)
 	if len(items) == 0 {
 		t.Fatal("PrepareCallHierarchy failed")
 	}
-	
+
 	item := items[0]
 	if item.Name != "+GAM2" {
 		t.Errorf("Expected +GAM2, got %s", item.Name)
 	}
-	
+
 	// Incoming calls to GAM2 (should be GAM1 via S1)
 	inParams := lsp.CallHierarchyIncomingCallsParams{Item: item}
 	inCalls := lsp.HandleIncomingCalls(inParams)
-	
+
 	found := false
 	for _, c := range inCalls {
 		if c.From.Name == "+GAM1" {

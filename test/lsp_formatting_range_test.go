@@ -20,7 +20,7 @@ func TestLSPOffsetAtMultiByte(t *testing.T) {
 		content string
 	}{
 		{name: "ASCII", content: "hello world"},
-		{name: "2-byte UTF-8", content: "a\u00f1o"}, // año
+		{name: "2-byte UTF-8", content: "a\u00f1o"},     // año
 		{name: "4-byte emoji", content: "a\U0001F44Db"}, // a👍b
 		{name: "mixed multi-byte", content: "caf\u00e9 r\u00e9sum\u00e9"},
 	}

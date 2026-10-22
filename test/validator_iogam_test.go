@@ -293,7 +293,7 @@ func TestValidator_IOGAM(t *testing.T) {
 				t.Fatalf("Parse failed: %v", err)
 			}
 			pt.AddFile("test.marte", cfg)
-			
+
 			pt.ResolveReferences(nil)
 			pt.ResolveFields(nil)
 

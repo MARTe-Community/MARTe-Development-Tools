@@ -31,10 +31,10 @@ func TestSchemaMetaValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	pt.AddFile("valid.marte", cfg)
-	
-	v := validator.NewValidator(pt, "", nil) 
+
+	v := validator.NewValidator(pt, "", nil)
 	v.ValidateProject(context.Background())
-	
+
 	if len(v.Diagnostics) > 0 {
 		for _, d := range v.Diagnostics {
 			t.Logf("Diag: %s", d.Message)
@@ -59,10 +59,10 @@ func TestSchemaMetaValidation(t *testing.T) {
 	p2 := parser.NewParser(invalidContent)
 	cfg2, _ := p2.Parse()
 	pt2.AddFile("invalid.marte", cfg2)
-	
+
 	v2 := validator.NewValidator(pt2, "", nil)
 	v2.ValidateProject(context.Background())
-	
+
 	foundError := false
 	for _, d := range v2.Diagnostics {
 		// CUE validation error message
@@ -70,7 +70,7 @@ func TestSchemaMetaValidation(t *testing.T) {
 			foundError = true
 		}
 	}
-	
+
 	if !foundError {
 		t.Error("Expected error for invalid #meta type, got nothing")
 		for _, d := range v2.Diagnostics {
