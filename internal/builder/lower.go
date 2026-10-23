@@ -418,6 +418,17 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 		for _, p := range b.members {
 			ps, err := l.resolveGroup(p.group, &rep.Redundant)
 			if err != nil {
+				// Qualify with the file: copy items carry source positions,
+				// and an unqualified "line:col" is impossible to locate in a
+				// multi-file project (it looks like it belongs to whatever
+				// file the user has open).
+				file := p.file
+				if file == "" && p.frag != nil {
+					file = p.frag.File
+				}
+				if file != "" {
+					return fmt.Errorf("%s:%d:%d: %v", file, p.group.Position.Line, p.group.Position.Column, err)
+				}
 				return fmt.Errorf("%d:%d: %v", p.group.Position.Line, p.group.Position.Column, err)
 			}
 			pairs = append(pairs, ps...)

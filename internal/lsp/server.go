@@ -1193,7 +1193,8 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	} else {
 		// The sugar itself is broken: report the position and validate the
 		// original tree so unrelated diagnostics still appear.
-		fileDiags[uriToPath(uri)] = append(fileDiags[uriToPath(uri)], sugarDiagnostic(err))
+		sugarPath, diag := sugarDiagnosticFor(err, uriToPath(uri))
+		fileDiags[sugarPath] = append(fileDiags[sugarPath], diag)
 	}
 
 	// Semantic Validation
@@ -4424,17 +4425,25 @@ func HandleWorkspaceSymbol(params WorkspaceSymbolParams) []SymbolInformation {
 
 // sugarDiagnostic turns a lowering error ("line:col: message") into a
 // diagnostic on the edited file.
-func sugarDiagnostic(err error) LSPDiagnostic {
+// sugarDiagnosticFor maps a copy/wiring lowering error to the file it came
+// from. Errors are "file:line:col: message" (or "line:col: message"); the
+// file part must not be attributed to whichever document happens to be open.
+func sugarDiagnosticFor(err error, defaultFile string) (string, LSPDiagnostic) {
+	file := defaultFile
 	line, col := 1, 1
 	msg := err.Error()
-	var l, c int
-	if n, _ := fmt.Sscanf(msg, "%d:%d:", &l, &c); n == 2 {
-		line, col = l, c
-		if idx := strings.Index(msg, ": "); idx >= 0 {
-			msg = msg[idx+2:]
-		}
+
+	if m := lowerFilePosRe.FindStringSubmatch(msg); m != nil {
+		file = m[1]
+		line, _ = strconv.Atoi(m[2])
+		col, _ = strconv.Atoi(m[3])
+		msg = m[4]
+	} else if m := lowerPosRe.FindStringSubmatch(msg); m != nil {
+		line, _ = strconv.Atoi(m[1])
+		col, _ = strconv.Atoi(m[2])
+		msg = m[3]
 	}
-	return LSPDiagnostic{
+	return file, LSPDiagnostic{
 		Range: Range{
 			Start: Position{Line: line - 1, Character: col - 1},
 			End:   Position{Line: line - 1, Character: col},
@@ -4444,3 +4453,8 @@ func sugarDiagnostic(err error) LSPDiagnostic {
 		Source:   "mdt-sugar",
 	}
 }
+
+var (
+	lowerFilePosRe = regexp.MustCompile(`^(.+):(\d+):(\d+):\s*(.*)$`)
+	lowerPosRe     = regexp.MustCompile(`^(\d+):(\d+):\s*(.*)$`)
+)

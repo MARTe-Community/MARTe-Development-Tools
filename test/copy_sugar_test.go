@@ -645,6 +645,11 @@ func TestCopyGroupUnknownSize(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "cannot determine the byte size") {
 		t.Fatalf("expected an unknown-size error, got %v", err)
 	}
+	// The position must be qualified with its source file: a bare
+	// "line:col" is unattributable in a multi-file project.
+	if !strings.Contains(err.Error(), ".marte:") {
+		t.Errorf("copy error does not name its file: %v", err)
+	}
 }
 
 // `-O` must not reorder the entries of a block IOGAM (the memory mapping is
