@@ -17,6 +17,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/loader"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/lsp/cache"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
@@ -620,7 +621,7 @@ func HandleMessage(msg *JsonRpcMessage) {
 				activateSnapshot(view, snap)
 				logger.Debugf("Resolve done")
 				view.SetSnapshot(snap)
-				GlobalSchema = schema.LoadFullSchema(root)
+				GlobalSchema = schema.LoadFullSchema(loader.ProjectRootFor(snap.Tree().Files(), root))
 				done()
 				logger.Debugf("Schema done")
 			}
@@ -760,15 +761,11 @@ func activateSnapshotClone(ctx context.Context, snap *cache.Snapshot) *cache.Sna
 	if snap == nil || snap.Tree() == nil {
 		return nil
 	}
-	root := ""
-	if view := snap.View(); view != nil {
-		root = view.Root()
-	}
 	clone := snap.Clone(ctx)
 	if clone == nil {
 		return nil
 	}
-	v := validator.NewValidator(clone.Tree(), root, nil)
+	v := validator.NewValidator(clone.Tree(), snapshotProjectRoot(clone), nil)
 	v.MissingFilesAreWarnings = true
 	v.Activate(ctx)
 	if ctx.Err() != nil {
@@ -777,11 +774,29 @@ func activateSnapshotClone(ctx context.Context, snap *cache.Snapshot) *cache.Sna
 	return clone
 }
 
+// snapshotProjectRoot returns the project home (nearest marte_project.json
+// above the indexed sources), falling back to the view root. It anchors the
+// .marte_schema.cue cascade, so opening a repository whose configs live in a
+// nested project still loads that project's schema.
+func snapshotProjectRoot(snap *cache.Snapshot) string {
+	if snap == nil {
+		return ""
+	}
+	root := ""
+	if v := snap.View(); v != nil {
+		root = v.Root()
+	}
+	if snap.Tree() == nil {
+		return root
+	}
+	return loader.ProjectRootFor(snap.Tree().Files(), root)
+}
+
 func activateSnapshot(view *cache.View, snap *cache.Snapshot) {
 	if view == nil || snap == nil || snap.Tree() == nil {
 		return
 	}
-	v := validator.NewValidator(snap.Tree(), view.Root(), nil)
+	v := validator.NewValidator(snap.Tree(), snapshotProjectRoot(snap), nil)
 	v.MissingFilesAreWarnings = true
 	v.Activate(context.Background())
 }
@@ -1182,7 +1197,7 @@ func runValidation(ctx context.Context, uri string, snap *cache.Snapshot) {
 	}
 
 	// Semantic Validation
-	v := validator.NewValidator(validationTree, snap.View().Root(), nil)
+	v := validator.NewValidator(validationTree, snapshotProjectRoot(snap), nil)
 	v.MissingFilesAreWarnings = true
 	v.ValidateProject(ctx)
 

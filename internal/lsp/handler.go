@@ -15,6 +15,7 @@ import (
 	golsp "github.com/owenrumney/go-lsp/lsp"
 	golspserver "github.com/owenrumney/go-lsp/server"
 
+	"github.com/marte-community/marte-dev-tools/internal/loader"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/lsp/cache"
 	"github.com/marte-community/marte-dev-tools/internal/schema"
@@ -96,7 +97,7 @@ func (h *marteHandler) Initialize(ctx context.Context, params *golsp.InitializeP
 		snap.Tree().ResolveReferences(nil)
 		snap.Tree().ResolveFields(nil)
 		view.SetSnapshot(snap)
-		GlobalSchema = schema.LoadFullSchema(root)
+		GlobalSchema = schema.LoadFullSchema(loader.ProjectRootFor(snap.Tree().Files(), root))
 		done()
 		logger.Debugf("Workspace ready")
 

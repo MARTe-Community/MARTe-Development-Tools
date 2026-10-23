@@ -89,6 +89,17 @@ func maxScanEntries() int {
 	return defaultMaxScanEntries
 }
 
+// Files returns the paths of the files currently indexed in the tree.
+func (pt *ProjectTree) Files() []string {
+	pt.mu.RLock()
+	defer pt.mu.RUnlock()
+	out := make([]string, 0, len(pt.knownFiles))
+	for f := range pt.knownFiles {
+		out = append(out, f)
+	}
+	return out
+}
+
 // HasFile reports whether file already contributes definitions to the tree.
 func (pt *ProjectTree) HasFile(file string) bool {
 	_, ok := pt.knownFiles[file]

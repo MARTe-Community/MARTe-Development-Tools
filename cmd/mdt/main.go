@@ -12,6 +12,7 @@ import (
 	"github.com/marte-community/marte-dev-tools/internal/builder"
 	"github.com/marte-community/marte-dev-tools/internal/formatter"
 	"github.com/marte-community/marte-dev-tools/internal/index"
+	"github.com/marte-community/marte-dev-tools/internal/loader"
 	"github.com/marte-community/marte-dev-tools/internal/logger"
 	"github.com/marte-community/marte-dev-tools/internal/lsp"
 	"github.com/marte-community/marte-dev-tools/internal/parser"
@@ -430,6 +431,7 @@ func runBuild(args []string) {
 	if projectRoot == "" {
 		projectRoot = "."
 	}
+	projectRoot = loader.ProjectRootFor(filteredFiles, projectRoot)
 	if _, err := builder.LowerWithOverrides(tree, overrides); err != nil {
 		logger.Printf("Copy/wiring error: %v\n", err)
 		os.Exit(1)
@@ -590,6 +592,7 @@ func runCheck(args []string) {
 	if projectRoot == "" {
 		projectRoot = "."
 	}
+	projectRoot = loader.ProjectRootFor(files, projectRoot)
 	if _, err := builder.LowerWithOverrides(tree, overrides); err != nil {
 		logger.Printf("Copy/wiring error: %v\n", err)
 		os.Exit(1)

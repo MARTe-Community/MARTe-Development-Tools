@@ -140,6 +140,30 @@ func fileExists(path string) bool {
 }
 
 // entryExists reports whether path exists (file or directory).
+// ProjectRootFor returns the project home for the given source files: the
+// nearest ancestor directory containing marte_project.json, else fallback.
+// The project home anchors the .marte_schema.cue cascade, so sources kept in
+// a subdirectory (src/, cfg/, ...) still load the project schema.
+func ProjectRootFor(files []string, fallback string) string {
+	for _, f := range files {
+		dir := filepath.Dir(f)
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		for {
+			if entryExists(filepath.Join(dir, projectMarker)) {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return fallback
+}
+
 func entryExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

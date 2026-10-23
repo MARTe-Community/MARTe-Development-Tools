@@ -458,6 +458,9 @@ import "list"
 		#meta: MetaType:      "datasource"
 		...
 	}
+	AbsoluteTimeGeneratorGAM: {
+		...
+	}
 }
 
 #Meta: {
