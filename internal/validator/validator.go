@@ -94,6 +94,11 @@ type Validator struct {
 	// visited tracks (child node -> source definition) pairs already
 	// expanded by activation, keeping repeated passes idempotent.
 	visited map[*index.ProjectNode]map[parser.Definition]bool
+	// baseCtx is the outermost evaluation context of the current activation.
+	// Unscoped (index-time) fragments belong to it; they must be evaluated
+	// with it, not with whatever loop/with context a traversal happens to
+	// carry (that both loses their fields and stamps wrong scopes).
+	baseCtx *index.EvaluationContext
 	// fileFragments indexes every fragment by file after activation, so
 	// position-activity queries don't walk the whole tree per reference
 	// (that was quadratic on projects with many references).
@@ -618,6 +623,7 @@ func (v *Validator) Activate(ctx context.Context) {
 	if v.Tree == nil {
 		return
 	}
+	v.baseCtx = &index.EvaluationContext{Variables: v.Variables, Tree: v.Tree}
 	// Initial full resolution (before activation pass, as ActiveFragments is empty)
 	v.Tree.ResolveFields(nil)
 	v.Tree.ResolveReferences(nil)
@@ -686,6 +692,7 @@ func (v *Validator) Activate(ctx context.Context) {
 			})
 	}
 	v.buildFileFragments()
+	v.reportWithBindingTypos()
 	v.reportDeferredWiths()
 	v.evaluateAsserts()
 }
@@ -714,6 +721,87 @@ func (v *Validator) buildFileFragments() {
 		walk(iso)
 	}
 	v.fileFragments = frags
+}
+
+// reportWithBindingTypos warns when a block body refers to a variable that
+// is one or two edits away from the name the block binds (e.g.
+// `as siganls` + `@signals`). Such a typo makes the body silently expand to
+// nothing and only shows up later as missing generated objects.
+func (v *Validator) reportWithBindingTypos() {
+	var walk func(n *index.ProjectNode)
+	walk = func(n *index.ProjectNode) {
+		if n == nil {
+			return
+		}
+		for _, frag := range n.Fragments {
+			for _, def := range frag.Definitions {
+				wb, ok := def.(*parser.WithBlock)
+				if !ok || wb.BindName == "" {
+					continue
+				}
+				for _, ref := range v.Tree.FileReferences[frag.File] {
+					if !ref.IsVariable {
+						continue
+					}
+					if ref.Position.Line < wb.Position.Line || ref.Position.Line > wb.EndPosition.Line {
+						continue
+					}
+					name := strings.TrimPrefix(strings.TrimPrefix(ref.Name, "@"), "$")
+					if name == wb.BindName || len(name) != len(wb.BindName) {
+						continue
+					}
+					if name[0] != wb.BindName[0] || name[len(name)-1] != wb.BindName[len(wb.BindName)-1] {
+						continue
+					}
+					if editDistance(name, wb.BindName) > 2 {
+						continue
+					}
+					v.report(n, "with_binding_typo", LevelWarning,
+						fmt.Sprintf("with %s(...) as %s: '@%s' looks like the binding '%s' (did you mean '@%s'?)", wb.Format, wb.BindName, name, wb.BindName, wb.BindName),
+						ref.Position, ref.File)
+				}
+			}
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	if v.Tree.Root != nil {
+		walk(v.Tree.Root)
+	}
+	for _, iso := range v.Tree.IsolatedFiles {
+		walk(iso)
+	}
+}
+
+// editDistance is the Levenshtein distance between two short names.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			del := prev[j] + 1
+			ins := cur[j-1] + 1
+			sub := prev[j-1] + cost
+			cur[j] = del
+			if ins < cur[j] {
+				cur[j] = ins
+			}
+			if sub < cur[j] {
+				cur[j] = sub
+			}
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // reportDeferredWiths reports with-blocks whose path still references an
@@ -933,8 +1021,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 				c = frag.EvalCtx
 			} else if frag.BranchID == "" && frag.Source != nil && evalCtx != nil && evalCtx.Scope != "" {
 				// Unscoped index fragment reached through a scoped
-				// expansion: it belongs to the base scope.
-				continue
+				// expansion: evaluate it under the base scope rather than
+				// the iteration's bindings.
+				c = v.baseCtx
 			}
 			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 		}
@@ -3238,6 +3327,12 @@ func (v *Validator) checkValueForConditionalRef(val parser.Value, node *index.Pr
 		// even when their condition evaluated to false with current variable values.
 		target := v.Tree.ResolveName(node, t.Value, nil)
 		if target == nil || !target.IsConditional {
+			return
+		}
+		// The target exists in the active configuration (its condition
+		// evaluated true), so the reference is valid now; flagging it
+		// produces noise for every conditional DataSource that is enabled.
+		if v.nodeActive(target) {
 			return
 		}
 		v.report(node, "conditional_reference", LevelError,

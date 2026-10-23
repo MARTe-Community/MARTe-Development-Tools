@@ -38,6 +38,9 @@ type Builder struct {
 	// validator's: contexts are recreated per visit, so pointer-keyed guards
 	// re-expand the same subtree indefinitely.
 	expandedScopes map[*index.ProjectNode]map[string]bool
+	// baseCtx evaluates unscoped (index-time) fragments: they belong to the
+	// base scope, not to any loop/with context a traversal carries.
+	baseCtx *index.EvaluationContext
 }
 
 func NewBuilder(files []string, overrides map[string]string) *Builder {
@@ -130,12 +133,11 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 			// with binding: evaluate with those bindings. Base-scope
 			// fragments use the caller's context so overrides apply.
 			c = frag.EvalCtx
-		} else if frag.BranchID == "" && frag.Source != nil && evalCtx != nil && evalCtx.Scope != "" {
+		} else if frag.BranchID == "" && frag.Source != nil && (c == nil || c.Scope != "") {
 			// Unscoped index fragment reached through a scoped expansion:
-			// it belongs to the base scope, which is evaluated separately.
-			// Replaying it here would attach its definitions to this
-			// iteration, duplicating the expansion.
-			continue
+			// evaluate it under the base scope, never under the iteration's
+			// bindings.
+			c = b.baseCtx
 		}
 		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 	}
@@ -537,6 +539,7 @@ func (b *Builder) activate() {
 
 		prevCount := len(b.activeFragments)
 		b.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
+		b.baseCtx = evalCtx
 		b.collectActiveNodes(tree.Root, evalCtx, false)
 		for _, node := range tree.IsolatedFiles {
 			b.collectActiveNodes(node, evalCtx, false)
@@ -983,6 +986,8 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 			// expansion: evaluate with those bindings so field values
 			// referencing loop/parameter variables resolve.
 			c = frag.EvalCtx
+		} else if frag.BranchID == "" && frag.Source != nil && (c == nil || c.Scope != "") && b.baseCtx != nil {
+			c = b.baseCtx
 		}
 		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 	}

@@ -1116,7 +1116,11 @@ func (l *lowerer) insertDefinitionInFrag(owner *index.ProjectNode, frag *index.F
 	frag.Definitions = append(frag.Definitions, nil)
 	copy(frag.Definitions[index+1:], frag.Definitions[index:])
 	frag.Definitions[index] = def
-	l.indexDefinitionCond(owner, def, frag.File, frag.IsConditional)
+	// Lowering only processes active sugar, so the generated node is part of
+	// the active configuration even when the fragment text sits in a
+	// conditional block (otherwise the node is never activated and
+	// references to the generated GAM are reported as unknown).
+	l.indexDefinitionCond(owner, def, frag.File, false)
 }
 
 // insertDefinition places def at index of the owner's active fragment,
@@ -1132,7 +1136,7 @@ func (l *lowerer) insertDefinition(owner *index.ProjectNode, index int, def pars
 	frag.Definitions = append(frag.Definitions, nil)
 	copy(frag.Definitions[index+1:], frag.Definitions[index:])
 	frag.Definitions[index] = def
-	l.indexDefinitionCond(owner, def, frag.File, frag.IsConditional)
+	l.indexDefinitionCond(owner, def, frag.File, false)
 }
 
 // appendDefinition adds def to the (first active) fragment of node and
@@ -1143,7 +1147,7 @@ func (l *lowerer) appendDefinition(node *index.ProjectNode, def parser.Definitio
 		return
 	}
 	frag.Definitions = append(frag.Definitions, def)
-	l.indexDefinitionCond(node, def, frag.File, frag.IsConditional)
+	l.indexDefinitionCond(node, def, frag.File, false)
 }
 
 // insertSignalDefinition inserts def so it becomes the at-th (1-based)
