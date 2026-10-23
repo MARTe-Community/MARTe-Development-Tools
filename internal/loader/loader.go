@@ -105,6 +105,11 @@ func ResolvePathFrom(baseFile, home, p string) string {
 	if filepath.IsAbs(p) {
 		return p
 	}
+	// Explicitly relative navigation (`./x`, `../x`) always means "from this
+	// file", never from the project home.
+	if isDotRelative(p) {
+		return filepath.Join(filepath.Dir(baseFile), p)
+	}
 	fromHome := ""
 	if home != "" {
 		fromHome = filepath.Join(home, p)
@@ -120,6 +125,13 @@ func ResolvePathFrom(baseFile, home, p string) string {
 		return fromHome
 	}
 	return fromFile
+}
+
+// isDotRelative reports whether p is explicitly relative to the current
+// file (`./…` or `../…`).
+func isDotRelative(p string) bool {
+	return p == "." || p == ".." ||
+		strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../")
 }
 
 func fileExists(path string) bool {

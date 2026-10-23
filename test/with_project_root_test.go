@@ -117,6 +117,93 @@ func TestWithPathAbsolute(t *testing.T) {
 	}
 }
 
+// TestWithPathAbsoluteBeatsProjectHome: an absolute path is used as written
+// even when the project home is set.
+func TestWithPathAbsoluteBeatsProjectHome(t *testing.T) {
+	dir := t.TempDir()
+	other := t.TempDir()
+	writeTree(t, dir, map[string]string{"marte_project.json": `{}`})
+	writeTree(t, other, map[string]string{"sig.json": `{"signals":[{"name":"ABS"}]}`})
+	app := "#package T\n+App = {\n  Class = ReferenceContainer\n  with json(\"" +
+		filepath.Join(other, "sig.json") + "\") as cfg begin\n    First = @cfg.signals.first().name\n  end\n}\n"
+	writeTree(t, dir, map[string]string{"app.marte": app})
+	out := buildFile(t, filepath.Join(dir, "app.marte"))
+	if !strings.Contains(out, `First = "ABS"`) {
+		t.Errorf("absolute path did not win over the project home:\n%s", out)
+	}
+}
+
+// TestWithPathDotRelativeAnchorsToFile: `./` and `../` mean "from this file"
+// and never resolve against the project home.
+func TestWithPathDotRelativeAnchorsToFile(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"marte_project.json": `{}`,
+		"data/up.json":       `{"signals":[{"name":"INSIDE"}]}`,
+		"sub/app.marte": `#package T
++App = {
+  Class = ReferenceContainer
+  with json("../data/up.json") as cfg begin
+    First = @cfg.signals.first().name
+  end
+}
+`,
+	})
+	// A document reachable by naively joining the home with "../data/up.json".
+	writeTree(t, outside, map[string]string{"data/up.json": `{"signals":[{"name":"OUTSIDE"}]}`})
+
+	out := buildFile(t, filepath.Join(dir, "sub", "app.marte"))
+	if !strings.Contains(out, `First = "INSIDE"`) {
+		t.Errorf("../ path not anchored to the file:\n%s", out)
+	}
+}
+
+// TestWithPathAbsoluteForms: absolute paths work as literal, variable and
+// concatenated expressions.
+func TestWithPathAbsoluteForms(t *testing.T) {
+	dir := t.TempDir()
+	sig := filepath.Join(dir, "sig.json")
+	writeTree(t, dir, map[string]string{"sig.json": `{"signals":[{"name":"ABS"}]}`})
+	app := "#package T\nvar p: string = \"" + sig + "\"\n+App = {\n  Class = ReferenceContainer\n" +
+		"  with json(\"" + sig + "\") as a begin\n    ViaLiteral = @a.signals.first().name\n  end\n" +
+		"  with json(@p) as b begin\n    ViaVar = @b.signals.first().name\n  end\n" +
+		"  with json(\"" + filepath.Dir(sig) + "/\" .. \"sig.json\") as c begin\n    ViaConcat = @c.signals.first().name\n  end\n}\n"
+	writeTree(t, dir, map[string]string{"app.marte": app})
+	out := buildFile(t, filepath.Join(dir, "app.marte"))
+	for _, want := range []string{`ViaLiteral = "ABS"`, `ViaVar = "ABS"`, `ViaConcat = "ABS"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("absolute form missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestResolvePathFromContract pins the loader helper's rules.
+func TestResolvePathFromContract(t *testing.T) {
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{
+		"marte_project.json": `{}`,
+		"data/root.json":     `{}`,
+		"sub/local.json":     `{}`,
+	})
+	base := filepath.Join(dir, "sub", "app.marte")
+	abs := filepath.Join(dir, "data", "root.json")
+
+	if got := loader.ResolvePathFrom(base, dir, abs); got != abs {
+		t.Errorf("absolute path altered: %q", got)
+	}
+	if got, want := loader.ResolvePathFrom(base, dir, "data/root.json"), abs; got != want {
+		t.Errorf("project-home path = %q, want %q", got, want)
+	}
+	if got, want := loader.ResolvePathFrom(base, dir, "./local.json"), filepath.Join(dir, "sub", "local.json"); got != want {
+		t.Errorf("dot-relative path = %q, want %q", got, want)
+	}
+	// Missing file, no dot prefix: the project-home form is reported.
+	if got, want := loader.ResolvePathFrom(base, dir, "missing.json"), filepath.Join(dir, "missing.json"); got != want {
+		t.Errorf("missing path = %q, want %q", got, want)
+	}
+}
+
 // TestWithPathProjectHomeDiscovery covers the loader helper directly.
 func TestWithPathProjectHomeDiscovery(t *testing.T) {
 	dir := t.TempDir()

@@ -708,8 +708,9 @@ end
   containing `marte_project.json`, otherwise the git root — and fall back
   to the directory of the file containing the block, so a document kept at
   the project root works from any subdirectory while single-file configs
-  keep their old behaviour. Absolute paths are used as written. Excel
-  files are read
+  keep their old behaviour. Absolute paths (`/data/x.json`) are used as
+  written; a path starting with `./` or `../` always resolves from the
+  file containing the block. Excel files are read
   from their first worksheet like CSV: the first row names the columns
   and every row becomes a dict of strings; shared strings, formula
   results and gaps are handled. Legacy binary `.xls` files are not
