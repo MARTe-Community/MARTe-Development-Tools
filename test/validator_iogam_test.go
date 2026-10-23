@@ -67,7 +67,7 @@ func TestValidator_IOGAM(t *testing.T) {
 					}
 				}
 			}`,
-			expected: []string{"Schema Validation Error"},
+			expected: []string{"IOGAM '+MyIOGAM': input memory is 4 bytes but output memory is 8 bytes"},
 		},
 		{
 			name: "IOGAM with DataSource Reference",
@@ -315,7 +315,8 @@ func TestValidator_IOGAM(t *testing.T) {
 
 			if len(tt.expected) == 0 {
 				for _, d := range v.Diagnostics {
-					if strings.Contains(d.Message, "IOGAM Size Mismatch") || strings.Contains(d.Message, "Schema Validation Error") {
+					if strings.Contains(d.Message, "IOGAM Size Mismatch") || strings.Contains(d.Message, "Schema Validation Error") ||
+						strings.Contains(d.Message, "input memory is") {
 						t.Errorf("Unexpected IOGAM error: %s", d.Message)
 					}
 				}

@@ -50,6 +50,14 @@ func NewBuilder(files []string, overrides map[string]string) *Builder {
 	}
 }
 
+// isBoundCtx reports whether ctx carries loop or with bindings on top of a
+// parent scope. Only such contexts are worth recording on a fragment: the
+// base scope is re-evaluated on every pass, and freezing it would hide later
+// variable overrides.
+func isBoundCtx(ctx *index.EvaluationContext) bool {
+	return ctx != nil && ctx.Parent != nil
+}
+
 func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
 	b.activeNodes[node] = true
 	for _, frag := range node.Fragments {
@@ -66,6 +74,15 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 	}
 
 	written := make(map[string]bool)
+	// expanded marks (child, evaluation context) pairs already walked. A
+	// loop revisits the same child name on every iteration with a fresh
+	// context, and each iteration defines its own nested objects, so the
+	// name alone is not enough to decide whether the subtree was expanded.
+	type expandKey struct {
+		name string
+		ctx  *index.EvaluationContext
+	}
+	expanded := make(map[expandKey]bool)
 	// forceUncond: definitions in this expansion are unconditional
 	// (true inside `with` blocks, which always load their document).
 	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode, bool)
@@ -83,11 +100,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == parser.Definition(d) {
 							b.activeFragments[f] = true
-							// Only conditional fragments need the enclosing
-							// binding; stamping it on unconditional ones
-							// would freeze the scope for later consumers
-							// (e.g. validation with -v overrides).
-							if f.IsConditional && f.EvalCtx == nil {
+							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -140,7 +153,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				for _, f := range child.Fragments {
 					if f.Source == parser.Definition(d) {
 						b.activeFragments[f] = true
-						if f.IsConditional && f.EvalCtx == nil {
+						if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
 							f.EvalCtx = ed.Ctx
 						}
 						found = true
@@ -152,7 +165,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							b.activeFragments[f] = true
-							if f.IsConditional && f.EvalCtx == nil {
+							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -160,9 +173,10 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					}
 				}
 
-				if !written[norm] {
-					b.collectActiveNodes(child, ed.Ctx, forceUncond)
+				if k := (expandKey{norm, ed.Ctx}); !expanded[k] {
+					expanded[k] = true
 					written[norm] = true
+					b.collectActiveNodes(child, ed.Ctx, forceUncond)
 				}
 			case *parser.IfBlock:
 				cond := b.tree.EvaluateValue(d.Condition, ed.Ctx)

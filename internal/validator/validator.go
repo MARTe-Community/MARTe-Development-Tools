@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,10 @@ type Validator struct {
 	// keyed by definition. They are evaluated after the final activation
 	// pass, once every variable has settled (later passes overwrite the
 	// evaluation context, so the last one wins).
+	// sizeMismatch marks GAMs whose detailed input/output size error was
+	// reported, so the generic CUE InputSize/OutputSize diagnostics are not
+	// repeated for the same node.
+	sizeMismatch    map[*index.ProjectNode]bool
 	pendingAsserts  map[*parser.AssertStatement]assertInstance
 	reportedAsserts map[*parser.AssertStatement]bool
 	// visited tracks (child node -> source definition) pairs already
@@ -154,6 +159,12 @@ func (v *Validator) isGAMSignalsContainer(node *index.ProjectNode) bool {
 	return node.RealName == "InputSignals" || node.RealName == "OutputSignals"
 }
 
+// isBoundCtx reports whether ctx carries loop or with bindings on top of a
+// parent scope (the base scope is re-evaluated every pass).
+func isBoundCtx(ctx *index.EvaluationContext) bool {
+	return ctx != nil && ctx.Parent != nil
+}
+
 func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
 	if v.visited == nil {
 		v.visited = make(map[*index.ProjectNode]map[parser.Definition]bool)
@@ -190,6 +201,14 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 	}
 
 	written := make(map[string]bool)
+	// expanded marks (child, evaluation context) pairs already walked: a
+	// loop revisits the same child name each iteration with a fresh context,
+	// and every iteration defines its own nested objects.
+	type expandKey struct {
+		name string
+		ctx  *index.EvaluationContext
+	}
+	expanded := make(map[expandKey]bool)
 	// forceUncond: definitions in this expansion are unconditional
 	// (true inside `with` blocks, which always load their document).
 	var processEval func([]index.EvaluatedDefinition, *index.ProjectNode, bool)
@@ -248,7 +267,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							v.ActiveFragments[f] = true
-							if f.EvalCtx == nil {
+							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -256,21 +275,12 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 				}
 
-				// Only recurse the first time this source definition
-				// materializes this child: later passes must not re-walk
-				// (and re-expand) already-activated subtrees.
-				alreadyVisited := v.visited[child] != nil && v.visited[child][d]
-				if !alreadyVisited {
-					if v.visited[child] == nil {
-						v.visited[child] = make(map[parser.Definition]bool)
-					}
-					v.visited[child][d] = true
-				}
 				v.muActive.Unlock()
 
-				if !written[norm] && !alreadyVisited {
-					v.collectActiveNodes(ctx, child, ed.Ctx, forceUncond)
+				if k := (expandKey{norm, ed.Ctx}); !expanded[k] {
+					expanded[k] = true
 					written[norm] = true
+					v.collectActiveNodes(ctx, child, ed.Ctx, forceUncond)
 				}
 			case *parser.IfBlock:
 				cond := v.Tree.EvaluateValue(d.Condition, ed.Ctx)
@@ -773,6 +783,12 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		}
 	}
 
+	// IOGAM copies its whole input memory to the output memory; report a
+	// mismatch with the size derivation of every signal on both sides.
+	if className == "IOGAM" {
+		v.checkIOGAMSize(node)
+	}
+
 	// 3. CUE Validation
 	if className != "" && v.Schema != nil {
 		v.validateWithCUE(node, className)
@@ -1218,6 +1234,13 @@ func (v *Validator) reportCUEError(err error, node *index.ProjectNode) {
 	list := errors.Errors(err)
 	for _, e := range list {
 		msg := e.Error()
+		v.mu.Lock()
+		explained := v.sizeMismatch[node]
+		v.mu.Unlock()
+		if explained && (strings.Contains(msg, "InputSize") || strings.Contains(msg, "OutputSize")) {
+			// checkIOGAMSize already reported this with a breakdown.
+			continue
+		}
 		v.report(node, "schema_validation", LevelError,
 			fmt.Sprintf("Schema Validation Error: %v", msg),
 			v.getNodePosition(node), v.getNodeFile(node))
@@ -1644,6 +1667,18 @@ func (v *Validator) validateGAMSignal(gamNode, signalNode *index.ProjectNode, di
 		// Property checks
 		v.checkSignalProperty(signalNode, targetNode, "Type")
 
+		// `Samples` multiplies the signal size. Pairing it with a DataSource
+		// signal that already declares NumberOfElements multiplies twice,
+		// which is the usual cause of an unexpected IOGAM size mismatch.
+		if own := v.signalSize(signalNode); own.Samples > 1 {
+			if target := v.signalSize(targetNode); target.Elements > 1 {
+				v.report(signalNode, "samples_multiplied", LevelWarning,
+					fmt.Sprintf("Signal '%s': Samples=%d multiplies '%s::%s', which already declares %d elements — the GAM buffer is %d×%d elements (%d bytes)",
+						signalNode.RealName, own.Samples, dsName, targetNode.RealName, target.Elements, target.Elements, own.Samples, own.Total),
+					v.getNodePosition(signalNode), v.getNodeFile(signalNode))
+			}
+		}
+
 		// Validate Ranges
 		if rangeFields, ok := fields["Ranges"]; ok && len(rangeFields) > 0 {
 			val := rangeFields[0].Value
@@ -1733,7 +1768,22 @@ func (v *Validator) getEvaluatedMetadata(node *index.ProjectNode, key string) st
 	return node.Metadata[key]
 }
 
+// signalSize describes how a signal's byte size is derived: the type, the
+// element count (NumberOfElements × NumberOfDimensions, or the Ranges total)
+// and the Samples multiplier. Diagnostics use the parts to explain a mismatch.
+type signalSize struct {
+	Type     string
+	TypeSize int64
+	Elements int64
+	Samples  int64
+	Total    int64
+}
+
 func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
+	return v.signalSize(node).Total
+}
+
+func (v *Validator) signalSize(node *index.ProjectNode) signalSize {
 	fields := v.getFields(node)
 
 	// Get Type
@@ -1749,12 +1799,12 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 	}
 
 	if typeStr == "" {
-		return 0
+		return signalSize{}
 	}
 
-	typeSize := v.getTypeSize(typeStr)
+	typeSize := int64(v.getTypeSize(typeStr))
 	if typeSize <= 0 {
-		return 0 // Variable size or unknown type
+		return signalSize{Type: typeStr} // Variable size or unknown type
 	}
 
 	totalElements := int64(1)
@@ -1837,20 +1887,98 @@ func (v *Validator) getSignalByteSize(node *index.ProjectNode) int64 {
 	}
 
 	// 2. Check for Samples multiplier
+	samples := int64(0)
 	if sampleFields, ok := fields["Samples"]; ok && len(sampleFields) > 0 {
 		val := v.ValueToInterface(sampleFields[0].Value, node)
-		var samples int64
 		if i, ok := val.(int64); ok {
 			samples = i
 		} else if i, ok := val.(int); ok {
 			samples = int64(i)
 		}
-		if samples > 0 {
-			totalElements *= samples
-		}
+	}
+	if samples > 0 {
+		totalElements *= samples
 	}
 
-	return int64(typeSize) * totalElements
+	return signalSize{
+		Type:     typeStr,
+		TypeSize: typeSize,
+		Elements: totalElements,
+		Samples:  samples,
+		Total:    typeSize * totalElements,
+	}
+}
+
+// describe renders the size derivation as `type×elements[×samples]=bytes`.
+func (s signalSize) describe() string {
+	if s.Type == "" || s.Total == 0 {
+		return "unknown size"
+	}
+	text := fmt.Sprintf("%s×%d", s.Type, s.Elements)
+	if s.Samples > 1 && s.Elements%s.Samples == 0 {
+		text = fmt.Sprintf("%s×%d×%dsamples", s.Type, s.Elements/s.Samples, s.Samples)
+	}
+	return fmt.Sprintf("%s=%d", text, s.Total)
+}
+
+// checkIOGAMSize reports an IOGAM whose input and output memories differ in
+// size, listing how each signal's size was derived. Without it the only hint
+// was CUE's "conflicting values N and M" on #Object.InputSize.
+func (v *Validator) checkIOGAMSize(node *index.ProjectNode) {
+	inDesc, inTotal, inOK := v.signalsSize(node.Children["InputSignals"])
+	outDesc, outTotal, outOK := v.signalsSize(node.Children["OutputSignals"])
+	if !inOK || !outOK || inTotal == outTotal {
+		return
+	}
+
+	v.mu.Lock()
+	if v.sizeMismatch == nil {
+		v.sizeMismatch = make(map[*index.ProjectNode]bool)
+	}
+	v.sizeMismatch[node] = true
+	v.mu.Unlock()
+
+	v.report(node, "iogam_size", LevelError,
+		fmt.Sprintf("IOGAM '%s': input memory is %d bytes but output memory is %d bytes — in: %s | out: %s (the IOGAM copies the whole input memory; Samples multiplies a signal size, NumberOfElements sets the element count)",
+			node.RealName, inTotal, outTotal, inDesc, outDesc),
+		v.getNodePosition(node), v.getNodeFile(node))
+}
+
+// signalsSize sums the active signals of a GAM signal container and describes
+// each contribution. ok is false when a signal's size is unknown, so a partial
+// sum is never reported as a mismatch.
+func (v *Validator) signalsSize(container *index.ProjectNode) (string, int64, bool) {
+	if container == nil {
+		return "", 0, false
+	}
+	names := make([]string, 0, len(container.Children))
+	for name, sig := range container.Children {
+		if !v.nodeActive(sig) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return "", 0, false
+	}
+
+	var total int64
+	parts := make([]string, 0, len(names))
+	for i, name := range names {
+		size := v.signalSize(container.Children[name])
+		if size.Total == 0 {
+			return "", 0, false
+		}
+		total += size.Total
+		if i < 8 {
+			parts = append(parts, fmt.Sprintf("%s %s", name, size.describe()))
+		}
+	}
+	if len(names) > 8 {
+		parts = append(parts, "…")
+	}
+	return strings.Join(parts, ", "), total, true
 }
 
 func (v *Validator) validateByteSize(node *index.ProjectNode, fields map[string][]index.EvaluatedField) {

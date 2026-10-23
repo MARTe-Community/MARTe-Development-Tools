@@ -250,12 +250,14 @@ GAM = {
 
 	found := false
 	for _, d := range v.Diagnostics {
-		if d.Level == validator.LevelError && strings.Contains(d.Message, "InputSize") {
+		// The mismatch is reported with the per-signal byte breakdown
+		// instead of CUE's generic #Object.InputSize conflict.
+		if d.Level == validator.LevelError && strings.Contains(d.Message, "input memory") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("expected an InputSize mismatch error, got %d diagnostics", len(v.Diagnostics))
+		t.Errorf("expected an IOGAM size mismatch error, got %d diagnostics", len(v.Diagnostics))
 	}
 }
 

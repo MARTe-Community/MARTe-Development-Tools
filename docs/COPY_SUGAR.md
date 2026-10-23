@@ -165,6 +165,59 @@ mapping is positional. `mdt build -O` still merges adjacent IOGAMs only when
 their input/output counts are equal and the merge keeps whole blocks in
 order.
 
+### Signal sizes: `NumberOfElements` vs `Samples`
+
+An IOGAM copies its whole input memory into its output memory, so both sides
+must describe the same byte count. A signal's size is
+
+```
+bytes = typeSize × NumberOfElements × NumberOfDimensions × Samples
+```
+
+- `NumberOfElements` / `NumberOfDimensions` describe the *shape* of the
+  signal and belong on the DataSource signal declaration.
+- `Samples` is a multiplier for buffered signals and may be set per GAM
+  entry (in a copy item's `{ … }` options).
+
+Set the depth in **one** place: a signal declared with
+`NumberOfElements = 10000` and a GAM entry with `Samples = 10000` becomes
+10000 × 10000 elements, which is usually not what was intended.
+
+When the totals differ, `mdt check` reports both sides with the derivation
+of every signal, e.g.:
+
+```
+ERROR: IOGAM '+ReadADC': input memory is 80000 bytes but output memory is
+800000000 bytes — in: AI0 float32×1×10000samples=40000, … |
+out: AI0 float32×10000×10000samples=400000000, …
+```
+
+and a warning points at the entry that multiplies an already-sized signal:
+
+```
+WARNING: Signal 'AI0': Samples=10000 multiplies 'DDB4::AI0', which already
+declares 10000 elements — the GAM buffer is 10000×10000 elements
+(400000000 bytes)
+```
+
+Both are suppressible with `//! ignore(samples_multiplied)` (warning) or by
+fixing the declaration.
+
+### Sharing a group name
+
+Several `copy Links { … }` blocks with the same name contribute to the same
+IOGAM: items are concatenated in declaration order and the generated GAM is
+emitted once, at the position of the first block. This lets a project spread
+copy operations over the files/sections where they belong while keeping one
+`Links` entry in the thread. The same holds for group elements of a
+`Functions` list — duplicates collapse into one reference.
+
+```marte
+copy Links { Acq.T1 -> Filter.In1 }     // in one file
+copy Links { Acq.T2 -> Filter.In2 }     // in another
+// → one +Links IOGAM with both pairs
+```
+
 ### Lowering rules
 
 * A pair whose source and destination are the same DataSource **and**

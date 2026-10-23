@@ -104,6 +104,14 @@ Matrix = {
 }
 ```
 
+### Signal byte size
+
+A signal occupies `typeSize × NumberOfElements × NumberOfDimensions × Samples`
+bytes. `Samples` multiplies the size of the signal it is written on; combining
+it with a DataSource signal that already declares `NumberOfElements` multiplies
+twice. Copy GAMs must describe the same total on both sides — the validator
+reports the derivation of every signal when they differ.
+
 ### Dynamic copy endpoints
 
 Inside a `with`/`foreach` scope the signal name of a copy endpoint may be an

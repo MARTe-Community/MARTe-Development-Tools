@@ -370,60 +370,111 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 		return err
 	}
 
+	// Groups that share a name (same Functions container) describe one GAM:
+	// several `copy Links { … }` blocks in different places contribute
+	// items to the same IOGAM instead of emitting duplicate definitions.
+	type bucketKey struct {
+		owner *index.ProjectNode
+		name  string
+	}
+	type bucket struct {
+		owner   *index.ProjectNode
+		name    string
+		members []pending
+	}
+	var order []*bucket
+	buckets := make(map[bucketKey]*bucket)
 	for _, p := range groups {
-		owner := p.owner
-		if owner == nil {
+		if p.owner == nil {
 			return fmt.Errorf("%d:%d: copy group is not inside a Functions container",
 				p.group.Position.Line, p.group.Position.Column)
 		}
-		pairs, err := l.resolveGroup(p.group, &rep.Redundant)
-		if err != nil {
-			return fmt.Errorf("%d:%d: %v", p.group.Position.Line, p.group.Position.Column, err)
-		}
-		if len(pairs) == 0 {
-			// Fully redundant: drop the group (and its array entry).
-			if p.arr != nil {
-				p.arr.Elements = append(p.arr.Elements[:p.arrIndex], p.arr.Elements[p.arrIndex+1:]...)
-			} else {
-				p.frag.Definitions = append(p.frag.Definitions[:p.index], p.frag.Definitions[p.index+1:]...)
+		// Anonymous groups are independent; key them by identity.
+		var b *bucket
+		if p.group.Name == "" {
+			b = &bucket{owner: p.owner}
+			order = append(order, b)
+		} else {
+			key := bucketKey{owner: p.owner, name: p.group.Name}
+			b = buckets[key]
+			if b == nil {
+				b = &bucket{owner: p.owner, name: p.group.Name}
+				buckets[key] = b
+				order = append(order, b)
 			}
-			continue
+		}
+		b.members = append(b.members, p)
+	}
+
+	for _, b := range order {
+		var pairs []copyOp
+		for _, p := range b.members {
+			ps, err := l.resolveGroup(p.group, &rep.Redundant)
+			if err != nil {
+				return fmt.Errorf("%d:%d: %v", p.group.Position.Line, p.group.Position.Column, err)
+			}
+			pairs = append(pairs, ps...)
 		}
 
-		name := p.group.Name
+		first := b.members[0]
+		// Drop every sugar definition first so the generated GAM can take
+		// the first group's slot without shifting it. Locate by identity:
+		// earlier insertions in the same fragment shift recorded indices.
+		var insertFrag *index.Fragment
+		insertAt := -1
+		for i, p := range b.members {
+			if p.frag == nil {
+				continue
+			}
+			if idx := indexOfDefinition(p.frag.Definitions, p.group); idx >= 0 {
+				if i == 0 {
+					insertAt = idx
+					insertFrag = p.frag
+				}
+				p.frag.Definitions[idx] = nil
+			} else if i == 0 {
+				insertAt = p.index
+				insertFrag = p.frag
+			}
+		}
+
+		name := b.name
 		if name == "" {
 			l.seq++
 			name = fmt.Sprintf("MdtCopy%d", l.seq)
 		}
-		// Drop the sugar definition first so the generated GAM can take its
-		// slot without shifting it. Locate it by identity: earlier
-		// insertions in the same fragment shift the recorded indices.
-		var insertFrag *index.Fragment
-		insertAt := -1
-		if p.frag != nil {
-			if idx := indexOfDefinition(p.frag.Definitions, p.group); idx >= 0 {
-				insertAt = idx
-				p.frag.Definitions[idx] = nil
-			} else {
-				insertAt = p.index
-			}
-			insertFrag = p.frag
-		}
-		if err := l.emitCopyGAM(owner, name, pairs, p.group.Position, rep, insertAt, insertFrag); err != nil {
-			return err
-		}
 
-		// Replace the group with a reference to the generated GAM. The
-		// reference lives at the list position, in the list's file, so it
-		// resolves like a parsed reference.
-		refPos := p.group.Position
-		if p.refPos.Line > 0 {
-			refPos = p.refPos
+		// One reference per Functions array: keep the first occurrence and
+		// drop later duplicates of the same group in that list.
+		refPos := first.group.Position
+		if first.refPos.Line > 0 {
+			refPos = first.refPos
 		}
 		ref := &parser.ReferenceValue{Position: refPos, Value: name}
-		if p.arr != nil {
-			p.arr.Elements[p.arrIndex] = ref
-			l.tree.IndexValue(p.file, ref)
+		seenArr := make(map[*parser.ArrayValue]bool)
+		for _, p := range b.members {
+			if p.arr == nil {
+				continue
+			}
+			if !seenArr[p.arr] {
+				seenArr[p.arr] = true
+				p.arr.Elements[p.arrIndex] = ref
+				l.tree.IndexValue(p.file, ref)
+				continue
+			}
+			// Remove the duplicate element (indices shift, so drop it now:
+			// later members are processed in collection order).
+			if p.arrIndex < len(p.arr.Elements) && p.arr.Elements[p.arrIndex] == p.group {
+				p.arr.Elements = append(p.arr.Elements[:p.arrIndex], p.arr.Elements[p.arrIndex+1:]...)
+			}
+		}
+
+		if len(pairs) == 0 {
+			// Fully redundant: nothing to emit.
+			continue
+		}
+		if err := l.emitCopyGAM(b.owner, name, pairs, first.group.Position, rep, insertAt, insertFrag); err != nil {
+			return err
 		}
 	}
 	// Drop the sugar definitions removed above.
