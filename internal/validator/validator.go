@@ -1069,6 +1069,8 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 				v.validateClassField(f, node)
 			} else if name == "Type" {
 				v.validateTypeField(f, node)
+			} else if name == "Alias" {
+				v.validateAliasField(f, node, fields)
 			} else {
 				v.validateGenericField(f, node)
 			}
@@ -1312,6 +1314,43 @@ func (v *Validator) validateTypeField(f index.EvaluatedField, node *index.Projec
 			fmt.Sprintf("Invalid Type '%s'", typeName),
 			f.Raw.Position, f.File)
 	}
+}
+
+// validateAliasField resolves an `Alias = X` value against the sibling
+// `DataSource`: X names a signal *inside* that DataSource, not a node of the
+// enclosing package. Treating it as a global reference produced bogus
+// "Unknown reference" errors for valid aliased GAM signal entries.
+func (v *Validator) validateAliasField(f index.EvaluatedField, node *index.ProjectNode, fields map[string][]index.EvaluatedField) {
+	var name string
+	switch val := f.Value.(type) {
+	case *parser.ReferenceValue:
+		name = val.Value
+	case *parser.StringValue:
+		name = val.Value
+	default:
+		v.validateGenericField(f, node)
+		return
+	}
+	dsName := ""
+	if dsFields, ok := fields["DataSource"]; ok && len(dsFields) > 0 {
+		dsName = v.getFieldValue(dsFields[0], node)
+	}
+	if dsName == "" {
+		v.validateGenericField(f, node)
+		return
+	}
+	ds := v.resolveReference(dsName, node, func(n *index.ProjectNode) bool { return v.Tree.IsDataSource(n) })
+	if ds == nil {
+		return
+	}
+	if signals, ok := ds.Children["Signals"]; ok {
+		if sig, ok := signals.Children[index.NormalizeName(name)]; ok {
+			v.updateReferenceTarget(f.File, f.Raw.Position, sig)
+		}
+	}
+	// Not found: the signal may be created implicitly by a GAM output
+	// (`Implicitly Defined Signal` warns about that), so this is not an
+	// error. MARTe resolves the alias inside the DataSource at runtime.
 }
 
 func (v *Validator) validateGenericField(f index.EvaluatedField, node *index.ProjectNode) {
@@ -3319,9 +3358,10 @@ func (v *Validator) CheckConditionalReferences(ctx context.Context) {
 			}
 			for _, def := range frag.Definitions {
 				f, ok := def.(*parser.Field)
-				if !ok {
+				if !ok || f.Name == "Alias" {
 					// IfBlock/ForeachBlock definitions inside a non-conditional fragment
 					// create their own conditional sub-fragments; skip them here.
+					// Alias names a signal inside the sibling DataSource.
 					continue
 				}
 				v.checkValueForConditionalRef(f.Value, node, frag.File)
