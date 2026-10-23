@@ -348,6 +348,17 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		f.formatValue(v.Base, indent)
 		fmt.Fprintf(f.writer, ".%s", v.Member)
 		return v.Position.Line
+	case *parser.MethodCall:
+		f.formatValue(v.Base, indent)
+		fmt.Fprintf(f.writer, ".%s(", v.Method)
+		f.formatCallArgs(v.Args, indent)
+		fmt.Fprint(f.writer, ")")
+		return v.Position.Line
+	case *parser.FunctionCall:
+		fmt.Fprintf(f.writer, "%s(", v.Name)
+		f.formatCallArgs(v.Args, indent)
+		fmt.Fprint(f.writer, ")")
+		return v.Position.Line
 	case *parser.MapValue:
 		fmt.Fprint(f.writer, "{ ")
 		for i, k := range v.Keys {
@@ -376,6 +387,16 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		return f.formatConditionalArrayElement(v, indent)
 	default:
 		return 0
+	}
+}
+
+// formatCallArgs renders a call's arguments comma-separated.
+func (f *Formatter) formatCallArgs(args []parser.Value, indent int) {
+	for i, a := range args {
+		if i > 0 {
+			fmt.Fprint(f.writer, ", ")
+		}
+		f.formatValue(a, indent)
 	}
 }
 

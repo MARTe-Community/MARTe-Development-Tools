@@ -401,6 +401,40 @@ same `Name: Type` form instead of a nested `Type = …` object:
 - Build output always uses the expanded `Name = { Type = … }` form, and
   `mdt fmt` round-trips the sugar unchanged.
 
+## 10.2 Builtin functions
+
+Call expressions evaluate pure iterator helpers; both `name(args)` and
+`@name(args)` spellings are accepted (`@` marks a variable, so
+`@zip(...)` reads naturally next to `@list` arguments).
+
+| Function | Result |
+| --- | --- |
+| `enumerate(x)` | list of `[index, element]` rows; for a dict, `[key, value]` rows |
+| `zip(a, b, …)` | list of `[a[i], b[i], …]` rows, stopping at the shortest input |
+| `range(n)` / `range(start, stop[, step])` | half-open integer sequence; `step` may be negative |
+| `keys(map)` / `values(map)` | keys (sorted) or values in key order |
+| `len(x)` | element count of a list/dict, rune count of a string |
+| `reversed(x)` | list or string in reverse order |
+| `concat(a, b, …)` | the arguments' elements spliced into one list |
+
+Two-variable `foreach` destructures rows that are two-element lists, so
+zipped and enumerated iteration reads like Python:
+
+```marte
+var names: [string] = { "AI0", "AI1" }
+var chans: [int] = { 0, 4 }
+
+foreach name, channel in zip(@names, @chans)
+  ("+Chan_" .. @name) = {
+    Class = ReferenceContainer
+    Id = @channel
+  }
+end
+```
+
+An unknown function, or arguments of the wrong kind, leave the call in
+the output verbatim (`zip(1, 2)`) and are reported by validation.
+
 ## 11. Comments, docstrings and pragmas
 
 ```marte

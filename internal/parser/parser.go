@@ -1079,8 +1079,42 @@ func (p *Parser) parseAtom() (Value, bool) {
 		val = &BoolValue{Position: tok.Position, Value: tok.Value == "true"}
 	case TokenIdentifier:
 		val = &ReferenceValue{Position: tok.Position, Value: tok.Value}
+		// Builtin iterator call: `enumerate(@list)`, `zip(@a, @b)`.
+		// Only when the '(' sits on the same line: a '(' on a following
+		// line starts a body object (see parsePostfix for the same rule).
+		if p.peek().Type == TokenSymbol && p.peek().Value == "(" &&
+			p.peek().Position.Line == tok.Position.Line {
+			p.next() // consume '('
+			args, closeTok, ok := p.parseCallArgs()
+			if !ok {
+				return nil, false
+			}
+			val = &FunctionCall{
+				Position:    tok.Position,
+				EndPosition: Position{Line: closeTok.Position.Line, Column: closeTok.Position.Column + 1},
+				Name:        tok.Value,
+				Args:        args,
+			}
+		}
 	case TokenVariableReference:
 		val = &VariableReferenceValue{Position: tok.Position, Name: tok.Value}
+		// `@enumerate(@x)` — the '@' form of a builtin call. A name
+		// followed by '(' on the same line is a call, not a reference;
+		// `@x.m(...)` stays a method call (parsePostfix).
+		if p.peek().Type == TokenSymbol && p.peek().Value == "(" &&
+			p.peek().Position.Line == tok.Position.Line {
+			p.next() // consume '('
+			args, closeTok, ok := p.parseCallArgs()
+			if !ok {
+				return nil, false
+			}
+			val = &FunctionCall{
+				Position:    tok.Position,
+				EndPosition: Position{Line: closeTok.Position.Line, Column: closeTok.Position.Column + 1},
+				Name:        strings.TrimPrefix(tok.Value, "@"),
+				Args:        args,
+			}
+		}
 	case TokenMinus:
 		inner, innerOK := p.parseAtom()
 		if !innerOK {
@@ -1180,6 +1214,31 @@ func (p *Parser) parseAtom() (Value, bool) {
 	return p.parsePostfix(tok, val)
 }
 
+// parseCallArgs parses the argument list of a call, after the '(' has been
+// consumed. Commas are optional separators; the closing ')' is returned.
+func (p *Parser) parseCallArgs() ([]Value, Token, bool) {
+	args := []Value{}
+	for {
+		t := p.peek()
+		if t.Type == TokenEOF {
+			p.addError(t.Position, "unexpected EOF, expected )")
+			return nil, Token{}, false
+		}
+		if t.Type == TokenSymbol && t.Value == ")" {
+			return args, p.next(), true
+		}
+		if t.Type == TokenComma {
+			p.next()
+			continue
+		}
+		arg, ok := p.parseExpression(0)
+		if !ok {
+			return nil, Token{}, false
+		}
+		args = append(args, arg)
+	}
+}
+
 // parsePostfix applies member access and builtin method calls to a primary
 // expression:
 //
@@ -1211,27 +1270,9 @@ func (p *Parser) parsePostfix(startTok Token, val Value) (Value, bool) {
 				return val, true
 			}
 			p.next() // consume '('
-			args := []Value{}
-			var closeTok Token
-			for {
-				t := p.peek()
-				if t.Type == TokenEOF {
-					p.addError(t.Position, "unexpected EOF, expected )")
-					return nil, false
-				}
-				if t.Type == TokenSymbol && t.Value == ")" {
-					closeTok = p.next()
-					break
-				}
-				if t.Type == TokenComma {
-					p.next()
-					continue
-				}
-				arg, argOK := p.parseExpression(0)
-				if !argOK {
-					return nil, false
-				}
-				args = append(args, arg)
+			args, closeTok, ok := p.parseCallArgs()
+			if !ok {
+				return nil, false
 			}
 			val = &MethodCall{
 				Position:    startTok.Position,

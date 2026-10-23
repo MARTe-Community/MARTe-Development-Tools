@@ -230,11 +230,18 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 							Parent:    ed.Ctx,
 							Tree:      b.tree,
 						}
-						if d.KeyVar != "" {
-							subCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
-						}
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
+						}
+						if d.KeyVar != "" {
+							// zip()/enumerate() produce two-element rows:
+							// `foreach a, b in @zip(...)` destructures them.
+							if row, ok := val.(*parser.ArrayValue); ok && len(row.Elements) == 2 {
+								subCtx.Variables[d.KeyVar] = row.Elements[0]
+								subCtx.Variables[d.ValueVar] = row.Elements[1]
+							} else {
+								subCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
+							}
 						}
 						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
@@ -788,6 +795,17 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 			return fmt.Sprintf("%s.%s(%s)", b.formatValueWithCtx(v.Base, ctx), v.Method, strings.Join(parts, ", "))
 		}
 		return b.formatValueWithCtx(res, ctx)
+	case *parser.FunctionCall:
+		res := b.tree.EvaluateValue(v, ctx)
+		if _, stillCall := res.(*parser.FunctionCall); stillCall {
+			// Unknown builtin or incompatible arguments: keep the call.
+			parts := make([]string, 0, len(v.Args))
+			for _, a := range v.Args {
+				parts = append(parts, b.formatValueWithCtx(a, ctx))
+			}
+			return fmt.Sprintf("%s(%s)", v.Name, strings.Join(parts, ", "))
+		}
+		return b.formatValueWithCtx(res, ctx)
 	case *parser.MapValue:
 		parts := []string{}
 		for _, k := range v.Keys {
@@ -836,11 +854,23 @@ func nameReferencesResolved(v parser.Value, ctx *index.EvaluationContext) bool {
 	case *parser.MemberAccess:
 		return nameReferencesResolved(t.Base, ctx)
 	case *parser.MethodCall:
-		return nameReferencesResolved(t.Base, ctx)
+		return nameReferencesResolved(t.Base, ctx) && allResolved(t.Args, ctx)
+	case *parser.FunctionCall:
+		return allResolved(t.Args, ctx)
 	case *parser.BinaryExpression:
 		return nameReferencesResolved(t.Left, ctx) && nameReferencesResolved(t.Right, ctx)
 	case *parser.UnaryExpression:
 		return nameReferencesResolved(t.Right, ctx)
+	}
+	return true
+}
+
+// allResolved reports whether every value in vs is fully bound in ctx.
+func allResolved(vs []parser.Value, ctx *index.EvaluationContext) bool {
+	for _, v := range vs {
+		if !nameReferencesResolved(v, ctx) {
+			return false
+		}
 	}
 	return true
 }

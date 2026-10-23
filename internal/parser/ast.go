@@ -220,6 +220,33 @@ func (v *MethodCall) End() Position {
 }
 func (v *MethodCall) isValue() {}
 
+// FunctionCall is a builtin iterator function invocation, written
+// `name(arg, …)`:
+//
+//	enumerate(@devices)
+//	zip(@names, @channels)
+//	range(0, 8, 2)
+//
+// The argument list is evaluated in the caller's context; the builtin set
+// lives in internal/loader (FunctionCall).
+type FunctionCall struct {
+	Position Position
+	// EndPosition is just past the closing parenthesis. Zero for values
+	// built programmatically rather than parsed.
+	EndPosition Position
+	Name        string
+	Args        []Value
+}
+
+func (v *FunctionCall) Pos() Position { return v.Position }
+func (v *FunctionCall) End() Position {
+	if v.EndPosition.Line > 0 {
+		return v.EndPosition
+	}
+	return v.Position
+}
+func (v *FunctionCall) isValue() {}
+
 // NewMapValue builds a MapValue from a Go map, sorting the keys.
 func NewMapValue(pos Position, values map[string]Value) *MapValue {
 	keys := make([]string, 0, len(values))

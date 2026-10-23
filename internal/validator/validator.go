@@ -318,11 +318,18 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 							Parent:    ed.Ctx,
 							Tree:      v.Tree,
 						}
-						if d.KeyVar != "" {
-							subCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
-						}
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
+						}
+						if d.KeyVar != "" {
+							// zip()/enumerate() produce two-element rows:
+							// `foreach a, b in @zip(...)` destructures them.
+							if row, ok := val.(*parser.ArrayValue); ok && len(row.Elements) == 2 {
+								subCtx.Variables[d.KeyVar] = row.Elements[0]
+								subCtx.Variables[d.ValueVar] = row.Elements[1]
+							} else {
+								subCtx.Variables[d.KeyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
+							}
 						}
 						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}

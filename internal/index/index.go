@@ -1857,6 +1857,15 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 			return res
 		}
 		return v
+	case *parser.FunctionCall:
+		args := make([]parser.Value, len(v.Args))
+		for k, a := range v.Args {
+			args[k] = pt.EvaluateValue(a, ctx)
+		}
+		if res := loader.FunctionCall(v.Name, args); res != nil {
+			return res
+		}
+		return v
 	case *parser.MemberAccess:
 		base := pt.EvaluateValue(v.Base, ctx)
 		if m, ok := base.(*parser.MapValue); ok {
@@ -2463,6 +2472,17 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		// Unknown method or incompatible receiver: keep the node so it
 		// renders symbolically instead of silently vanishing.
 		return v
+	case *parser.FunctionCall:
+		args := make([]parser.Value, len(v.Args))
+		for i, a := range v.Args {
+			args[i] = pt.evaluate(a, ctx)
+		}
+		if res := loader.FunctionCall(v.Name, args); res != nil {
+			return res
+		}
+		// Unknown function or incompatible arguments: keep the node so it
+		// renders symbolically instead of silently vanishing.
+		return v
 	case *parser.BinaryExpression:
 		left := pt.evaluate(v.Left, ctx)
 		right := pt.evaluate(v.Right, ctx)
@@ -3064,9 +3084,32 @@ func (pt *ProjectTree) valueToString(val parser.Value) string {
 			parts = append(parts, pt.valueToString(e))
 		}
 		return strings.Join(parts, " ")
+	case *parser.MemberAccess:
+		base := pt.valueToString(v.Base)
+		if base == "" {
+			return ""
+		}
+		return base + "." + v.Member
+	case *parser.MethodCall:
+		base := pt.valueToString(v.Base)
+		if base == "" {
+			return ""
+		}
+		return base + "." + v.Method + "(" + pt.callArgsToString(v.Args) + ")"
+	case *parser.FunctionCall:
+		return v.Name + "(" + pt.callArgsToString(v.Args) + ")"
 	default:
 		return ""
 	}
+}
+
+// callArgsToString renders a call's arguments, comma-separated.
+func (pt *ProjectTree) callArgsToString(args []parser.Value) string {
+	parts := make([]string, 0, len(args))
+	for _, a := range args {
+		parts = append(parts, pt.valueToString(a))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (pt *ProjectTree) ResolveFields(activeFragments map[*Fragment]bool) {
