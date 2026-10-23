@@ -991,7 +991,34 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 		}
 		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 	}
-	b.writeEvaluatedDefinitions(f, evaluated, indent, parentNode, writtenChildren, ctx)
+
+	// A node may carry several fragments for the same definition when the
+	// enclosing object was materialized under more than one scope (e.g. a
+	// file shared by two with/foreach contexts). They describe the same
+	// source definitions, so emitting every copy duplicates fields (invalid
+	// MARTe configuration). Keep one per definition pointer, preferring a
+	// scoped fragment (its values have the loop/with bindings applied).
+	deduped := make([]index.EvaluatedDefinition, 0, len(evaluated))
+	seen := make(map[parser.Definition]int, len(evaluated))
+	for _, ed := range evaluated {
+		if idx, ok := seen[ed.Def]; ok {
+			cur := deduped[idx]
+			if scopeOf(cur.Ctx) == "" && scopeOf(ed.Ctx) != "" {
+				deduped[idx] = ed
+			}
+			continue
+		}
+		seen[ed.Def] = len(deduped)
+		deduped = append(deduped, ed)
+	}
+	b.writeEvaluatedDefinitions(f, deduped, indent, parentNode, writtenChildren, ctx)
+}
+
+func scopeOf(ctx *index.EvaluationContext) string {
+	if ctx == nil {
+		return ""
+	}
+	return ctx.Scope
 }
 
 func (b *Builder) writeEvaluatedDefinitions(f *os.File, evaluated []index.EvaluatedDefinition, indent int, parentNode *index.ProjectNode, writtenChildren map[string]bool, defaultCtx *index.EvaluationContext) {
