@@ -273,6 +273,24 @@ func (p *Parser) parseCopyEndpoint() (CopyEndpoint, bool) {
 	ep := CopyEndpoint{Position: tok.Position, EndPos: tok.Position}
 	name := tok.Value
 
+	// Dynamic signal name: `DS::@expr`. The lexer stops the identifier at
+	// the '@', leaving the trailing '::' attached to the DataSource name.
+	if strings.HasSuffix(name, "::") {
+		ep.IsDS = true
+		ep.Object = strings.TrimSuffix(name, "::")
+		if ep.Object == "" {
+			p.addError(tok.Position, "expected a DataSource before '::'")
+			return ep, false
+		}
+		sigExpr, ok := p.parseValue()
+		if !ok {
+			return ep, false
+		}
+		ep.SignalExpr = sigExpr
+		ep.EndPos = sigExpr.End()
+		return ep, true
+	}
+
 	if idx := strings.Index(name, "::"); idx >= 0 {
 		ep.IsDS = true
 		ep.Object = name[:idx]

@@ -1866,6 +1866,12 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 			return res
 		}
 		return v
+	case *parser.ListComprehension:
+		if res := pt.evalComprehension(v, ctx, pt.EvaluateValue); res != nil {
+			return res
+		}
+		// Unresolvable iterable: keep the node so it renders symbolically.
+		return v
 	case *parser.MemberAccess:
 		base := pt.EvaluateValue(v.Base, ctx)
 		if m, ok := base.(*parser.MapValue); ok {
@@ -2483,6 +2489,11 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		// Unknown function or incompatible arguments: keep the node so it
 		// renders symbolically instead of silently vanishing.
 		return v
+	case *parser.ListComprehension:
+		// This evaluator has no variable scope to bind the loop variables
+		// in, so the comprehension stays symbolic here; EvaluateValue
+		// evaluates it with the caller's context.
+		return v
 	case *parser.BinaryExpression:
 		left := pt.evaluate(v.Left, ctx)
 		right := pt.evaluate(v.Right, ctx)
@@ -2883,6 +2894,79 @@ func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.
 	return nil
 }
 
+// evalComprehension evaluates `{ expr for v[, k] in iterable [if cond] }`.
+// eval is the caller's evaluator so each entry point keeps its own context
+// semantics. It returns nil when the iterable is not a list/dict.
+func (pt *ProjectTree) evalComprehension(c *parser.ListComprehension,
+	ctx *EvaluationContext, eval func(parser.Value, *EvaluationContext) parser.Value) parser.Value {
+
+	iterable := eval(c.Iterable, ctx)
+	out := &parser.ArrayValue{Position: c.Position, EndPosition: c.EndPosition}
+
+	emit := func(i int, val parser.Value) {
+		sub := &EvaluationContext{Variables: make(map[string]parser.Value), Parent: ctx, Tree: pt}
+		bindLoopVars(sub.Variables, c.KeyVar, c.ValueVar, i, val)
+		if c.Filter != nil {
+			cond := eval(c.Filter, sub)
+			if cond == nil || !pt.IsTrue(cond) {
+				return
+			}
+		}
+		if res := eval(c.Expr, sub); res != nil {
+			out.Elements = append(out.Elements, res)
+		}
+	}
+
+	switch it := iterable.(type) {
+	case *parser.ArrayValue:
+		for i, e := range it.Elements {
+			emit(i, e)
+		}
+		return out
+	case *parser.MapValue:
+		keys := append([]string(nil), it.Keys...)
+		sort.Strings(keys)
+		for _, k := range keys {
+			sub := &EvaluationContext{Variables: make(map[string]parser.Value), Parent: ctx, Tree: pt}
+			if c.KeyVar != "" {
+				sub.Variables[c.KeyVar] = &parser.StringValue{Value: k, Quoted: true}
+			}
+			if c.ValueVar != "" {
+				sub.Variables[c.ValueVar] = it.Values[k]
+			}
+			if c.Filter != nil {
+				cond := eval(c.Filter, sub)
+				if cond == nil || !pt.IsTrue(cond) {
+					continue
+				}
+			}
+			if res := eval(c.Expr, sub); res != nil {
+				out.Elements = append(out.Elements, res)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// bindLoopVars applies foreach binding rules: one variable gets the element,
+// two get index/key and element, and two-element rows destructure (so
+// enumerate/zip output can be projected directly).
+func bindLoopVars(vars map[string]parser.Value, keyVar, valueVar string, i int, val parser.Value) {
+	if valueVar != "" {
+		vars[valueVar] = val
+	}
+	if keyVar == "" {
+		return
+	}
+	if row, ok := val.(*parser.ArrayValue); ok && len(row.Elements) == 2 {
+		vars[keyVar] = row.Elements[0]
+		vars[valueVar] = row.Elements[1]
+		return
+	}
+	vars[keyVar] = &parser.IntValue{Value: int64(i), Raw: fmt.Sprintf("%d", i)}
+}
+
 // contains reports whether needle occurs in container: as a list element, as
 // a dict key, or as a substring of a string. It returns nil when the
 // container kind is not supported, which keeps the expression symbolic.
@@ -3157,6 +3241,16 @@ func (pt *ProjectTree) valueToString(val parser.Value) string {
 		return base + "." + v.Method + "(" + pt.callArgsToString(v.Args) + ")"
 	case *parser.FunctionCall:
 		return v.Name + "(" + pt.callArgsToString(v.Args) + ")"
+	case *parser.ListComprehension:
+		vars := v.ValueVar
+		if v.KeyVar != "" {
+			vars = v.KeyVar + ", " + v.ValueVar
+		}
+		text := "{ " + pt.valueToString(v.Expr) + " for " + vars + " in " + pt.valueToString(v.Iterable)
+		if v.Filter != nil {
+			text += " if " + pt.valueToString(v.Filter)
+		}
+		return text + " }"
 	default:
 		return ""
 	}

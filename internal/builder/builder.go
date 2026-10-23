@@ -23,9 +23,12 @@ type Builder struct {
 	Optimize       bool
 	OptimizeReport OptimizeReport
 	// LowerReport summarizes copy/wiring sugar expansion.
-	LowerReport     LowerReport
-	variables       map[string]parser.Value
-	tree            *index.ProjectTree
+	LowerReport LowerReport
+	variables   map[string]parser.Value
+	tree        *index.ProjectTree
+	// dynamicGroups maps a parsed copy group with dynamic endpoints to the
+	// concrete group it materializes into (one per enclosing scope).
+	dynamicGroups   map[*parser.CopyGroup]*parser.CopyGroup
 	activeNodes     map[*index.ProjectNode]bool
 	activeFragments map[*index.Fragment]bool
 }
@@ -80,7 +83,11 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == parser.Definition(d) {
 							b.activeFragments[f] = true
-							if f.EvalCtx == nil {
+							// Only conditional fragments need the enclosing
+							// binding; stamping it on unconditional ones
+							// would freeze the scope for later consumers
+							// (e.g. validation with -v overrides).
+							if f.IsConditional && f.EvalCtx == nil {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -133,7 +140,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				for _, f := range child.Fragments {
 					if f.Source == parser.Definition(d) {
 						b.activeFragments[f] = true
-						if f.EvalCtx == nil {
+						if f.IsConditional && f.EvalCtx == nil {
 							f.EvalCtx = ed.Ctx
 						}
 						found = true
@@ -145,7 +152,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == d {
 							b.activeFragments[f] = true
-							if f.EvalCtx == nil {
+							if f.IsConditional && f.EvalCtx == nil {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -246,6 +253,11 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 						processEval(b.tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				}
+			case *parser.CopyGroup:
+				if !parser.CopyGroupHasDynamicEndpoints(d) {
+					continue // static groups are lowered once by the lowerer
+				}
+				b.materializeCopyGroup(node, d, ed.Ctx, ed.File)
 			case *parser.WithBlock:
 				resolved := loader.ResolvePath(ed.File, b.tree.ValueToString(b.tree.EvaluateValue(d.Path, ed.Ctx)))
 				val, err := loader.Load(d.Format, resolved)
@@ -294,6 +306,162 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 	}
 }
 
+// activate collects active fragments in up to five passes, refreshing the
+// variable values each time so conditions defined by newly activated nodes
+// take effect. Shared by Build and Lower (the `mdt check` path needs the
+// same scope expansion so dynamic copy endpoints can be materialized).
+func (b *Builder) activate() {
+	tree := b.tree
+	if tree == nil {
+		return
+	}
+	b.collectVariables(tree)
+	tree.ResolveFields(nil)
+	tree.ResolveReferences(nil)
+
+	for pass := 0; pass < 5; pass++ {
+		// Each pass replays every scope; keep only the latest expansion.
+		for _, concrete := range b.dynamicGroups {
+			concrete.Items = nil
+		}
+		evalCtx := &index.EvaluationContext{Variables: make(map[string]parser.Value), Tree: b.tree}
+		for k, v := range b.variables {
+			evalCtx.Variables[k] = v
+		}
+
+		// Refresh variables from tree (might have new ones from newly activated fragments)
+		tree.Walk(func(n *index.ProjectNode) {
+			for k, varInfo := range n.Variables {
+				if _, ok := b.variables[k]; !ok || varInfo.Def.IsConst {
+					b.variables[k] = varInfo.Def.DefaultValue
+				}
+			}
+		})
+		// Re-apply overrides
+		b.collectVariables(tree) // This re-parses overrides
+
+		prevCount := len(b.activeFragments)
+		b.collectActiveNodes(tree.Root, evalCtx, false)
+		for _, node := range tree.IsolatedFiles {
+			b.collectActiveNodes(node, evalCtx, false)
+		}
+
+		// Re-resolve only active things after activation pass
+		tree.ResolveFields(b.activeFragments)
+		tree.ResolveReferences(b.activeFragments)
+
+		if len(b.activeFragments) == prevCount {
+			break
+		}
+	}
+
+	for group, concrete := range b.dynamicGroups {
+		if len(concrete.Items) == 0 {
+			fmt.Fprintf(os.Stderr, "Warning: dynamic copy group %q at %d:%d produced no copies (unresolvable endpoint name?)\n",
+				concrete.Name, group.Position.Line, group.Position.Column)
+		}
+	}
+}
+
+// materializeCopyGroup records one expansion of a copy group with dynamic
+// endpoints. All expansions of the same group fold into one concrete group,
+// so the lowered IOGAM carries every copied signal.
+func (b *Builder) materializeCopyGroup(node *index.ProjectNode, group *parser.CopyGroup, ctx *index.EvaluationContext, file string) bool {
+	if b.dynamicGroups == nil {
+		b.dynamicGroups = make(map[*parser.CopyGroup]*parser.CopyGroup)
+	}
+	concrete := b.dynamicGroups[group]
+	if concrete == nil {
+		concrete = &parser.CopyGroup{
+			Position:    group.Position,
+			EndPosition: group.EndPosition,
+			Name:        group.Name,
+		}
+		b.dynamicGroups[group] = concrete
+		// The lowered GAM must live in the Functions container that held
+		// the loop, in a definition fragment of its own (marked active so
+		// the lowerer picks it up). The original group stays in place and
+		// is skipped by lowering.
+		frag := &index.Fragment{
+			File:           file,
+			Definitions:    []parser.Definition{concrete},
+			DefinitionDocs: map[parser.Definition]string{},
+			IsConditional:  false,
+		}
+		node.Fragments = append(node.Fragments, frag)
+		b.activeFragments[frag] = true
+		if b.activeNodes == nil {
+			b.activeNodes = make(map[*index.ProjectNode]bool)
+		}
+		b.activeNodes[node] = true
+	}
+
+	for _, item := range group.Items {
+		resolved, ok := b.resolveDynamicItem(item, ctx)
+		if !ok {
+			return false
+		}
+		concrete.Items = append(concrete.Items, resolved)
+	}
+	return true
+}
+
+// resolveDynamicItem evaluates the expressions of a copy item: dynamic
+// endpoint names and every per-signal option value (so options can use loop
+// variables and with bindings).
+func (b *Builder) resolveDynamicItem(item parser.CopyItem, ctx *index.EvaluationContext) (parser.CopyItem, bool) {
+	resolveEP := func(ep parser.CopyEndpoint) (parser.CopyEndpoint, bool) {
+		if !ep.Dynamic() {
+			return ep, true
+		}
+		name := b.tree.ValueToString(b.tree.EvaluateValue(ep.SignalExpr, ctx))
+		if name == "" {
+			// Early passes may run before the loop variable is bound; the
+			// final pass decides. activate() warns if nothing materializes.
+			return ep, false
+		}
+		ep.Signal = name
+		ep.SignalExpr = nil
+		return ep, true
+	}
+	resolveOpts := func(opts []parser.CopyOption) []parser.CopyOption {
+		out := make([]parser.CopyOption, len(opts))
+		for i, o := range opts {
+			out[i] = parser.CopyOption{Position: o.Position, Name: o.Name, Value: b.tree.EvaluateValue(o.Value, ctx)}
+		}
+		return out
+	}
+
+	src, ok := resolveEP(item.Src)
+	if !ok {
+		return item, false
+	}
+	dst, ok := resolveEP(item.Dst)
+	if !ok {
+		return item, false
+	}
+	item.Src, item.Dst = src, dst
+	item.SrcOptions = resolveOpts(item.SrcOptions)
+	item.DstOptions = resolveOpts(item.DstOptions)
+	for i := range item.SrcGroup {
+		ep, ok := resolveEP(item.SrcGroup[i].Endpoint)
+		if !ok {
+			return item, false
+		}
+		item.SrcGroup[i].Endpoint = ep
+		item.SrcGroup[i].Options = resolveOpts(item.SrcGroup[i].Options)
+	}
+	for i := range item.DstGroup {
+		ep, ok := resolveEP(item.DstGroup[i].Endpoint)
+		if !ok {
+			return item, false
+		}
+		item.DstGroup[i].Endpoint = ep
+		item.DstGroup[i].Options = resolveOpts(item.DstGroup[i].Options)
+	}
+	return item, true
+}
+
 func (b *Builder) Build(f *os.File) error {
 	// Build the Project Tree
 	tree := index.NewProjectTree()
@@ -333,47 +501,7 @@ func (b *Builder) Build(f *os.File) error {
 		tree.AddFile(file, config)
 	}
 
-	b.collectVariables(tree)
-	tree.ResolveFields(nil)
-	tree.ResolveReferences(nil)
-
-	// Multi-pass active node collection
-	for pass := 0; pass < 5; pass++ {
-		evalCtx := &index.EvaluationContext{Variables: make(map[string]parser.Value), Tree: b.tree}
-		for k, v := range b.variables {
-			evalCtx.Variables[k] = v
-		}
-
-		// Refresh variables from tree (might have new ones from newly activated fragments)
-		tree.Walk(func(n *index.ProjectNode) {
-			for k, varInfo := range n.Variables {
-				if _, ok := b.variables[k]; !ok || varInfo.Def.IsConst {
-					b.variables[k] = varInfo.Def.DefaultValue
-				}
-			}
-		})
-		// Re-apply overrides
-		b.collectVariables(tree) // This re-parses overrides
-
-		prevCount := len(b.activeFragments)
-		b.collectActiveNodes(tree.Root, evalCtx, false)
-		for _, node := range tree.IsolatedFiles {
-			b.collectActiveNodes(node, evalCtx, false)
-		}
-
-		// Re-resolve only active things after activation pass
-		tree.ResolveFields(b.activeFragments)
-		tree.ResolveReferences(b.activeFragments)
-
-		if len(b.activeFragments) == prevCount {
-			break
-		}
-	}
-
-	evalCtx := &index.EvaluationContext{Variables: make(map[string]parser.Value), Tree: b.tree}
-	for k, v := range b.variables {
-		evalCtx.Variables[k] = v
-	}
+	b.activate()
 
 	// Expand copy/wiring sugar before validation: copies create the signal
 	// producers that the ordering checks expect.
@@ -806,6 +934,22 @@ func (b *Builder) formatValueWithCtx(val parser.Value, ctx *index.EvaluationCont
 			return fmt.Sprintf("%s(%s)", v.Name, strings.Join(parts, ", "))
 		}
 		return b.formatValueWithCtx(res, ctx)
+	case *parser.ListComprehension:
+		res := b.tree.EvaluateValue(v, ctx)
+		if _, stillComp := res.(*parser.ListComprehension); stillComp {
+			// Unresolvable iterable: keep the expression as written.
+			vars := v.ValueVar
+			if v.KeyVar != "" {
+				vars = v.KeyVar + ", " + v.ValueVar
+			}
+			text := "{ " + b.formatValueWithCtx(v.Expr, ctx) + " for " + vars +
+				" in " + b.formatValueWithCtx(v.Iterable, ctx)
+			if v.Filter != nil {
+				text += " if " + b.formatValueWithCtx(v.Filter, ctx)
+			}
+			return text + " }"
+		}
+		return b.formatValueWithCtx(res, ctx)
 	case *parser.MapValue:
 		parts := []string{}
 		for _, k := range v.Keys {
@@ -857,6 +1001,16 @@ func nameReferencesResolved(v parser.Value, ctx *index.EvaluationContext) bool {
 		return nameReferencesResolved(t.Base, ctx) && allResolved(t.Args, ctx)
 	case *parser.FunctionCall:
 		return allResolved(t.Args, ctx)
+	case *parser.ListComprehension:
+		// The loop variables are bound by the comprehension itself; only the
+		// iterable and filter must resolve in the surrounding scope.
+		if !nameReferencesResolved(t.Iterable, ctx) {
+			return false
+		}
+		if t.Filter != nil && !nameReferencesResolved(t.Filter, ctx) {
+			return false
+		}
+		return true
 	case *parser.BinaryExpression:
 		return nameReferencesResolved(t.Left, ctx) && nameReferencesResolved(t.Right, ctx)
 	case *parser.UnaryExpression:

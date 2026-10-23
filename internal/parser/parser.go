@@ -909,9 +909,19 @@ func (p *Parser) isSubnodeLookahead() bool {
 
 	if t1.Type == TokenVariableReference {
 		// `@expr = { … }` — dynamic object name (e.g. `@signal.name`
-		// inside a foreach). Struct literals cannot have `@` keys, so
-		// this can only be a definition.
-		return true
+		// inside a foreach). Struct literals cannot have `@` keys, so a
+		// top-level `=` means the brace opens a definition body. Without
+		// one the brace is an array value, e.g. a list comprehension:
+		// `{ @sig.name for sig in @signals }`.
+		for i := 2; ; i++ {
+			t := p.peekN(i)
+			switch t.Type {
+			case TokenEqual:
+				return true
+			case TokenRBrace, TokenLBrace, TokenComma, TokenEOF:
+				return false
+			}
+		}
 	}
 
 	// Directives opening a block (`#foreach`, `#if`, `#template`, …)
@@ -1212,6 +1222,15 @@ func (p *Parser) parseAtom() (Value, bool) {
 				return nil, false
 			}
 			arr.Elements = append(arr.Elements, elem)
+			// `{ expr for x in … }` — list comprehension.
+			if p.peek().Type == TokenIdentifier && p.peek().Value == "for" &&
+				len(arr.Elements) == 1 {
+				comp, compOK := p.parseComprehension(tok, elem)
+				if !compOK {
+					return nil, false
+				}
+				return p.parsePostfix(tok, comp)
+			}
 		}
 		val = arr
 	default:
@@ -1220,6 +1239,62 @@ func (p *Parser) parseAtom() (Value, bool) {
 	}
 
 	return p.parsePostfix(tok, val)
+}
+
+// parseComprehension parses the tail of `{ expr for v[, k] in iterable
+// [if cond] }`; the caller consumed the opening brace and the element
+// expression. The closing brace is consumed here.
+func (p *Parser) parseComprehension(openTok Token, expr Value) (Value, bool) {
+	p.next() // consume 'for'
+	v1 := p.next()
+	if v1.Type != TokenIdentifier {
+		p.addError(v1.Position, "expected a loop variable after 'for'")
+		return nil, false
+	}
+	keyVar, valueVar := "", v1.Value
+	// Two variables bind index/key and element, written `k, v` or `k v`.
+	if p.peek().Type == TokenComma {
+		p.next()
+		v2 := p.next()
+		if v2.Type != TokenIdentifier {
+			p.addError(v2.Position, "expected a loop variable after ','")
+			return nil, false
+		}
+		keyVar, valueVar = v1.Value, v2.Value
+	} else if p.peek().Type == TokenIdentifier {
+		v2 := p.next()
+		keyVar, valueVar = v1.Value, v2.Value
+	}
+	if p.next().Type != TokenIn {
+		p.addError(p.peek().Position, "expected 'in' in list comprehension")
+		return nil, false
+	}
+	iterable, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+	comp := &ListComprehension{
+		Position: openTok.Position,
+		Expr:     expr,
+		KeyVar:   keyVar,
+		ValueVar: valueVar,
+		Iterable: iterable,
+	}
+	if p.peek().Type == TokenIf {
+		p.next()
+		filter, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+		comp.Filter = filter
+	}
+	closeTok := p.next()
+	if closeTok.Type != TokenRBrace {
+		p.addError(closeTok.Position, "expected } to close the list comprehension")
+		return nil, false
+	}
+	comp.EndPosition = Position{Line: closeTok.Position.Line, Column: closeTok.Position.Column + 1}
+	return comp, true
 }
 
 // parseCallArgs parses the argument list of a call, after the '(' has been

@@ -507,6 +507,28 @@ func (w *WithBlock) Pos() Position { return w.Position }
 func (w *WithBlock) End() Position { return w.EndPosition }
 func (w *WithBlock) isDefinition() {}
 
+// ListComprehension builds a list from an iterable:
+//
+//	{ @sig.name for sig in @signals }
+//	{ @name for name, cfg in @map if @cfg.enabled }
+//
+// One loop variable binds the element (dict values); two bind index/key and
+// element, exactly like foreach. The optional `if` filter keeps only the
+// items whose condition is true.
+type ListComprehension struct {
+	Position    Position
+	EndPosition Position
+	Expr        Value
+	KeyVar      string // empty for the one-variable form
+	ValueVar    string
+	Iterable    Value
+	Filter      Value // nil when absent
+}
+
+func (c *ListComprehension) Pos() Position { return c.Position }
+func (c *ListComprehension) End() Position { return c.EndPosition }
+func (c *ListComprehension) isValue()      {}
+
 // AssertStatement fails validation — and therefore the build — when its
 // condition does not hold:
 //
@@ -532,12 +554,44 @@ func (a *AssertStatement) isDefinition() {}
 type CopyEndpoint struct {
 	Position Position
 	Object   string // GAM or DataSource name
-	Signal   string // signal name ("" when ByIndex)
-	IsDS     bool   // DataSource::Signal form
-	ByIndex  bool   // selected by 1-based index in the GAM's signal list
-	Index    int    // 1-based start (or single) index
-	IndexEnd int    // 1-based end for ranges; equals Index for single
-	EndPos   Position
+	Signal   string // signal name ("" when ByIndex or dynamic)
+	// SignalExpr is set for a dynamic signal name, written `DS::@expr`.
+	// The expression is evaluated for every expansion of the enclosing
+	// foreach/with scope and the endpoint becomes the resulting name.
+	SignalExpr Value
+	IsDS       bool // DataSource::Signal form
+	ByIndex    bool // selected by 1-based index in the GAM's signal list
+	Index      int  // 1-based start (or single) index
+	IndexEnd   int  // 1-based end for ranges; equals Index for single
+	EndPos     Position
+}
+
+// Dynamic reports whether the endpoint's signal name is an expression.
+func (e CopyEndpoint) Dynamic() bool { return e.SignalExpr != nil }
+
+// CopyGroupHasDynamicEndpoints reports whether any item or member of the
+// group uses a dynamic endpoint (`DS::@expr`). Such groups are materialized
+// per expansion of their enclosing scope before lowering.
+func CopyGroupHasDynamicEndpoints(g *CopyGroup) bool {
+	if g == nil {
+		return false
+	}
+	for _, item := range g.Items {
+		if item.Src.Dynamic() || item.Dst.Dynamic() {
+			return true
+		}
+		for _, m := range item.SrcGroup {
+			if m.Endpoint.Dynamic() {
+				return true
+			}
+		}
+		for _, m := range item.DstGroup {
+			if m.Endpoint.Dynamic() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e CopyEndpoint) Pos() Position { return e.Position }

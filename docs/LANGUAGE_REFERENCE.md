@@ -104,6 +104,51 @@ Matrix = {
 }
 ```
 
+### Dynamic copy endpoints
+
+Inside a `with`/`foreach` scope the signal name of a copy endpoint may be an
+expression, written after `::`:
+
+```marte
+with json("signals.json") as cfg begin
+  foreach sig in @cfg.signals
+    copy ReadADC {
+      FastAdc::@sig.name { Samples = @n } -> DDB::@sig.name { Samples = @n }
+    }
+  end
+end
+```
+
+All iterations fold into a single IOGAM, and per-signal options are
+evaluated in the loop scope (see `docs/COPY_SUGAR.md`).
+
+### List comprehensions
+
+`{ expr for var in iterable [if cond] }` builds a list by evaluating `expr`
+for every item. One variable binds the element (dict values); two bind
+index/key and element, exactly like `foreach`. An optional `if` keeps only
+the items whose condition is true.
+
+```marte
+// project one field out of a list of objects
+Names = { @sig.name for sig in @cfg.signals }
+
+// filter while projecting
+Channels = { @sig.channel for sig in @cfg.signals if @sig.channel > 1 }
+
+// index, arithmetic and dict iteration
+Indexed = { @i for i, sig in @cfg.signals }
+Doubled = { @n * 2 for n in @nums }
+Enabled = { @k for k, v in @flags if @v }
+```
+
+- The iterable is any expression evaluating to a list or a dict; anything
+  else leaves the comprehension unevaluated (it renders as written) rather
+  than producing an empty list.
+- Two-variable loops destructure two-element rows, so `{ @name for i, s in
+  zip(@names, @chans) }` works like the `foreach` form.
+- Dict iteration is sorted by key, so build output is deterministic.
+
 ### Conditional array elements
 
 `if`/`else` blocks flatten inline inside array literals (the active

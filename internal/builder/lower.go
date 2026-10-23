@@ -141,7 +141,12 @@ func (b *Builder) lowerAll() (LowerReport, error) {
 // Lower expands copy/wiring sugar on a tree without writing it. Used by
 // `mdt check` so sugar-backed configurations validate like lowered ones.
 func Lower(tree *index.ProjectTree) (LowerReport, error) {
-	b := &Builder{tree: tree}
+	b := NewBuilder(nil, nil)
+	b.tree = tree
+	// Expansion needs the same scope evaluation as a build: dynamic copy
+	// endpoints are materialized per foreach/with expansion during
+	// activation, and only active fragments may be lowered.
+	b.activate()
 	rep, err := b.lowerAll()
 	if err != nil {
 		return rep, err
@@ -322,6 +327,11 @@ func (l *lowerer) lowerCopyGroups(root *index.ProjectNode, rep *LowerReport) err
 			}
 			for i, def := range frag.Definitions {
 				if g, ok := def.(*parser.CopyGroup); ok {
+					if parser.CopyGroupHasDynamicEndpoints(g) {
+						// Materialized per expansion during activation; the
+						// concrete group is lowered instead.
+						continue
+					}
 					if g.Name == "" {
 						// An anonymous group in an object body has no place
 						// in any Functions list, so it could never run.

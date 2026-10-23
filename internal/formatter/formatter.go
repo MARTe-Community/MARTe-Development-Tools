@@ -390,6 +390,21 @@ func (f *Formatter) formatValue(val parser.Value, indent int) int {
 		fmt.Fprint(f.writer, v.Operator.Value)
 		f.formatValue(v.Right, indent)
 		return v.Position.Line
+	case *parser.ListComprehension:
+		fmt.Fprint(f.writer, "{ ")
+		f.formatValue(v.Expr, indent)
+		fmt.Fprint(f.writer, " for ")
+		if v.KeyVar != "" {
+			fmt.Fprintf(f.writer, "%s, ", v.KeyVar)
+		}
+		fmt.Fprintf(f.writer, "%s in ", v.ValueVar)
+		f.formatValue(v.Iterable, indent)
+		if v.Filter != nil {
+			fmt.Fprint(f.writer, " if ")
+			f.formatValue(v.Filter, indent)
+		}
+		fmt.Fprint(f.writer, " }")
+		return v.Position.Line
 	case *parser.ArrayValue:
 		return f.formatArray(v, indent)
 	case *parser.ConditionalArrayElements:
@@ -553,7 +568,10 @@ func (f *Formatter) peekPosition() parser.Position {
 // formatCopySide prints one side of a copy item (grouped or single).
 func (f *Formatter) formatCopySide(ep parser.CopyEndpoint, alias string, opts []parser.CopyOption, group []parser.CopyMember, indent int) {
 	writeOne := func(e parser.CopyEndpoint, al string, os []parser.CopyOption) {
-		if e.IsDS {
+		if e.IsDS && e.Dynamic() {
+			fmt.Fprintf(f.writer, "%s::", e.Object)
+			f.formatValue(e.SignalExpr, indent)
+		} else if e.IsDS {
 			fmt.Fprintf(f.writer, "%s::%s", e.Object, e.Signal)
 		} else if e.ByIndex {
 			if e.IndexEnd > e.Index {

@@ -88,6 +88,32 @@ name in the thread, or move it into the list.
 | `: type[dim]` | item | type for signals that declare none |
 | `{ Name = value … }` | both | per-signal options emitted verbatim into the generated entry (`Type`, `NumberOfElements`, `Samples`, `Frequency`, `Ranges`, `Value`, `Trigger`, `Comparator`, …) |
 | `(a, b) -> (c, d)` | both | grouped endpoints: a contiguous memory block (see below) |
+| `DS::@expr` | both | dynamic signal name: evaluated for every expansion of the enclosing `with`/`foreach` scope |
+
+### Dynamic endpoints
+
+The signal part of an endpoint may be an expression, evaluated in the scope
+the group is written in (loop variable, `with` binding, overrides):
+
+```marte
+with json("EC-GN-P01-Signals.json") as signals begin
+  foreach signal in @signals.AnalogInputSignals
+    copy ReadADC {
+      FastAdcDataSource::@signal.name { Samples = @samples_adc }
+        -> DDB4::@signal.name { Samples = @samples_adc }
+    }
+  end
+end
+```
+
+Every iteration folds into **one** `+ReadADC` IOGAM carrying all copied
+signals — the group is expanded per iteration/`with` binding during
+activation, before lowering, so `mdt check` and `mdt build` behave the
+same. Per-signal option values are evaluated in the same scope, so they can
+reference loop variables. The original group is a template and never
+lowered on its own; if its endpoints cannot be resolved (no loop binding,
+unknown variable) the build warns and emits nothing. Dynamic endpoints are
+supported for `DS::Signal`; the `GAM.Signal` / index forms stay static.
 
 Per-signal options follow the endpoint, before `->` for the source and
 after the destination alias for the destination:
