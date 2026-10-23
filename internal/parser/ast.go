@@ -507,6 +507,25 @@ func (w *WithBlock) Pos() Position { return w.Position }
 func (w *WithBlock) End() Position { return w.EndPosition }
 func (w *WithBlock) isDefinition() {}
 
+// AssertStatement fails validation — and therefore the build — when its
+// condition does not hold:
+//
+//	assert(@variant == "A", "variant must be A")
+//
+// The message may be any expression and is evaluated in the assert's scope,
+// so it can interpolate loop variables and overrides. The statement itself
+// never appears in build output.
+type AssertStatement struct {
+	Position    Position
+	EndPosition Position
+	Condition   Value
+	Message     Value // nil when omitted
+}
+
+func (a *AssertStatement) Pos() Position { return a.Position }
+func (a *AssertStatement) End() Position { return a.EndPosition }
+func (a *AssertStatement) isDefinition() {}
+
 // --- Copy / wiring sugar ------------------------------------------------
 
 // CopyEndpoint is one side of a copy: `GAM.Signal`, `GAM[n]` or `DS::Signal`.

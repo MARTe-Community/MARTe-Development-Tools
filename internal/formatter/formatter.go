@@ -277,6 +277,15 @@ func (f *Formatter) formatDefinition(def parser.Definition, indent int) int {
 		f.formatBlock(d.Body, indent+1)
 		fmt.Fprintf(f.writer, "%send", indentStr)
 		return d.EndPosition.Line
+	case *parser.AssertStatement:
+		fmt.Fprintf(f.writer, "%sassert(", indentStr)
+		f.formatValue(d.Condition, indent)
+		if d.Message != nil {
+			fmt.Fprint(f.writer, ", ")
+			f.formatValue(d.Message, indent)
+		}
+		fmt.Fprint(f.writer, ")")
+		return d.Position.Line
 	case *parser.TemplateInstantiation:
 		fmt.Fprintf(f.writer, "%suse %s %s(", indentStr, d.Template, d.Name)
 		for i, arg := range d.Arguments {

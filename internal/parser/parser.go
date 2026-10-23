@@ -164,6 +164,12 @@ func (p *Parser) parseDefinition() (Definition, bool) {
 			return p.parseFuse(tok)
 		}
 
+		// Build-time assertion: `assert(condition, "message")`.
+		if name == "assert" && p.peek().Type == TokenSymbol && p.peek().Value == "(" &&
+			p.peek().Position.Line == tok.Position.Line {
+			return p.parseAssert(tok)
+		}
+
 		// Signal shorthand: DS::Signal [: Type[Dim]] [= { … }]
 		if strings.Contains(name, "::") {
 			return p.parseSignalShorthand(tok, name)
@@ -1011,6 +1017,8 @@ func getPrecedence(t Token) int {
 		}
 	case TokenConcat:
 		return 5
+	case TokenIn:
+		return 3 // `x in @list` — comparison level, like Python
 	case TokenPipe, TokenCaret:
 		return 6 // Bitwise OR/XOR
 	case TokenAmpersand:
@@ -1812,6 +1820,32 @@ func (p *Parser) atWithLoader() bool {
 //
 // `begin`/`{` are both accepted as body openers; the body is closed by
 // `end` (or the closing brace).
+// parseAssert parses `assert(condition[, "message"])`. The caller has
+// consumed the `assert` identifier.
+func (p *Parser) parseAssert(startTok Token) (Definition, bool) {
+	p.next() // consume '('
+	cond, ok := p.parseValue()
+	if !ok {
+		return nil, false
+	}
+	def := &AssertStatement{Position: startTok.Position, EndPosition: startTok.Position, Condition: cond}
+	if p.peek().Type == TokenComma {
+		p.next()
+		msg, ok := p.parseValue()
+		if !ok {
+			return nil, false
+		}
+		def.Message = msg
+	}
+	closeTok := p.next()
+	if closeTok.Type != TokenSymbol || closeTok.Value != ")" {
+		p.addError(closeTok.Position, "expected ) after assert arguments")
+		return nil, false
+	}
+	def.EndPosition = Position{Line: closeTok.Position.Line, Column: closeTok.Position.Column + 1}
+	return def, true
+}
+
 func (p *Parser) parseWith(startTok Token) (Definition, bool) {
 	formatTok := p.next()
 	if formatTok.Type != TokenIdentifier {

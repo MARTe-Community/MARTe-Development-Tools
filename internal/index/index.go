@@ -2727,6 +2727,10 @@ func (pn *ProjectNode) Clone(parent *ProjectNode) *ProjectNode {
 }
 
 func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.Value) parser.Value {
+	if op.Type == parser.TokenIn {
+		// Membership: `x in @list`, `key in @map`, `"sub" in "string"`.
+		return pt.contains(right, left)
+	}
 	if op.Type == parser.TokenConcat {
 		// List concatenation: array .. array merges the two lists.
 		if la, ok := left.(*parser.ArrayValue); ok {
@@ -2877,6 +2881,61 @@ func (pt *ProjectTree) compute(left parser.Value, op parser.Token, right parser.
 	}
 
 	return nil
+}
+
+// contains reports whether needle occurs in container: as a list element, as
+// a dict key, or as a substring of a string. It returns nil when the
+// container kind is not supported, which keeps the expression symbolic.
+func (pt *ProjectTree) contains(container, needle parser.Value) parser.Value {
+	switch c := container.(type) {
+	case *parser.ArrayValue:
+		for _, e := range c.Elements {
+			if pt.valuesEqual(e, needle) {
+				return &parser.BoolValue{Value: true}
+			}
+		}
+		return &parser.BoolValue{Value: false}
+	case *parser.MapValue:
+		key := pt.valueToString(needle)
+		for _, k := range c.Keys {
+			if k == key {
+				return &parser.BoolValue{Value: true}
+			}
+		}
+		return &parser.BoolValue{Value: false}
+	case *parser.StringValue:
+		return &parser.BoolValue{Value: strings.Contains(c.Value, pt.valueToString(needle))}
+	}
+	return nil
+}
+
+// valuesEqual compares two values for membership testing: numbers compare
+// numerically across int/float, everything else by its rendered text.
+func (pt *ProjectTree) valuesEqual(a, b parser.Value) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	switch x := a.(type) {
+	case *parser.IntValue:
+		switch y := b.(type) {
+		case *parser.IntValue:
+			return x.Value == y.Value
+		case *parser.FloatValue:
+			return float64(x.Value) == y.Value
+		}
+	case *parser.FloatValue:
+		switch y := b.(type) {
+		case *parser.FloatValue:
+			return x.Value == y.Value
+		case *parser.IntValue:
+			return x.Value == float64(y.Value)
+		}
+	case *parser.BoolValue:
+		if y, ok := b.(*parser.BoolValue); ok {
+			return x.Value == y.Value
+		}
+	}
+	return pt.valueToString(a) == pt.valueToString(b)
 }
 
 func (pt *ProjectTree) computeUnary(op parser.Token, val parser.Value) parser.Value {

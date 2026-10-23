@@ -129,7 +129,7 @@ Operators, lowest to highest binding:
 | ----- | ----------------- | ------------------------- |
 | 1     | `\|\|`            | logical or                |
 | 2     | `&&`              | logical and               |
-| 3     | `==` `!=`         | equality                  |
+| 3     | `==` `!=` `in`    | equality; `x in y` membership (see below) |
 | 4     | `<` `>` `<=` `>=` | comparison                |
 | 5     | `..`              | concatenation (see below) |
 | 6     | `\|`              | bitwise or                |
@@ -434,6 +434,61 @@ end
 
 An unknown function, or arguments of the wrong kind, leave the call in
 the output verbatim (`zip(1, 2)`) and are reported by validation.
+
+## 10.3 Membership: `in`
+
+`x in y` returns a boolean and binds at comparison level:
+
+| Right operand | Meaning |
+| --- | --- |
+| list | element membership (numbers compare numerically across int/float) |
+| dict | key membership (`"k1" in { k1 = 1 }`) |
+| string | substring test (`"AI" in "AI0 and AI1"`) |
+
+```marte
+var names: [string] = { "AI0", "AI1" }
+
++App = {
+  Class = ReferenceContainer
+  HasAI1 = "AI1" in @names          // true
+  Missing = "ZZ" in @names          // false
+  IsKey = "k1" in { k1 = 1 }        // true
+  Substring = "AI" in "AI0 and AI1" // true
+  if "AI0" in @names
+    …
+  end
+}
+```
+
+Other container kinds leave the expression unevaluated (it renders
+verbatim), so mistakes surface instead of silently yielding `false`.
+
+## 10.4 Build-time assertions: `assert`
+
+`assert(condition)` or `assert(condition, message)` fails validation — and
+therefore `mdt build` — when the condition does not hold:
+
+```marte
+var variant: string = "A"
+
+assert(@variant == "A", "variant must be A, got " .. @variant)
+
++App = {
+  Class = ReferenceContainer
+  foreach n in { "AI0", "AI1" }
+    assert(@n in @signals, "unknown signal " .. @n)   // per iteration
+  end
+}
+```
+
+- Assertions are evaluated after activation settles, so they can reference
+  variables from any file and see `-v` / `-j` overrides.
+- The message is an expression (`..` concatenates, `@vars` interpolate);
+  it becomes the diagnostic text. Position is the `assert` itself.
+- Assertions inside an `if`/`else` branch that is not selected do not run;
+  inside `foreach` they run once per iteration.
+- The statement is build-time only: it never appears in the generated
+  configuration, and `mdt fmt` preserves it.
 
 ## 11. Comments, docstrings and pragmas
 

@@ -36,6 +36,14 @@ type Diagnostic struct {
 	File     string
 }
 
+// assertInstance records where an assert was reached so it can be
+// evaluated with the right scope and reported at its own position.
+type assertInstance struct {
+	ctx  *index.EvaluationContext
+	file string
+	node *index.ProjectNode
+}
+
 type Validator struct {
 	Diagnostics []Diagnostic
 	Tree        *index.ProjectTree
@@ -54,6 +62,12 @@ type Validator struct {
 	mu              sync.Mutex
 	ActiveNodes     map[*index.ProjectNode]bool
 	ActiveFragments map[*index.Fragment]bool
+	// pendingAsserts holds the assert statements reached by activation,
+	// keyed by definition. They are evaluated after the final activation
+	// pass, once every variable has settled (later passes overwrite the
+	// evaluation context, so the last one wins).
+	pendingAsserts  map[*parser.AssertStatement]assertInstance
+	reportedAsserts map[*parser.AssertStatement]bool
 	// visited tracks (child node -> source definition) pairs already
 	// expanded by activation, keeping repeated passes idempotent.
 	visited map[*index.ProjectNode]map[parser.Definition]bool
@@ -70,6 +84,8 @@ func NewValidator(tree *index.ProjectTree, projectRoot string, overrides map[str
 		Variables:       make(map[string]parser.Value),
 		ActiveNodes:     make(map[*index.ProjectNode]bool),
 		ActiveFragments: make(map[*index.Fragment]bool),
+		pendingAsserts:  make(map[*parser.AssertStatement]assertInstance),
+		reportedAsserts: make(map[*parser.AssertStatement]bool),
 		visited:         make(map[*index.ProjectNode]map[parser.Definition]bool),
 	}
 
@@ -358,6 +374,15 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 						processEval(v.Tree.EvaluateDefinitions(d.Body, subCtx, ed.File), node, forceUncond)
 					}
 				}
+			case *parser.AssertStatement:
+				// Evaluated once activation settles: the condition may
+				// reference variables defined by nodes activated later.
+				v.muActive.Lock()
+				if v.pendingAsserts == nil {
+					v.pendingAsserts = make(map[*parser.AssertStatement]assertInstance)
+				}
+				v.pendingAsserts[d] = assertInstance{ctx: ed.Ctx, file: ed.File, node: node}
+				v.muActive.Unlock()
 			case *parser.WithBlock:
 				resolved := loader.ResolvePath(ed.File, v.ValueToString(d.Path, ed.Ctx))
 				val, err := v.loadStructured(resolved, d.Format)
@@ -479,6 +504,48 @@ func (v *Validator) Activate(ctx context.Context) {
 		if len(v.ActiveFragments) == prevCount {
 			break
 		}
+	}
+	v.evaluateAsserts()
+}
+
+// evaluateAsserts checks every assert statement reached by activation. A
+// failing condition is an error diagnostic, so `mdt check` reports it and
+// `mdt build` refuses to write output. Each assert is reported at most once
+// per validator run.
+func (v *Validator) evaluateAsserts() {
+	v.muActive.Lock()
+	pending := make([]*parser.AssertStatement, 0, len(v.pendingAsserts))
+	instances := make(map[*parser.AssertStatement]assertInstance, len(v.pendingAsserts))
+	for def, inst := range v.pendingAsserts {
+		if v.reportedAsserts[def] {
+			continue
+		}
+		pending = append(pending, def)
+		instances[def] = inst
+	}
+	v.muActive.Unlock()
+
+	for _, def := range pending {
+		inst := instances[def]
+		cond := v.Tree.EvaluateValue(def.Condition, inst.ctx)
+		if cond == nil {
+			v.report(inst.node, "assert_unresolved", LevelError,
+				"assert: the condition could not be evaluated (unresolved reference?)",
+				def.Position, inst.file)
+		} else if v.Tree.IsTrue(cond) {
+			continue
+		} else {
+			msg := "assertion failed"
+			if def.Message != nil {
+				if rendered := v.ValueToString(def.Message, inst.ctx); rendered != "" {
+					msg = rendered
+				}
+			}
+			v.report(inst.node, "assert_failed", LevelError, msg, def.Position, inst.file)
+		}
+		v.muActive.Lock()
+		v.reportedAsserts[def] = true
+		v.muActive.Unlock()
 	}
 }
 
