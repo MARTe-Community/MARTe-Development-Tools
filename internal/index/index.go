@@ -409,6 +409,54 @@ func (ctx *EvaluationContext) Resolve(name string) parser.Value {
 	return nil
 }
 
+// HasUnresolvedReference reports whether val references a variable that has
+// no value in ctx. Loop and template variables are registered in the tree
+// without a default, so they exist but resolve to nil until their block
+// expansion binds them; callers that run outside that expansion (e.g. a
+// node-level pass over a loop body) must not act on such a value.
+func (pt *ProjectTree) HasUnresolvedReference(val parser.Value, ctx *EvaluationContext) bool {
+	switch v := val.(type) {
+	case nil:
+		return true
+	case *parser.VariableReferenceValue:
+		name := strings.TrimPrefix(strings.TrimPrefix(v.Name, "@"), "$")
+		if ctx == nil {
+			return true
+		}
+		return ctx.Resolve(name) == nil
+	case *parser.MemberAccess:
+		return pt.HasUnresolvedReference(v.Base, ctx)
+	case *parser.BinaryExpression:
+		return pt.HasUnresolvedReference(v.Left, ctx) || pt.HasUnresolvedReference(v.Right, ctx)
+	case *parser.UnaryExpression:
+		return pt.HasUnresolvedReference(v.Right, ctx)
+	case *parser.MethodCall:
+		if pt.HasUnresolvedReference(v.Base, ctx) {
+			return true
+		}
+		for _, a := range v.Args {
+			if pt.HasUnresolvedReference(a, ctx) {
+				return true
+			}
+		}
+	case *parser.FunctionCall:
+		for _, a := range v.Args {
+			if pt.HasUnresolvedReference(a, ctx) {
+				return true
+			}
+		}
+	case *parser.ListComprehension:
+		return pt.HasUnresolvedReference(v.Iterable, ctx)
+	case *parser.ArrayValue:
+		for _, e := range v.Elements {
+			if pt.HasUnresolvedReference(e, ctx) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type EvaluatedDefinition struct {
 	Def  parser.Definition
 	Ctx  *EvaluationContext

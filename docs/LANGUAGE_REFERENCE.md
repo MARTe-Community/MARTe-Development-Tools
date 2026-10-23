@@ -721,7 +721,11 @@ end
 - The whole document or any member can be assigned to a field; dicts
   render as `{ key = value … }` blocks in build output.
 - **Variable paths**: the path may be any expression, including variable
-  references — `with json(@data_file) as cfg` (same for `csv`).
+  references — `with json(@data_file) as cfg` (same for `csv`). The variable
+  is resolved in the block's scope, so loop and template variables work
+  (`foreach f in @files … with json(@f) …`). A path variable that is never
+  bound is reported as `with <format>("@name"): the path references a
+  variable that is never bound` — not as a literal file name.
 - **Missing documents**: `mdt check` and editors report a **warning**
   ("assuming the documented fields exist") and treat the binding as an
   empty document, so references to it do not cascade into errors.

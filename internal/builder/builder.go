@@ -273,10 +273,18 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				}
 				b.materializeCopyGroup(node, d, ed.Ctx, ed.File)
 			case *parser.WithBlock:
+				if b.tree.HasUnresolvedReference(d.Path, ed.Ctx) {
+					// Path not bound in this scope (e.g. a loop body visited
+					// outside its iteration): the expansion that binds the
+					// variable loads the document.
+					continue
+				}
 				resolved := loader.ResolvePath(ed.File, b.tree.ValueToString(b.tree.EvaluateValue(d.Path, ed.Ctx)))
 				val, err := loader.Load(d.Format, resolved)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: with %s(%q): %v\n", d.Format, resolved, err)
+					// Validation reports the failed load with the sugar
+					// position (and honours MissingFilesAreWarnings); writing
+					// it to stderr here would surface as an error in editors.
 					continue
 				}
 				id := fmt.Sprintf("%d:%d", d.Position.Line, d.Position.Column)

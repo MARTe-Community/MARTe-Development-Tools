@@ -37,6 +37,14 @@ type Diagnostic struct {
 	File     string
 }
 
+// withInstance records where a with-block was reached when its path could not
+// be evaluated, so unresolved paths can be reported after activation.
+type withInstance struct {
+	ctx  *index.EvaluationContext
+	file string
+	node *index.ProjectNode
+}
+
 // assertInstance records where an assert was reached so it can be
 // evaluated with the right scope and reported at its own position.
 type assertInstance struct {
@@ -70,7 +78,13 @@ type Validator struct {
 	// sizeMismatch marks GAMs whose detailed input/output size error was
 	// reported, so the generic CUE InputSize/OutputSize diagnostics are not
 	// repeated for the same node.
-	sizeMismatch    map[*index.ProjectNode]bool
+	sizeMismatch map[*index.ProjectNode]bool
+	// pendingWith collects with-blocks whose path could not be evaluated in
+	// the current scope; reportDeferredWiths reports the ones that never
+	// resolved, so a typo still fails while a loop body visited outside its
+	// iteration does not.
+	pendingWith     map[*parser.WithBlock]withInstance
+	loadedWith      map[*parser.WithBlock]bool
 	pendingAsserts  map[*parser.AssertStatement]assertInstance
 	reportedAsserts map[*parser.AssertStatement]bool
 	// visited tracks (child node -> source definition) pairs already
@@ -394,7 +408,26 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 				v.pendingAsserts[d] = assertInstance{ctx: ed.Ctx, file: ed.File, node: node}
 				v.muActive.Unlock()
 			case *parser.WithBlock:
+				if v.Tree.HasUnresolvedReference(d.Path, ed.Ctx) {
+					// The path variable is not bound in this scope (a loop
+					// body is visited both per iteration and at node level).
+					// Defer: the binding expansion loads the document, and
+					// reportDeferredWiths reports paths that never resolve.
+					v.muActive.Lock()
+					if v.pendingWith == nil {
+						v.pendingWith = make(map[*parser.WithBlock]withInstance)
+					}
+					v.pendingWith[d] = withInstance{ctx: ed.Ctx, file: ed.File, node: node}
+					v.muActive.Unlock()
+					continue
+				}
 				resolved := loader.ResolvePath(ed.File, v.ValueToString(d.Path, ed.Ctx))
+				v.muActive.Lock()
+				if v.loadedWith == nil {
+					v.loadedWith = make(map[*parser.WithBlock]bool)
+				}
+				v.loadedWith[d] = true
+				v.muActive.Unlock()
 				val, err := v.loadStructured(resolved, d.Format)
 				if err != nil {
 					if err == errAlreadyReported {
@@ -515,7 +548,48 @@ func (v *Validator) Activate(ctx context.Context) {
 			break
 		}
 	}
+	v.reportDeferredWiths()
 	v.evaluateAsserts()
+}
+
+// reportDeferredWiths reports with-blocks whose path still references an
+// unbound variable after activation. Blocks that loaded in some scope are
+// left alone (the same definition is visited per loop iteration and at node
+// level, and only the node-level visit may lack the binding).
+func (v *Validator) reportDeferredWiths() {
+	v.muActive.Lock()
+	pending := make([]*parser.WithBlock, 0, len(v.pendingWith))
+	instances := make(map[*parser.WithBlock]withInstance, len(v.pendingWith))
+	for def, inst := range v.pendingWith {
+		if v.loadedWith[def] {
+			continue
+		}
+		pending = append(pending, def)
+		instances[def] = inst
+	}
+	v.muActive.Unlock()
+
+	for _, def := range pending {
+		inst := instances[def]
+		path := v.ValueToString(def.Path, inst.ctx)
+		msg := fmt.Sprintf("with %s(%q): the path references a variable that is never bound", def.Format, path)
+		if path == "" || !v.Tree.HasUnresolvedReference(def.Path, inst.ctx) {
+			// Resolvable now but the load never succeeded in any scope.
+			msg = fmt.Sprintf("with %s(%q): the document could not be loaded", def.Format, path)
+		}
+		v.mu.Lock()
+		if v.reportedLoadFailures == nil {
+			v.reportedLoadFailures = make(map[string]bool)
+		}
+		key := fmt.Sprintf("%s:%d:%d", inst.file, def.Position.Line, def.Position.Column)
+		if v.reportedLoadFailures[key] {
+			v.mu.Unlock()
+			continue
+		}
+		v.reportedLoadFailures[key] = true
+		v.mu.Unlock()
+		v.report(inst.node, "with_load_failed", LevelError, msg, def.Position, inst.file)
+	}
 }
 
 // evaluateAsserts checks every assert statement reached by activation. A
