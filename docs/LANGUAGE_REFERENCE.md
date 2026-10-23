@@ -50,12 +50,21 @@ $RtApp = {            // '$' object: template/class-like root
   declares, e.g. `$RtApp`).
 - Field names are bare identifiers; values are expressions (section 5).
 - **Dynamic object names** — any expression evaluating to a string can
-  name an object or field. Parenthesise it:
+  name an object, a field or a signal entry. Parentheses are optional; a
+  leading string or variable followed by a top-level `=` is recognised as
+  a definition:
 
   ```marte
   ("+Channel" .. @ID) = {
     Class = ReferenceContainer
     Label = "chan" .. @ID
+  }
+
+  Signals = {
+    "DI_" .. @name = { Type = float32 }      // signal named DI_<name>
+    foreach n in @names
+      "DO_" .. @n = { Type = uint32 }        // one signal per iteration
+    end
   }
   ```
 

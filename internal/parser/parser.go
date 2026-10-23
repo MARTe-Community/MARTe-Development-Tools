@@ -907,21 +907,13 @@ func (p *Parser) isSubnodeLookahead() bool {
 		return true
 	}
 
-	if t1.Type == TokenVariableReference {
-		// `@expr = { … }` — dynamic object name (e.g. `@signal.name`
-		// inside a foreach). Struct literals cannot have `@` keys, so a
-		// top-level `=` means the brace opens a definition body. Without
-		// one the brace is an array value, e.g. a list comprehension:
-		// `{ @sig.name for sig in @signals }`.
-		for i := 2; ; i++ {
-			t := p.peekN(i)
-			switch t.Type {
-			case TokenEqual:
-				return true
-			case TokenRBrace, TokenLBrace, TokenComma, TokenEOF:
-				return false
-			}
-		}
+	// Dynamic object name: `@expr = { … }`, `"prefix_" .. @expr = { … }` or
+	// `("prefix_" .. @expr) = { … }`. A top-level `=` before the brace
+	// closes means the brace opens a definition body; otherwise it is an
+	// array value (e.g. a list comprehension `{ @sig.name for … }`).
+	if t1.Type == TokenVariableReference || t1.Type == TokenString ||
+		(t1.Type == TokenSymbol && t1.Value == "(") {
+		return p.definitionLookahead()
 	}
 
 	// Directives opening a block (`#foreach`, `#if`, `#template`, …)
@@ -933,6 +925,21 @@ func (p *Parser) isSubnodeLookahead() bool {
 
 	// Literals -> Array
 	return false
+}
+
+// definitionLookahead reports whether a top-level '=' follows the tokens
+// starting at peekN(1), before the enclosing brace style block ends. It is
+// used to tell a definition with a dynamic key from an array value.
+func (p *Parser) definitionLookahead() bool {
+	for i := 1; ; i++ {
+		t := p.peekN(i)
+		switch t.Type {
+		case TokenEqual:
+			return true
+		case TokenRBrace, TokenLBrace, TokenComma, TokenEOF:
+			return false
+		}
+	}
 }
 
 // parseSubnodeConcat parses an object body, optionally merged with
