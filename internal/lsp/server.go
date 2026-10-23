@@ -374,7 +374,7 @@ func watchRequest(method string) func() {
 		mu.Lock()
 		stillRunning = true
 		mu.Unlock()
-		logger.Warningf("request %s still running after %v", method, requestWatchdog)
+		logger.Debugf("request %s still running after %v", method, requestWatchdog)
 	})
 	return func() {
 		timer.Stop()
@@ -384,9 +384,9 @@ func watchRequest(method string) func() {
 		mu.Unlock()
 		switch {
 		case hung:
-			logger.Warningf("request %s finished after %v", method, elapsed)
+			logger.Debugf("request %s finished after %v", method, elapsed)
 		case elapsed >= slowRequestWarn:
-			logger.Warningf("slow request %s: %v", method, elapsed)
+			logger.Debugf("slow request %s: %v", method, elapsed)
 		}
 	}
 }
@@ -402,7 +402,7 @@ func watchOperation(what string) func() {
 		mu.Lock()
 		stillRunning = true
 		mu.Unlock()
-		logger.Warningf("%s still running after %v", what, slowScanWarn)
+		logger.Debugf("%s still running after %v", what, slowScanWarn)
 	})
 	return func() {
 		timer.Stop()
@@ -411,7 +411,7 @@ func watchOperation(what string) func() {
 		slow := stillRunning
 		mu.Unlock()
 		if slow {
-			logger.Warningf("%s finished after %v", what, elapsed)
+			logger.Debugf("%s finished after %v", what, elapsed)
 		}
 	}
 }
@@ -457,8 +457,17 @@ func triggerValidation(uri string) {
 	valMu.Lock()
 	defer valMu.Unlock()
 
-	if timer, ok := valTimers[uri]; ok {
+	// Validation covers the whole project, so any newer trigger supersedes
+	// every pending or in-flight pass. Without this, startup (workspace-wide)
+	// plus a didOpen for the first file ran the same expensive validation
+	// twice, and every keystroke added another full pass.
+	for k, timer := range valTimers {
 		timer.Stop()
+		delete(valTimers, k)
+	}
+	for k, cancel := range valCancels {
+		cancel()
+		delete(valCancels, k)
 	}
 
 	valTimers[uri] = time.AfterFunc(validationDebounce, func() {
@@ -486,7 +495,18 @@ func triggerValidation(uri string) {
 
 		view := GlobalSession.ViewOf(uri)
 		if view != nil {
-			runValidation(ctx, uri, view.Snapshot())
+			snap := view.Snapshot()
+			// Navigation features read the published snapshot, and the
+			// expanded nodes (loops, templates, `with` bindings) only exist
+			// after activation. Activate a clone here, off the edit path,
+			// and publish it if no newer edit arrived meanwhile.
+			if activated := activateSnapshotClone(ctx, snap); activated != nil {
+				if view.Snapshot() == snap {
+					view.SetSnapshot(activated)
+					snap = activated
+				}
+			}
+			runValidation(ctx, uri, snap)
 		}
 	})
 }
@@ -733,6 +753,30 @@ func uriToPath(uri string) string {
 // snapshot's tree so navigation features (hover, go-to-definition, inlay
 // hints) see the same tree validation does, without waiting for the
 // debounced validation pass.
+// activateSnapshotClone returns a snapshot whose tree has loop/template/with
+// expansions materialized. The receiver is left untouched, so the activation
+// can run after the edit was published without blocking typing.
+func activateSnapshotClone(ctx context.Context, snap *cache.Snapshot) *cache.Snapshot {
+	if snap == nil || snap.Tree() == nil {
+		return nil
+	}
+	root := ""
+	if view := snap.View(); view != nil {
+		root = view.Root()
+	}
+	clone := snap.Clone(ctx)
+	if clone == nil {
+		return nil
+	}
+	v := validator.NewValidator(clone.Tree(), root, nil)
+	v.MissingFilesAreWarnings = true
+	v.Activate(ctx)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return clone
+}
+
 func activateSnapshot(view *cache.View, snap *cache.Snapshot) {
 	if view == nil || snap == nil || snap.Tree() == nil {
 		return
@@ -756,14 +800,32 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		view = GlobalSession.CreateView("auto", root)
 	}
 
+	oldSnap := view.Snapshot()
+	path := uriToPath(params.TextDocument.URI)
+
+	// Opening a file the workspace scan already indexed with identical
+	// content is the common startup case. The tree is resolved and immutable
+	// at this point, so share it instead of reparsing, re-resolving and
+	// re-activating the whole project (which dominated didOpen latency on
+	// large workspaces).
+	if oldSnap != nil && oldSnap.Tree() != nil && oldSnap.Tree().HasFile(path) {
+		if onDisk, err := os.ReadFile(path); err == nil && string(onDisk) == params.TextDocument.Text {
+			fast := oldSnap.CloneShallow()
+			fast.Documents()[params.TextDocument.URI] = params.TextDocument.Text
+			diagMu.Lock()
+			delete(lastPublished, params.TextDocument.URI)
+			diagMu.Unlock()
+			view.SetSnapshot(fast)
+			triggerValidation(params.TextDocument.URI)
+			return
+		}
+	}
+
 	// Create new snapshot. We're about to mutate the tree via AddFile (or, on
 	// parse failure, resolve it ourselves below), so skip the eager resolve
 	// CloneForEdit()/CloneForEdit would otherwise do on the pre-edit tree just
 	// to have it thrown away by the resolve after AddFile.
-	oldSnap := view.Snapshot()
 	newSnap := oldSnap.CloneForEdit(context.Background())
-
-	path := uriToPath(params.TextDocument.URI)
 	newSnap.Documents()[params.TextDocument.URI] = params.TextDocument.Text
 
 	p := parser.NewParser(params.TextDocument.Text)
@@ -782,7 +844,6 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences(nil)
 		newSnap.Tree().ResolveFields(nil)
-		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	} else {
@@ -790,7 +851,6 @@ func HandleDidOpen(params DidOpenTextDocumentParams) {
 		// unresolved (Reference.Target still points at the OLD tree's now
 		// stale nodes) -- resolve them against the clone before publishing it.
 		newSnap.Tree().ResolveReferences(nil)
-		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(params.TextDocument.URI)
 	}
@@ -832,11 +892,13 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 	// had to clear a second later. runValidation publishes the complete,
 	// authoritative set (parser + semantic) once typing pauses.
 
+	// Loop/template activation is validation work: ValidateProject performs
+	// it once typing pauses. Doing it here too made every keystroke pay for a
+	// full-project activation pass.
 	if config != nil {
 		newSnap.Tree().AddFile(path, config)
 		newSnap.Tree().ResolveReferences(nil)
 		newSnap.Tree().ResolveFields(nil)
-		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri)
 	} else {
@@ -844,7 +906,6 @@ func HandleDidChange(params DidChangeTextDocumentParams) {
 		// unresolved (Reference.Target still points at the OLD tree's now
 		// stale nodes) -- resolve them against the clone before publishing it.
 		newSnap.Tree().ResolveReferences(nil)
-		activateSnapshot(view, newSnap)
 		view.SetSnapshot(newSnap)
 		triggerValidation(uri) // Still trigger validation to show parser errors
 	}
@@ -1975,10 +2036,10 @@ func HandleDefinition(params DefinitionParams) any {
 	// field declaration in the variable's structured type.
 	if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
 		if locs := pipelineDefinition(tree, text, line, col); len(locs) > 0 {
-			return locs
+			return dedupeLocations(locs)
 		}
 		if locs := structFieldDefinition(tree, params.TextDocument.URI, text, path, line, col); len(locs) > 0 {
-			return locs
+			return dedupeLocations(locs)
 		}
 	}
 
@@ -1986,7 +2047,7 @@ func HandleDefinition(params DefinitionParams) any {
 	if res == nil {
 		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
 			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
-				return locs
+				return dedupeLocations(locs)
 			}
 		}
 		return nil
@@ -2066,7 +2127,7 @@ func HandleDefinition(params DefinitionParams) any {
 				})
 			}
 		}
-		return locations
+		return dedupeLocations(locations)
 	}
 
 	return nil
@@ -2088,7 +2149,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	if res == nil {
 		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
 			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
-				return locs
+				return dedupeLocations(locs)
 			}
 		}
 		return nil
@@ -2112,7 +2173,8 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	}
 
 	// 1. If it's a Signal usage in a GAM, jump to the Signal definition in the DataSource
-	if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
+	dsInfo, _ := tree.GetSignalInfo(targetNode)
+	if dsInfo != nil {
 		// Find the peer that is a definition in a DataSource
 		peers := tree.FindSignalPeers(targetNode)
 		for _, peer := range peers {
@@ -2130,7 +2192,7 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 					}
 				}
 				if len(locations) > 0 {
-					return locations
+					return dedupeLocations(locations)
 				}
 			}
 		}
@@ -2263,6 +2325,82 @@ func HandleTypeDefinition(params TypeDefinitionParams) any {
 	return nil
 }
 
+// dedupeLocations drops identical ranges. A node may carry several fragments
+// for the same source definition (index-time placeholder plus materialized
+// expansion), which would otherwise repeat the same jump target.
+func dedupeLocations(locs []Location) []Location {
+	if len(locs) < 2 {
+		return locs
+	}
+	seen := make(map[string]bool, len(locs))
+	out := locs[:0]
+	for _, l := range locs {
+		key := fmt.Sprintf("%s|%d:%d-%d:%d", l.URI, l.Range.Start.Line, l.Range.Start.Character, l.Range.End.Line, l.Range.End.Character)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, l)
+	}
+	return out
+}
+
+// copyEndpointReferences finds `DataSource::Signal` endpoints in copy groups.
+// Copy sugar has no tree nodes until lowering, so without this go-to
+// references for a signal never reaches the IOGAM copies that use it.
+func copyEndpointReferences(tree *index.ProjectTree, ds *index.ProjectNode, signal string) []Location {
+	if tree == nil || ds == nil || signal == "" {
+		return nil
+	}
+	dsName := index.NormalizeName(ds.RealName)
+	dsNorm := index.NormalizeName(ds.Name)
+	var out []Location
+	add := func(file string, ep parser.CopyEndpoint) {
+		if !ep.IsDS || ep.Dynamic() || ep.Signal != signal {
+			return
+		}
+		if index.NormalizeName(ep.Object) != dsName && index.NormalizeName(ep.Object) != dsNorm {
+			return
+		}
+		length := len(ep.Object) + 2 + len(ep.Signal)
+		out = append(out, Location{
+			URI: "file://" + file,
+			Range: Range{
+				Start: Position{Line: ep.Position.Line - 1, Character: ep.Position.Column - 1},
+				End:   Position{Line: ep.Position.Line - 1, Character: ep.Position.Column - 1 + length},
+			},
+		})
+	}
+	var walk func(n *index.ProjectNode)
+	walk = func(n *index.ProjectNode) {
+		if n == nil {
+			return
+		}
+		for _, frag := range n.Fragments {
+			for _, def := range frag.Definitions {
+				g, ok := def.(*parser.CopyGroup)
+				if !ok {
+					continue
+				}
+				for _, item := range g.Items {
+					add(frag.File, item.Src)
+					add(frag.File, item.Dst)
+				}
+			}
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	if tree.Root != nil {
+		walk(tree.Root)
+	}
+	for _, iso := range tree.IsolatedFiles {
+		walk(iso)
+	}
+	return out
+}
+
 func nodeToLocations(node *index.ProjectNode) []Location {
 	var locations []Location
 	for _, frag := range node.Fragments {
@@ -2276,7 +2414,7 @@ func nodeToLocations(node *index.ProjectNode) []Location {
 			})
 		}
 	}
-	return locations
+	return dedupeLocations(locations)
 }
 
 func HandleCodeAction(params CodeActionParams) []CodeAction {
@@ -2669,7 +2807,7 @@ func structFieldReferences(tree *index.ProjectTree, params ReferenceParams, text
 	if varName, m, ok := memberUsageAt(text, line-1, col-1); ok {
 		varNames = []string{varName}
 		member = m
-	} else if typ, fieldName, found := fieldDeclarationAt(tree, line, col); found {
+	} else if typ, fieldName, found := fieldDeclarationAt(tree, path, line, col); found {
 		member = fieldName
 		varNames = variablesOfType(tree, typ)
 	}
@@ -2695,21 +2833,26 @@ func structFieldReferences(tree *index.ProjectTree, params ReferenceParams, text
 			})
 		}
 	}
-	return locations
+	return dedupeLocations(locations)
 }
 
 // fieldDeclarationAt reports the structured type and field name when the
 // cursor sits on a field declaration of a named type (tree.Types) or of an
 // inline struct type declared on a variable. line and col are 1-based.
-func fieldDeclarationAt(tree *index.ProjectTree, line, col int) (*parser.TypeDefinition, string, bool) {
+func fieldDeclarationAt(tree *index.ProjectTree, file string, line, col int) (*parser.TypeDefinition, string, bool) {
 	for _, typ := range tree.Types {
+		// Positions are file-relative: a type declared in another file at
+		// the same line/column must not match the cursor.
+		if tree.TypeFiles[typ.Name] != file {
+			continue
+		}
 		if name, ok := fieldDeclarationIn(typ, line, col); ok {
 			return typ, name, true
 		}
 	}
 	for _, node := range lspNodes(tree) {
 		for _, info := range node.Variables {
-			if info.Def == nil || info.Def.InlineType == nil {
+			if info.Def == nil || info.Def.InlineType == nil || info.File != file {
 				continue
 			}
 			if name, ok := fieldDeclarationIn(info.Def.InlineType, line, col); ok {
@@ -2802,7 +2945,7 @@ func HandleReferences(params ReferenceParams) []Location {
 	if res == nil {
 		if text, ok := snap.Documents()[params.TextDocument.URI]; ok {
 			if locs := sugarDefinition(tree, path, text, line, col); len(locs) > 0 {
-				return locs
+				return dedupeLocations(locs)
 			}
 		}
 		return nil
@@ -2853,7 +2996,7 @@ func HandleReferences(params ReferenceParams) []Location {
 				})
 			}
 		}
-		return locations
+		return dedupeLocations(locations)
 	}
 
 	if targetVar != nil {
@@ -2883,7 +3026,7 @@ func HandleReferences(params ReferenceParams) []Location {
 				})
 			}
 		}
-		return locations
+		return dedupeLocations(locations)
 	}
 
 	if targetNode == nil {
@@ -2891,11 +3034,13 @@ func HandleReferences(params ReferenceParams) []Location {
 	}
 
 	// Special handling for Signals
-	if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
+	dsInfo, sigName := tree.GetSignalInfo(targetNode)
+	if dsInfo != nil {
 		peers := tree.FindSignalPeers(targetNode)
 		var locations []Location
 		seen := make(map[string]bool)
 
+		locations = append(locations, copyEndpointReferences(tree, dsInfo, sigName)...)
 		for _, peer := range peers {
 			for _, frag := range peer.Fragments {
 				if !frag.IsObject {
@@ -2921,7 +3066,7 @@ func HandleReferences(params ReferenceParams) []Location {
 				}
 			}
 		}
-		return locations
+		return dedupeLocations(locations)
 	}
 
 	// Resolve canonical target (follow link if present)
@@ -3004,7 +3149,7 @@ func HandleReferences(params ReferenceParams) []Location {
 		}
 	}
 
-	return locations
+	return dedupeLocations(locations)
 }
 
 // shorthandOf returns the SignalShorthand definition of a signal usage
@@ -3365,7 +3510,8 @@ func HandleRename(params RenameParams) *WorkspaceEdit {
 
 	if targetNode != nil {
 		// Special handling for Signals (Implicit/Explicit)
-		if ds, _ := tree.GetSignalInfo(targetNode); ds != nil {
+		dsInfo, _ := tree.GetSignalInfo(targetNode)
+		if dsInfo != nil {
 			peers := tree.FindSignalPeers(targetNode)
 			seenPeers := make(map[*index.ProjectNode]bool)
 

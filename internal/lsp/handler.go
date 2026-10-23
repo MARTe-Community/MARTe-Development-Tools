@@ -23,6 +23,7 @@ import (
 // RunServer starts the LSP server using the go-lsp framework over stdio.
 // It replaces the hand-rolled JSON-RPC loop that was previously here.
 func RunServer() {
+
 	SynchronousValidation = false
 	GlobalSession = cache.NewSession("default")
 
@@ -99,13 +100,10 @@ func (h *marteHandler) Initialize(ctx context.Context, params *golsp.InitializeP
 		done()
 		logger.Debugf("Workspace ready")
 
-		// Trigger initial workspace-wide validation in the background.
-		go func() {
-			view := GlobalSession.ViewOf("")
-			if view != nil {
-				runValidation(context.Background(), "", view.Snapshot())
-			}
-		}()
+		// Kick off the initial workspace-wide pass through the same debounced
+		// path editors use, so the published snapshot gets its loop/template
+		// expansions materialized (navigation features) before diagnostics.
+		triggerValidation("")
 	}
 
 	return &golsp.InitializeResult{

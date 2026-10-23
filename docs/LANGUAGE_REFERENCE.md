@@ -378,6 +378,20 @@ end
 - Loop and template variables are fully substituted in build output:
   `use AcqChannel Chan(ID = @i, Gain = (0.5 * @i))` emits objects with
   the evaluated `Index`, `Scale` and dynamic names.
+- `let`/`var` declared inside a loop body are lexical to that iteration:
+  each iteration binds its own value, and sibling loops may each declare
+  the same name without a duplicate-definition error:
+
+  ```marte
+  foreach sig in @inputs
+    let name: string = "DI_" .. @sig
+    +DDB5 = { Signals = { @name = { Type = uint8 } } }
+  end
+  foreach sig in @outputs
+    let name: string = "DO_" .. @sig
+    +DDB5 = { Signals = { @name = { Type = uint8 } } }
+  end
+  ```
 - Validation is stable in multi-file projects and under `-v` overrides.
 
 ## 9. Templates: `template` / `use`

@@ -31,6 +31,13 @@ type Builder struct {
 	dynamicGroups   map[*parser.CopyGroup]*parser.CopyGroup
 	activeNodes     map[*index.ProjectNode]bool
 	activeFragments map[*index.Fragment]bool
+	// copySeen dedupes dynamic copy-group expansions visited from several
+	// evaluation paths (key: group, scope, item index).
+	copySeen map[string]bool
+	// expandedScopes is the per-pass (node, scope) visit guard, matching the
+	// validator's: contexts are recreated per visit, so pointer-keyed guards
+	// re-expand the same subtree indefinitely.
+	expandedScopes map[*index.ProjectNode]map[string]bool
 }
 
 func NewBuilder(files []string, overrides map[string]string) *Builder {
@@ -50,15 +57,56 @@ func NewBuilder(files []string, overrides map[string]string) *Builder {
 	}
 }
 
-// isBoundCtx reports whether ctx carries loop or with bindings on top of a
-// parent scope. Only such contexts are worth recording on a fragment: the
-// base scope is re-evaluated on every pass, and freezing it would hide later
-// variable overrides.
-func isBoundCtx(ctx *index.EvaluationContext) bool {
-	return ctx != nil && ctx.Parent != nil
+// pruneMismatchedChildFragments drops fragments whose definition does not
+// evaluate to the child's name in that fragment's scope. Cross-scope replay
+// (a loop body definition evaluated under a sibling iteration's context)
+// would otherwise attach a signal's fields to another signal, producing
+// spurious duplicate-field diagnostics.
+func (b *Builder) pruneMismatchedChildFragments(node *index.ProjectNode) {
+	if node == nil {
+		return
+	}
+	for _, child := range node.Children {
+		var kept []*index.Fragment
+		dropped := false
+		for _, f := range child.Fragments {
+			obj, ok := f.Source.(*parser.ObjectNode)
+			if !ok || f.EvalCtx == nil || f.EvalCtx.Scope == "" {
+				kept = append(kept, f)
+				continue
+			}
+			name := b.tree.ValueToString(b.tree.EvaluateValue(obj.Name, f.EvalCtx))
+			if name == "" || strings.Contains(name, "@") || index.NormalizeName(name) == child.Name {
+				kept = append(kept, f)
+				continue
+			}
+			delete(b.activeFragments, f)
+			dropped = true
+		}
+		if dropped {
+			child.Fragments = kept
+		}
+		b.pruneMismatchedChildFragments(child)
+	}
 }
 
 func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
+	scopeKey := ""
+	if evalCtx != nil {
+		scopeKey = evalCtx.Scope
+	}
+	if b.expandedScopes == nil {
+		b.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
+	}
+	scopes := b.expandedScopes[node]
+	if scopes != nil && scopes[scopeKey] {
+		return
+	}
+	if scopes == nil {
+		scopes = make(map[string]bool)
+		b.expandedScopes[node] = scopes
+	}
+	scopes[scopeKey] = true
 	b.activeNodes[node] = true
 	for _, frag := range node.Fragments {
 		if !frag.IsConditional {
@@ -68,9 +116,28 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 
 	var evaluated []index.EvaluatedDefinition
 	for _, frag := range node.Fragments {
-		if b.activeFragments[frag] {
-			evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, evalCtx, frag.File)...)
+		if !b.activeFragments[frag] {
+			continue
 		}
+		if frag.IsConditional && frag.EvalCtx == nil {
+			// Block body or index-time placeholder for an object inside one:
+			// the block expansion materializes scoped copies.
+			continue
+		}
+		c := evalCtx
+		if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
+			// Fragment materialized under a loop iteration, template or
+			// with binding: evaluate with those bindings. Base-scope
+			// fragments use the caller's context so overrides apply.
+			c = frag.EvalCtx
+		} else if frag.BranchID == "" && frag.Source != nil && evalCtx != nil && evalCtx.Scope != "" {
+			// Unscoped index fragment reached through a scoped expansion:
+			// it belongs to the base scope, which is evaluated separately.
+			// Replaying it here would attach its definitions to this
+			// iteration, duplicating the expansion.
+			continue
+		}
+		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 	}
 
 	written := make(map[string]bool)
@@ -100,7 +167,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					for _, f := range child.Fragments {
 						if f.Source == parser.Definition(d) {
 							b.activeFragments[f] = true
-							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
+							if f.EvalCtx == nil {
 								f.EvalCtx = ed.Ctx
 							}
 							break
@@ -151,9 +218,11 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				// Ensure this fragment is present and active
 				found := false
 				for _, f := range child.Fragments {
-					if f.Source == parser.Definition(d) {
+					// The same AST node repeats on every loop iteration, so a
+					// fragment only serves this expansion when its scope matches.
+					if f.Source == parser.Definition(d) && index.SameEvalScope(f.EvalCtx, ed.Ctx) {
 						b.activeFragments[f] = true
-						if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
+						if f.EvalCtx == nil {
 							f.EvalCtx = ed.Ctx
 						}
 						found = true
@@ -162,12 +231,13 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 				}
 				if !found {
 					b.tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, !forceUncond)
+					// Stamp this expansion's scope on the fragment that
+					// carries the definition (not necessarily the last one
+					// appended: population may add field fragments too).
 					for _, f := range child.Fragments {
-						if f.Source == d {
+						if f.Source == parser.Definition(d) && f.EvalCtx == nil {
 							b.activeFragments[f] = true
-							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
-								f.EvalCtx = ed.Ctx
-							}
+							f.EvalCtx = ed.Ctx
 							break
 						}
 					}
@@ -229,6 +299,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 							Variables: make(map[string]parser.Value),
 							Parent:    ed.Ctx,
 							Tree:      b.tree,
+							Scope:     index.ChildScope(ed.Ctx, id+"#"+key),
 						}
 						if d.KeyVar != "" {
 							subCtx.Variables[d.KeyVar] = &parser.StringValue{Value: key, Quoted: true}
@@ -250,6 +321,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 							Variables: make(map[string]parser.Value),
 							Parent:    ed.Ctx,
 							Tree:      b.tree,
+							Scope:     index.ChildScope(ed.Ctx, fmt.Sprintf("%s#%d", id, i)),
 						}
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
@@ -293,6 +365,7 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					Variables: map[string]parser.Value{d.BindName: val},
 					Parent:    ed.Ctx,
 					Tree:      b.tree,
+					Scope:     index.ChildScope(ed.Ctx, id+":with"),
 				}
 				for _, f := range node.Fragments {
 					if f.IsConditional && f.BranchID == id+":with" {
@@ -322,9 +395,14 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 
 	processEval(evaluated, node, forceUncond)
 
-	for name, child := range node.Children {
-		if !written[name] && !child.IsConditional {
-			b.collectActiveNodes(child, evalCtx, forceUncond)
+	// Scoped expansions only walk the children they define (handled above);
+	// visiting unrelated siblings here would stamp every iteration's scope
+	// onto them. The base-scope visit covers the rest of the tree.
+	if evalCtx == nil || evalCtx.Scope == "" {
+		for name, child := range node.Children {
+			if !written[name] && !child.IsConditional {
+				b.collectActiveNodes(child, evalCtx, forceUncond)
+			}
 		}
 	}
 }
@@ -333,6 +411,99 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 // variable values each time so conditions defined by newly activated nodes
 // take effect. Shared by Build and Lower (the `mdt check` path needs the
 // same scope expansion so dynamic copy endpoints can be materialized).
+
+// pruneShadowedFragments removes index-time fragments (no scope) that are
+// duplicated by a materialized copy of the same definition. The duplicates
+// would otherwise be evaluated with whatever scope happens to be current,
+// leaking one loop iteration's variables into another (cross-named signals).
+type fragmentKey struct {
+	src    parser.Definition
+	scope  string
+	branch string
+}
+
+func pruneShadowedFragments(node *index.ProjectNode, isActive func(*index.Fragment) bool, deactivate func(*index.Fragment)) {
+	if node == nil {
+		return
+	}
+	seen := make(map[fragmentKey]bool)
+	scoped := make(map[parser.Definition]bool)
+	for _, f := range node.Fragments {
+		if f.Source != nil && f.EvalCtx != nil && f.EvalCtx.Scope != "" {
+			scoped[f.Source] = true
+		}
+	}
+	var kept []*index.Fragment
+	changed := false
+	for _, f := range node.Fragments {
+		if !isActive(f) {
+			kept = append(kept, f)
+			continue
+		}
+		shadowed := f.Source != nil && scoped[f.Source] &&
+			(f.EvalCtx == nil || f.EvalCtx.Scope == "")
+		if shadowed {
+			deactivate(f)
+			changed = true
+			continue
+		}
+		if f.Source != nil {
+			scope := ""
+			if f.EvalCtx != nil {
+				scope = f.EvalCtx.Scope
+			}
+			key := fragmentKey{src: f.Source, scope: scope, branch: f.BranchID}
+			if seen[key] {
+				deactivate(f)
+				changed = true
+				continue
+			}
+			seen[key] = true
+		}
+		kept = append(kept, f)
+	}
+	if changed {
+		node.Fragments = kept
+	}
+	// Children may carry base-scope fragments for definitions that were
+	// materialized under a scope elsewhere (a loop body evaluated once at
+	// base scope, e.g. with an unresolved name). Drop those fragments and
+	// any child left empty by the removal.
+	childScoped := make(map[parser.Definition]bool)
+	for _, c := range node.Children {
+		for _, f := range c.Fragments {
+			if f.Source != nil && f.EvalCtx != nil && f.EvalCtx.Scope != "" {
+				childScoped[f.Source] = true
+			}
+		}
+	}
+	if len(childScoped) > 0 {
+		for name, c := range node.Children {
+			var kept []*index.Fragment
+			dropped := false
+			for _, f := range c.Fragments {
+				if f.Source != nil && childScoped[f.Source] && (f.EvalCtx == nil || f.EvalCtx.Scope == "") {
+					deactivate(f)
+					dropped = true
+					continue
+				}
+				kept = append(kept, f)
+			}
+			if !dropped {
+				continue
+			}
+			c.Fragments = kept
+			if len(c.Fragments) == 0 {
+				delete(node.Children, name)
+			}
+		}
+	}
+
+	for _, c := range node.Children {
+		pruneShadowedFragments(c, isActive, deactivate)
+	}
+}
+
 func (b *Builder) activate() {
 	tree := b.tree
 	if tree == nil {
@@ -347,6 +518,7 @@ func (b *Builder) activate() {
 		for _, concrete := range b.dynamicGroups {
 			concrete.Items = nil
 		}
+		b.copySeen = nil
 		evalCtx := &index.EvaluationContext{Variables: make(map[string]parser.Value), Tree: b.tree}
 		for k, v := range b.variables {
 			evalCtx.Variables[k] = v
@@ -364,6 +536,7 @@ func (b *Builder) activate() {
 		b.collectVariables(tree) // This re-parses overrides
 
 		prevCount := len(b.activeFragments)
+		b.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
 		b.collectActiveNodes(tree.Root, evalCtx, false)
 		for _, node := range tree.IsolatedFiles {
 			b.collectActiveNodes(node, evalCtx, false)
@@ -376,6 +549,20 @@ func (b *Builder) activate() {
 		if len(b.activeFragments) == prevCount {
 			break
 		}
+	}
+
+	if b.tree.Root != nil {
+		b.pruneMismatchedChildFragments(b.tree.Root)
+	}
+	if b.tree.Root != nil {
+		pruneShadowedFragments(b.tree.Root,
+			func(f *index.Fragment) bool { return b.activeFragments[f] },
+			func(f *index.Fragment) { delete(b.activeFragments, f) })
+	}
+	for _, root := range b.tree.IsolatedFiles {
+		pruneShadowedFragments(root,
+			func(f *index.Fragment) bool { return b.activeFragments[f] },
+			func(f *index.Fragment) { delete(b.activeFragments, f) })
 	}
 
 	for group, concrete := range b.dynamicGroups {
@@ -419,11 +606,25 @@ func (b *Builder) materializeCopyGroup(node *index.ProjectNode, group *parser.Co
 		b.activeNodes[node] = true
 	}
 
-	for _, item := range group.Items {
+	if b.copySeen == nil {
+		b.copySeen = make(map[string]bool)
+	}
+	scope := ""
+	if ctx != nil {
+		scope = ctx.Scope
+	}
+	for i, item := range group.Items {
 		resolved, ok := b.resolveDynamicItem(item, ctx)
 		if !ok {
 			return false
 		}
+		// The same expansion is visited from several paths (node-level
+		// evaluation and block expansion); record each (scope, item) once.
+		key := fmt.Sprintf("%p|%s|%d", group, scope, i)
+		if b.copySeen[key] {
+			continue
+		}
+		b.copySeen[key] = true
 		concrete.Items = append(concrete.Items, resolved)
 	}
 	return true
@@ -771,8 +972,13 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 		if !b.activeFragments[frag] {
 			continue
 		}
+		if frag.IsConditional && frag.BranchID == "" && frag.EvalCtx == nil {
+			// Placeholder for a node materialized inside a block; the scoped
+			// copy carries the content.
+			continue
+		}
 		c := ctx
-		if frag.EvalCtx != nil {
+		if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
 			// Fragment materialized under a loop iteration or template
 			// expansion: evaluate with those bindings so field values
 			// referencing loop/parameter variables resolve.

@@ -29,7 +29,11 @@ type ProjectTree struct {
 	GlobalPragmas  map[string][]string
 	NodeMap        map[string][]*ProjectNode
 	Templates      map[string]*parser.TemplateDefinition
-	TemplateFiles  map[string]string // Maps template name to the file it came from
+	// TypeFiles records the file declaring each named type, so position
+	// based lookups (LSP struct-field navigation) can restrict matches to
+	// the file the cursor is in.
+	TypeFiles     map[string]string
+	TemplateFiles map[string]string // Maps template name to the file it came from
 	// GamDefinitions holds `gam Name { … }` pipeline macros by name.
 	GamDefinitions map[string]*parser.GamDefinition
 	GamFiles       map[string]string // Maps pipeline name to its file
@@ -38,13 +42,21 @@ type ProjectTree struct {
 	// MemberRefs records struct field usages through variables
 	// (`@var.member`), keyed by "varName.member".
 	MemberRefs map[string][]MemberReference
+	// BlockVars holds the names of variables declared inside a block body
+	// (`let`/`var` in a foreach/if/with body). They are bound per expansion
+	// and never registered on a node, but a reference to them is still valid.
+	BlockVars map[string]bool
 	// knownFiles tracks which files already contribute to the tree. A file
 	// that is not in here has nothing to remove, so AddFile can skip the
 	// tree-wide removal walks. Without it, adding N files costs O(N x nodes)
 	// -- a 1200-file workspace took 3.4s to index, quadratically worse on
 	// bigger trees, which clients see as a request timeout during initialize.
 	knownFiles map[string]struct{}
-	mu         sync.RWMutex
+	// refSeen dedupes FileReferences per file: activation re-indexes block
+	// bodies on every pass/expansion, and repeated appends of the same
+	// reference produce duplicate go-to-definition/references locations.
+	refSeen map[string]map[string]bool
+	mu      sync.RWMutex
 }
 
 // scanSkipDirs are directory names that never hold project sources: dependency
@@ -75,6 +87,12 @@ func maxScanEntries() int {
 		}
 	}
 	return defaultMaxScanEntries
+}
+
+// HasFile reports whether file already contributes definitions to the tree.
+func (pt *ProjectTree) HasFile(file string) bool {
+	_, ok := pt.knownFiles[file]
+	return ok
 }
 
 func (pt *ProjectTree) ScanDirectory(rootPath string) error {
@@ -395,6 +413,11 @@ type EvaluationContext struct {
 	Variables map[string]parser.Value
 	Parent    *EvaluationContext
 	Tree      *ProjectTree
+	// Scope identifies the concrete expansion this context belongs to
+	// (foreach iteration, with block, template instance). It is stable
+	// across activation passes, unlike the context pointer, so fragment
+	// materialization can tell "same expansion" from "another iteration".
+	Scope string
 }
 
 func (ctx *EvaluationContext) Resolve(name string) parser.Value {
@@ -407,6 +430,31 @@ func (ctx *EvaluationContext) Resolve(name string) parser.Value {
 	// Fallback to global variables in tree?
 	// But which node? The evaluation usually starts at a node.
 	return nil
+}
+
+// SameEvalScope reports whether two fragment evaluation contexts denote the
+// same scope. The scope key is stable across activation passes (which create
+// fresh contexts) and distinguishes sibling loop iterations.
+func SameEvalScope(a, b *EvaluationContext) bool {
+	scope := func(c *EvaluationContext) string {
+		if c == nil {
+			return ""
+		}
+		return c.Scope
+	}
+	return scope(a) == scope(b)
+}
+
+// ChildScope derives the scope key of a nested expansion from its parent.
+func ChildScope(parent *EvaluationContext, id string) string {
+	base := ""
+	if parent != nil {
+		base = parent.Scope
+	}
+	if base == "" {
+		return id
+	}
+	return base + "/" + id
 }
 
 // HasUnresolvedReference reports whether val references a variable that has
@@ -495,12 +543,15 @@ func NewProjectTree() *ProjectTree {
 		NodeMap:        make(map[string][]*ProjectNode),
 		FileReferences: make(map[string][]Reference),
 		Templates:      make(map[string]*parser.TemplateDefinition),
+		TypeFiles:      make(map[string]string),
+		BlockVars:      make(map[string]bool),
 		TemplateFiles:  make(map[string]string),
 		GamDefinitions: make(map[string]*parser.GamDefinition),
 		GamFiles:       make(map[string]string),
 		Types:          make(map[string]*parser.TypeDefinition),
 		MemberRefs:     make(map[string][]MemberReference),
 		knownFiles:     make(map[string]struct{}),
+		refSeen:        make(map[string]map[string]bool),
 	}
 }
 
@@ -516,6 +567,7 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	defer pt.mu.Unlock()
 	// Remove references for this file
 	delete(pt.FileReferences, file)
+	delete(pt.refSeen, file)
 	delete(pt.knownFiles, file)
 	pt.pruneFileMemberReferences(file)
 
@@ -531,6 +583,13 @@ func (pt *ProjectTree) RemoveFile(file string) {
 	// empty. Nodes other files still contribute to survive.
 	pt.removeFileFromNode(pt.Root, file)
 
+	// Remove types that belong to this file.
+	for name, f := range pt.TypeFiles {
+		if f == file {
+			delete(pt.TypeFiles, name)
+			delete(pt.Types, name)
+		}
+	}
 	// Remove templates that belong to this file
 	for name, f := range pt.TemplateFiles {
 		if f == file {
@@ -716,6 +775,10 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
+	// Re-indexing the file must also forget which references were already
+	// recorded, or the dedupe map would suppress them all.
+	delete(pt.refSeen, file)
+
 	// Re-adding a file replaces its previous content, so the old fragments
 	// have to be removed first (removeFileFromNode re-aggregates each node
 	// from its remaining fragments and prunes what became empty). That walk
@@ -723,6 +786,16 @@ func (pt *ProjectTree) AddFile(file string, config *parser.Configuration) {
 	// part of it.
 	if _, known := pt.knownFiles[file]; known {
 		delete(pt.FileReferences, file)
+		// Drop this file's entries from the legacy flat slice as well;
+		// otherwise re-indexing appends new positions next to the old ones
+		// and references keep pointing at pre-edit locations.
+		kept := pt.References[:0]
+		for _, r := range pt.References {
+			if r.File != file {
+				kept = append(kept, r)
+			}
+		}
+		pt.References = kept
 		if iso, ok := pt.IsolatedFiles[file]; ok {
 			pt.removeNodeTreeFromMap(iso)
 			delete(pt.IsolatedFiles, file)
@@ -919,6 +992,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 		case *parser.TypeDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.Types[d.Name] = d
+			pt.TypeFiles[d.Name] = file
 		case *parser.GamDefinition:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
 			pt.GamDefinitions[d.Name] = d
@@ -950,7 +1024,7 @@ func (pt *ProjectTree) populateNode(node *ProjectNode, file string, config *pars
 			pt.indexNestedDefinitions(node, file, d.Body, config.Comments, config.Pragmas, true, id+":with")
 		case *parser.TemplateInstantiation:
 			fileFragment.Definitions = append(fileFragment.Definitions, d)
-			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+			pt.addReference(file, Reference{
 				Name:     d.Template,
 				Position: d.Position,
 				File:     file,
@@ -1089,6 +1163,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 		case *parser.TypeDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.Types[d.Name] = d
+			pt.TypeFiles[d.Name] = file
 		case *parser.GamDefinition:
 			frag.Definitions = append(frag.Definitions, d)
 			pt.GamDefinitions[d.Name] = d
@@ -1119,7 +1194,7 @@ func (pt *ProjectTree) addObjectFragment(node *ProjectNode, file string, obj *pa
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":with")
 		case *parser.TemplateInstantiation:
 			frag.Definitions = append(frag.Definitions, d)
-			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+			pt.addReference(file, Reference{
 				Name:     d.Template,
 				Position: d.Position,
 				File:     file,
@@ -1259,8 +1334,32 @@ func (pt *ProjectTree) addSignalShorthandChild(node *ProjectNode, file string, d
 	child.Fragments = append(child.Fragments, frag)
 }
 
+// hasNestedFragment reports whether node already carries the conditional
+// fragment for this block body. Activation re-populates objects on every
+// pass and iteration (once per scope), and addObjectFragment re-indexes
+// their nested blocks: without this check each pass appends another copy of
+// the same body, which then reports duplicate variables/fields.
+func (pt *ProjectTree) hasNestedFragment(node *ProjectNode, file string, defs []parser.Definition, branchID string) bool {
+	for _, f := range node.Fragments {
+		if f.BranchID != branchID || f.File != file || len(f.Definitions) != len(defs) {
+			continue
+		}
+		same := true
+		for i, d := range defs {
+			if f.Definitions[i] != d {
+				same = false
+				break
+			}
+		}
+		if same {
+			return true
+		}
+	}
+	return false
+}
+
 func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, defs []parser.Definition, comments []parser.Comment, pragmas []parser.Pragma, conditional bool, branchID string) {
-	if conditional && len(defs) > 0 {
+	if conditional && len(defs) > 0 && !pt.hasNestedFragment(node, file, defs, branchID) {
 		frag := &Fragment{
 			File:           file,
 			Definitions:    defs,
@@ -1288,7 +1387,12 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			pt.extractFieldMetadata(node, d)
 			node.Fields[d.Name] = append(node.Fields[d.Name], EvaluatedField{Raw: d, Value: d.Value, File: file})
 		case *parser.VariableDefinition:
-			node.Variables[d.Name] = VariableInfo{Def: d, File: file, Doc: doc}
+			// Variables declared inside a block body are lexical: the block
+			// expansion binds them per iteration/branch (see
+			// EvaluateDefinitions). Registering them on the node would leak
+			// one block's value into a sibling block; keep the names only,
+			// for reference resolution diagnostics.
+			pt.BlockVars[d.Name] = true
 			if d.DefaultValue != nil {
 				pt.IndexValue(file, d.DefaultValue)
 			}
@@ -1382,7 +1486,7 @@ func (pt *ProjectTree) indexNestedDefinitions(node *ProjectNode, file string, de
 			}
 			pt.indexNestedDefinitions(node, file, d.Body, comments, pragmas, true, id+":with")
 		case *parser.TemplateInstantiation:
-			pt.FileReferences[file] = append(pt.FileReferences[file], Reference{
+			pt.addReference(file, Reference{
 				Name:     d.Template,
 				Position: d.Position,
 				File:     file,
@@ -1456,6 +1560,22 @@ func (pt *ProjectTree) findPragmas(pragmas []parser.Pragma, pos parser.Position)
 	return found
 }
 
+// addReference records a reference once per file and source position.
+func (pt *ProjectTree) addReference(file string, ref Reference) {
+	seen := pt.refSeen[file]
+	if seen == nil {
+		seen = make(map[string]bool)
+		pt.refSeen[file] = seen
+	}
+	key := fmt.Sprintf("%s\x00%d:%d\x00%v", ref.Name, ref.Position.Line, ref.Position.Column, ref.IsVariable)
+	if seen[key] {
+		return
+	}
+	seen[key] = true
+	pt.FileReferences[file] = append(pt.FileReferences[file], ref)
+	pt.References = append(pt.References, ref)
+}
+
 func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 	switch v := val.(type) {
 	case *parser.ReferenceValue:
@@ -1464,9 +1584,7 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 			Position: v.Position,
 			File:     file,
 		}
-		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
-		// Maintain legacy slice for now
-		pt.References = append(pt.References, ref)
+		pt.addReference(file, ref)
 	case *parser.VariableReferenceValue:
 		name := strings.TrimPrefix(v.Name, "@")
 		ref := Reference{
@@ -1475,8 +1593,7 @@ func (pt *ProjectTree) IndexValue(file string, val parser.Value) {
 			File:       file,
 			IsVariable: true,
 		}
-		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
-		pt.References = append(pt.References, ref)
+		pt.addReference(file, ref)
 	case *parser.MemberAccess:
 		pt.IndexValue(file, v.Base)
 		if base, ok := v.Base.(*parser.VariableReferenceValue); ok {
@@ -1512,8 +1629,7 @@ func (pt *ProjectTree) IndexExpressionVariables(file string, val parser.Value) {
 			File:       file,
 			IsVariable: true,
 		}
-		pt.FileReferences[file] = append(pt.FileReferences[file], ref)
-		pt.References = append(pt.References, ref)
+		pt.addReference(file, ref)
 	case *parser.MemberAccess:
 		pt.IndexExpressionVariables(file, v.Base)
 		if base, ok := v.Base.(*parser.VariableReferenceValue); ok {
@@ -1547,7 +1663,13 @@ func (pt *ProjectTree) recordMemberReference(file string, base *parser.VariableR
 	pos := base.Position
 	pos.Column += len(base.Name) + 1
 	key := strings.TrimPrefix(base.Name, "@") + "." + member
-	pt.MemberRefs[key] = append(pt.MemberRefs[key], MemberReference{Position: pos, File: file})
+	entry := MemberReference{Position: pos, File: file}
+	for _, existing := range pt.MemberRefs[key] {
+		if existing == entry {
+			return
+		}
+	}
+	pt.MemberRefs[key] = append(pt.MemberRefs[key], entry)
 }
 
 func (pt *ProjectTree) RebuildIndex() {
@@ -1818,6 +1940,7 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 					Variables: make(map[string]parser.Value),
 					Parent:    ctx,
 					Tree:      pt,
+					Scope:     ChildScope(ctx, "use:"+d.Name),
 				}
 				// Bind arguments
 				argMap := make(map[string]parser.Value)
@@ -1843,14 +1966,18 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 		case *parser.TemplateDefinition:
 			// Skip template definitions during evaluation
 		case *parser.VariableDefinition:
+			// A variable declared in a nested scope (loop/if/with/template
+			// body) shadows the same name from the enclosing scope: two
+			// sibling loops may each declare `name`. At the base scope the
+			// first definition wins so re-evaluating a node does not clobber
+			// the value set by its file.
+			shadow := ctx.Parent != nil
 			if d.DefaultValue != nil {
-				existing := ctx.Resolve(d.Name)
-				if existing == nil {
+				if shadow || ctx.Resolve(d.Name) == nil {
 					ctx.Variables[d.Name] = pt.EvaluateValue(d.DefaultValue, ctx)
 				}
 			} else if def := pt.EffectiveStructDefault(d); def != nil && !IsNilValue(def) {
-				existing := ctx.Resolve(d.Name)
-				if existing == nil {
+				if shadow || ctx.Resolve(d.Name) == nil {
 					ctx.Variables[d.Name] = def
 				}
 			}
@@ -2655,6 +2782,14 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 	// Clone Types
 	for k, v := range pt.Types {
 		newPT.Types[k] = v
+		if f, ok := pt.TypeFiles[k]; ok {
+			newPT.TypeFiles[k] = f
+		}
+	}
+
+	// Clone block-scoped variable names.
+	for k := range pt.BlockVars {
+		newPT.BlockVars[k] = true
 	}
 
 	// Clone MemberRefs (slices are copied so appends on either tree stay
@@ -2663,6 +2798,15 @@ func (pt *ProjectTree) cloneStructure() *ProjectTree {
 		newRefs := make([]MemberReference, len(v))
 		copy(newRefs, v)
 		newPT.MemberRefs[k] = newRefs
+	}
+
+	// Clone reference dedupe keys.
+	for k, v := range pt.refSeen {
+		inner := make(map[string]bool, len(v))
+		for kk, vv := range v {
+			inner[kk] = vv
+		}
+		newPT.refSeen[k] = inner
 	}
 
 	// Clone knownFiles: without it the clone would believe it holds no files

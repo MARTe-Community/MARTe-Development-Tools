@@ -164,6 +164,15 @@ func (s *Snapshot) CloneForEdit(ctx context.Context) *Snapshot {
 	return s.cloneWithTree(s.tree.CloneUnresolved())
 }
 
+// CloneShallow returns a new snapshot that shares the receiver's immutable
+// tree and schema and copies only the document maps. Use it when the tree is
+// known to be unchanged (e.g. opening a file whose content the workspace
+// scan already indexed): the resolved tree stays readable while the document
+// text is recorded.
+func (s *Snapshot) CloneShallow() *Snapshot {
+	return s.cloneWithTree(s.tree)
+}
+
 func (s *Snapshot) cloneWithTree(tree *index.ProjectTree) *Snapshot {
 	newSnap := &Snapshot{
 		view:         s.view,

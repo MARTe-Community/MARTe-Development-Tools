@@ -226,11 +226,15 @@ func negativePositions(raw json.RawMessage) []string {
 var _ = strings.TrimSpace
 
 // TestLSPReportsSlowRequests covers the "request timeout, but no logs" case:
-// editors report a timeout without saying which request hung, and routine
-// logging is off by default, so the server must report its own overruns.
+// editors report a timeout without saying which request hung. The overrun
+// report is a diagnostic, so it is only emitted in debug mode: editors paint
+// every stderr line as an error, and a slow request must not look like a
+// server failure.
 func TestLSPReportsSlowRequests(t *testing.T) {
-	// Every request counts as slow with a zero threshold.
+	// Every request counts as slow with a zero threshold; MDT_DEBUG opts in
+	// to the report.
 	t.Setenv("MDT_SLOW_REQUEST_MS", "0")
+	t.Setenv("MDT_DEBUG", "1")
 
 	ctx := framework.NewTestContext(t)
 	defer ctx.Cleanup()
@@ -251,6 +255,30 @@ func TestLSPReportsSlowRequests(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Errorf("no slow-request line on stderr, got:\n%s", client.Stderr())
+}
+
+// Without MDT_DEBUG the watchdog is silent, so an editor's stderr panel is
+// not flooded with [ERROR] lines for routine latency.
+func TestLSPQuietWithoutDebug(t *testing.T) {
+	t.Setenv("MDT_SLOW_REQUEST_MS", "0")
+	t.Setenv("MDT_DEBUG", "")
+	t.Setenv("MDT_VERBOSE", "")
+	t.Setenv("MDT_LOG", "")
+
+	ctx := framework.NewTestContext(t)
+	defer ctx.Cleanup()
+	ctx.CreateFile("app.marte", lifecycleFixture)
+
+	client := ctx.RunLSP()
+	if _, err := client.RawRequest("textDocument/documentSymbol", map[string]interface{}{
+		"textDocument": map[string]interface{}{"uri": "file://" + ctx.RootDir() + "/app.marte"},
+	}); err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if out := client.Stderr(); strings.Contains(out, "slow request") || strings.Contains(out, "still running after") {
+		t.Errorf("routine latency was logged without MDT_DEBUG:\n%s", out)
+	}
 }
 
 // TestLSPInitializeScalesWithWorkspaceSize guards the indexing cost: adding a

@@ -94,6 +94,16 @@ type Validator struct {
 	// visited tracks (child node -> source definition) pairs already
 	// expanded by activation, keeping repeated passes idempotent.
 	visited map[*index.ProjectNode]map[parser.Definition]bool
+	// fileFragments indexes every fragment by file after activation, so
+	// position-activity queries don't walk the whole tree per reference
+	// (that was quadratic on projects with many references).
+	fileFragments map[string][]*index.Fragment
+	// expandedScopes records (node, scope) pairs already walked in this
+	// activation pass. Contexts are recreated on every visit, so keying by
+	// pointer (or relying on the per-call map only) re-expands the same
+	// subtree with a fresh pointer indefinitely on projects with several
+	// `with`/`foreach` blocks.
+	expandedScopes map[*index.ProjectNode]map[string]bool
 	// loadCache memoizes with-block document loads by absolute path.
 	loadCache map[string]parser.Value
 	muActive  sync.Mutex
@@ -177,13 +187,87 @@ func (v *Validator) isGAMSignalsContainer(node *index.ProjectNode) bool {
 	return node.RealName == "InputSignals" || node.RealName == "OutputSignals"
 }
 
-// isBoundCtx reports whether ctx carries loop or with bindings on top of a
-// parent scope (the base scope is re-evaluated every pass).
-func isBoundCtx(ctx *index.EvaluationContext) bool {
-	return ctx != nil && ctx.Parent != nil
+// pruneShadowedFragments removes index-time fragments (no scope) that are
+// duplicated by a materialized copy of the same definition. The duplicates
+// would otherwise be evaluated with whatever scope happens to be current,
+// leaking one loop iteration's variables into another (cross-named signals).
+type fragmentKey struct {
+	src    parser.Definition
+	scope  string
+	branch string
+}
+
+func pruneShadowedFragments(node *index.ProjectNode, isActive func(*index.Fragment) bool, deactivate func(*index.Fragment)) {
+	if node == nil {
+		return
+	}
+	seen := make(map[fragmentKey]bool)
+	scoped := make(map[parser.Definition]bool)
+	for _, f := range node.Fragments {
+		if f.Source != nil && f.EvalCtx != nil && f.EvalCtx.Scope != "" {
+			scoped[f.Source] = true
+		}
+	}
+	var kept []*index.Fragment
+	changed := false
+	for _, f := range node.Fragments {
+		if !isActive(f) {
+			kept = append(kept, f)
+			continue
+		}
+		shadowed := f.Source != nil && scoped[f.Source] &&
+			(f.EvalCtx == nil || f.EvalCtx.Scope == "")
+		if shadowed {
+			deactivate(f)
+			changed = true
+			continue
+		}
+		if f.Source != nil {
+			scope := ""
+			if f.EvalCtx != nil {
+				scope = f.EvalCtx.Scope
+			}
+			key := fragmentKey{src: f.Source, scope: scope, branch: f.BranchID}
+			if seen[key] {
+				deactivate(f)
+				changed = true
+				continue
+			}
+			seen[key] = true
+		}
+		kept = append(kept, f)
+	}
+	// Only rewrite the slice when something was actually dropped: a no-op
+	// rewrite would still be a write to the tree, racing with concurrent
+	// readers of a shared snapshot.
+	if changed {
+		node.Fragments = kept
+	}
+	for _, c := range node.Children {
+		pruneShadowedFragments(c, isActive, deactivate)
+	}
 }
 
 func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectNode, evalCtx *index.EvaluationContext, forceUncond bool) {
+	if ctx.Err() != nil {
+		return
+	}
+	scopeKey := ""
+	if evalCtx != nil {
+		scopeKey = evalCtx.Scope
+	}
+	if v.expandedScopes == nil {
+		v.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
+	}
+	scopes := v.expandedScopes[node]
+	if scopes != nil && scopes[scopeKey] {
+		return
+	}
+	if scopes == nil {
+		scopes = make(map[string]bool)
+		v.expandedScopes[node] = scopes
+	}
+	scopes[scopeKey] = true
 	if v.visited == nil {
 		v.visited = make(map[*index.ProjectNode]map[parser.Definition]bool)
 	}
@@ -207,9 +291,16 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 		v.muActive.Lock()
 		active := v.ActiveFragments[frag]
 		v.muActive.Unlock()
+		if active && frag.IsConditional && frag.EvalCtx == nil {
+			// Conditional fragment without a recorded scope: either a block
+			// body (handled by its block expansion) or an index-time
+			// placeholder for an object inside such a body. Evaluating it
+			// here would use the unbound scope and leak loop variables.
+			continue
+		}
 		if active {
 			c := evalCtx
-			if frag.EvalCtx != nil {
+			if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
 				// Fragment materialized under loop/template/with
 				// bindings: evaluate with those.
 				c = frag.EvalCtx
@@ -271,7 +362,9 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 				// Ensure this fragment is present and active
 				found := false
 				for _, f := range child.Fragments {
-					if f.Source == d {
+					// The same AST node repeats on every loop iteration, so a
+					// fragment only serves this expansion when its scope matches.
+					if f.Source == d && index.SameEvalScope(f.EvalCtx, ed.Ctx) {
 						v.ActiveFragments[f] = true
 						if f.EvalCtx == nil {
 							f.EvalCtx = ed.Ctx
@@ -281,13 +374,15 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					}
 				}
 				if !found {
+					before := len(child.Fragments)
 					v.Tree.PopulateObjectFragment(child, ed.File, d, "", nil, nil, !forceUncond)
-					for _, f := range child.Fragments {
-						if f.Source == d {
+					// Only fragments appended by this call belong to this
+					// expansion; an earlier placeholder with the same source
+					// must keep its own (or no) scope.
+					for _, f := range child.Fragments[before:] {
+						if f.Source == d && f.EvalCtx == nil {
 							v.ActiveFragments[f] = true
-							if f.EvalCtx == nil && isBoundCtx(ed.Ctx) {
-								f.EvalCtx = ed.Ctx
-							}
+							f.EvalCtx = ed.Ctx
 							break
 						}
 					}
@@ -361,6 +456,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 							Variables: make(map[string]parser.Value),
 							Parent:    ed.Ctx,
 							Tree:      v.Tree,
+							Scope:     index.ChildScope(ed.Ctx, fmt.Sprintf("%s#%d", id, i)),
 						}
 						if d.ValueVar != "" {
 							subCtx.Variables[d.ValueVar] = val
@@ -392,6 +488,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 							Variables: make(map[string]parser.Value),
 							Parent:    ed.Ctx,
 							Tree:      v.Tree,
+							Scope:     index.ChildScope(ed.Ctx, id+"#"+key),
 						}
 						if d.KeyVar != "" {
 							subCtx.Variables[d.KeyVar] = &parser.StringValue{Value: key, Quoted: true}
@@ -465,6 +562,7 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					Variables: map[string]parser.Value{d.BindName: val},
 					Parent:    ed.Ctx,
 					Tree:      v.Tree,
+					Scope:     index.ChildScope(ed.Ctx, id+":with"),
 				}
 				v.muActive.Lock()
 				for _, f := range node.Fragments {
@@ -497,9 +595,16 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 
 	processEval(evaluated, node, forceUncond)
 
-	for name, child := range node.Children {
-		if !written[name] && !child.IsConditional {
-			v.collectActiveNodes(ctx, child, evalCtx, forceUncond)
+	// Sibling children that this expansion did not define belong to the
+	// base scope (they may come from another file sharing the package).
+	// Recursing into them with a loop/with context leaked that expansion
+	// into unrelated subtrees and multiplied their fragments once per
+	// iteration. Base visits (empty scope) still walk the whole tree.
+	if evalCtx == nil || evalCtx.Scope == "" {
+		for name, child := range node.Children {
+			if !written[name] && !child.IsConditional {
+				v.collectActiveNodes(ctx, child, evalCtx, forceUncond)
+			}
 		}
 	}
 }
@@ -538,6 +643,7 @@ func (v *Validator) Activate(ctx context.Context) {
 		}
 
 		prevCount := len(v.ActiveFragments)
+		v.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
 		if v.Tree.Root != nil {
 			v.collectActiveNodes(ctx, v.Tree.Root, evalCtx, false)
 		}
@@ -553,8 +659,61 @@ func (v *Validator) Activate(ctx context.Context) {
 			break
 		}
 	}
+	if v.Tree.Root != nil {
+		pruneShadowedFragments(v.Tree.Root,
+			func(f *index.Fragment) bool {
+				v.muActive.Lock()
+				defer v.muActive.Unlock()
+				return v.ActiveFragments[f]
+			},
+			func(f *index.Fragment) {
+				v.muActive.Lock()
+				defer v.muActive.Unlock()
+				delete(v.ActiveFragments, f)
+			})
+	}
+	for _, root := range v.Tree.IsolatedFiles {
+		pruneShadowedFragments(root,
+			func(f *index.Fragment) bool {
+				v.muActive.Lock()
+				defer v.muActive.Unlock()
+				return v.ActiveFragments[f]
+			},
+			func(f *index.Fragment) {
+				v.muActive.Lock()
+				defer v.muActive.Unlock()
+				delete(v.ActiveFragments, f)
+			})
+	}
+	v.buildFileFragments()
 	v.reportDeferredWiths()
 	v.evaluateAsserts()
+}
+
+// buildFileFragments indexes fragments by file for position queries.
+func (v *Validator) buildFileFragments() {
+	frags := make(map[string][]*index.Fragment)
+	var walk func(n *index.ProjectNode)
+	walk = func(n *index.ProjectNode) {
+		if n == nil {
+			return
+		}
+		for _, f := range n.Fragments {
+			if f.File != "" {
+				frags[f.File] = append(frags[f.File], f)
+			}
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	if v.Tree.Root != nil {
+		walk(v.Tree.Root)
+	}
+	for _, iso := range v.Tree.IsolatedFiles {
+		walk(iso)
+	}
+	v.fileFragments = frags
 }
 
 // reportDeferredWiths reports with-blocks whose path still references an
@@ -770,14 +929,34 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 		v.muActive.Unlock()
 		if active {
 			c := evalCtx
-			if frag.EvalCtx != nil {
+			if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
 				c = frag.EvalCtx
+			} else if frag.BranchID == "" && frag.Source != nil && evalCtx != nil && evalCtx.Scope != "" {
+				// Unscoped index fragment reached through a scoped
+				// expansion: it belongs to the base scope.
+				continue
 			}
 			evaluated = append(evaluated, v.Tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
 		}
 	}
 
 	fields := v.extractFields(evaluated)
+	// A field repeated across different expansions (loop iterations sharing
+	// a container) is not a duplicate definition: each expansion contributes
+	// its own value. Only repetitions within the same scope are errors.
+	fieldScopes := make(map[string]map[string]bool)
+	for _, ed := range evaluated {
+		if d, ok := ed.Def.(*parser.Field); ok {
+			if fieldScopes[d.Name] == nil {
+				fieldScopes[d.Name] = make(map[string]bool)
+			}
+			scope := ""
+			if ed.Ctx != nil {
+				scope = ed.Ctx.Scope
+			}
+			fieldScopes[d.Name][scope] = true
+		}
+	}
 	var objects []index.EvaluatedDefinition
 	for _, ed := range evaluated {
 		if _, ok := ed.Def.(*parser.ObjectNode); ok {
@@ -787,9 +966,9 @@ func (v *Validator) validateNode(ctx context.Context, node *index.ProjectNode, e
 
 	// 1. Check for duplicate fields (evaluated only)
 	for name, defs := range fields {
-		if len(defs) > 1 {
+		if len(defs) > 1 && len(fieldScopes[name]) <= 1 {
 			v.report(node, "duplicate_field", LevelError,
-				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in %s", name, defs[0].File),
+				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in object %s (%s)", name, nodePath(node), defs[0].File),
 				defs[1].Raw.Position, defs[1].File)
 		}
 	}
@@ -921,6 +1100,22 @@ func (v *Validator) validateDynamicObject(ctx context.Context, obj *parser.Objec
 	evaluated := v.Tree.EvaluateDefinitions(obj.Subnode.Definitions, evalCtx, file)
 
 	fields := v.extractFields(evaluated)
+	// A field repeated across different expansions (loop iterations sharing
+	// a container) is not a duplicate definition: each expansion contributes
+	// its own value. Only repetitions within the same scope are errors.
+	fieldScopes := make(map[string]map[string]bool)
+	for _, ed := range evaluated {
+		if d, ok := ed.Def.(*parser.Field); ok {
+			if fieldScopes[d.Name] == nil {
+				fieldScopes[d.Name] = make(map[string]bool)
+			}
+			scope := ""
+			if ed.Ctx != nil {
+				scope = ed.Ctx.Scope
+			}
+			fieldScopes[d.Name][scope] = true
+		}
+	}
 	var objects []index.EvaluatedDefinition
 	for _, ed := range evaluated {
 		if _, ok := ed.Def.(*parser.ObjectNode); ok {
@@ -931,8 +1126,9 @@ func (v *Validator) validateDynamicObject(ctx context.Context, obj *parser.Objec
 	// Perform basic validation on dynamic object (Class existence, duplicates)
 	for name, defs := range fields {
 		if len(defs) > 1 {
+			objName := v.ValueToString(obj.Name, evalCtx)
 			v.report(nil, "duplicate_field", LevelError,
-				fmt.Sprintf("Duplicate Field Definition in dynamic object: '%s'", name),
+				fmt.Sprintf("Duplicate Field Definition: '%s' is already defined in object %s (%s)", name, objName, file),
 				defs[1].Raw.Position, defs[1].File)
 		}
 		for _, f := range defs {
@@ -1121,21 +1317,14 @@ func (v *Validator) isSuppressed(warningType string, node *index.ProjectNode) bo
 }
 
 func (v *Validator) isPositionActive(file string, pos parser.Position) bool {
-	node := v.Tree.GetNodeContaining(file, pos)
-	if node == nil {
+	frags := v.fileFragments[file]
+	if len(frags) == 0 {
 		return false
 	}
-	// A node's package/file-level content can be split across several
-	// non-object Fragments: one holding the unconditional definitions, plus
-	// one per top-level conditional (#if/#foreach/#template) block. Position
-	// is only inactive if it actually falls inside one of those conditional
-	// fragments and that branch wasn't the one selected as active. We must
-	// not just take the first non-object fragment matching the file, since
-	// its conditional state has nothing to do with the position we're
-	// checking (this previously caused unrelated content earlier/later in
-	// the same file to be reported as inactive/active incorrectly).
-	for _, frag := range node.Fragments {
-		if frag.File != file || frag.IsObject || !frag.IsConditional {
+	// Position is inactive when it falls inside a conditional block body
+	// (#if/#foreach/#template) that was not selected for this pass.
+	for _, frag := range frags {
+		if frag.IsObject || !frag.IsConditional {
 			continue
 		}
 		if pos.Line >= frag.ObjectPos.Line && pos.Line <= frag.EndPos.Line {
@@ -1147,24 +1336,66 @@ func (v *Validator) isPositionActive(file string, pos parser.Position) bool {
 			}
 		}
 	}
-	// Now check whether the position falls within an object fragment, and if
-	// so, defer to that fragment's own active state (this covers the case
-	// where the whole object is itself conditionally defined).
-	for _, frag := range node.Fragments {
-		if frag.File != file || !frag.IsObject {
+	// Otherwise the innermost object fragment containing the position
+	// decides, so a definition inside an inactive branch stays inactive.
+	var best *index.Fragment
+	for _, frag := range frags {
+		if !frag.IsObject {
 			continue
 		}
 		start := frag.ObjectPos
 		end := frag.EndPos
 		if (pos.Line > start.Line || (pos.Line == start.Line && pos.Column >= start.Column)) &&
 			(pos.Line < end.Line || (pos.Line == end.Line && pos.Column <= end.Column)) {
-			v.muActive.Lock()
-			active := v.ActiveFragments[frag]
-			v.muActive.Unlock()
-			return active
+			if best == nil || spanLess(frag, best) {
+				best = frag
+			}
+		}
+	}
+	if best != nil {
+		v.muActive.Lock()
+		active := v.ActiveFragments[best]
+		v.muActive.Unlock()
+		return active
+	}
+	for _, frag := range frags {
+		if !frag.IsObject && !frag.IsConditional && frag.BranchID == "" {
+			return true
 		}
 	}
 	return true
+}
+
+// spanLess orders two fragments by source range size (smallest wins, i.e.
+// the innermost definition).
+func spanLess(a, b *index.Fragment) bool {
+	as := (a.EndPos.Line-a.ObjectPos.Line)*(1<<20) + (a.EndPos.Column - a.ObjectPos.Column)
+	bs := (b.EndPos.Line-b.ObjectPos.Line)*(1<<20) + (b.EndPos.Column - b.ObjectPos.Column)
+	return as < bs
+}
+
+// nodePath renders the containment path of a node (e.g.
+// "/App/+Data/+DDB5/Signals/DI0") so diagnostics on data-driven,
+// generated objects say which object they refer to.
+func nodePath(node *index.ProjectNode) string {
+	if node == nil {
+		return ""
+	}
+	var parts []string
+	for n := node; n != nil; n = n.Parent {
+		name := n.RealName
+		if name == "" {
+			name = n.Name
+		}
+		if name == "" || strings.HasPrefix(name, "#") {
+			continue
+		}
+		parts = append(parts, name)
+	}
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return "/" + strings.Join(parts, "/")
 }
 
 func (v *Validator) report(node *index.ProjectNode, tag string, level DiagnosticLevel, msg string, pos parser.Position, file string) {
@@ -2841,12 +3072,16 @@ func (v *Validator) CheckVariables(ctx context.Context) {
 			}
 			for _, def := range frag.Definitions {
 				if vdef, ok := def.(*parser.VariableDefinition); ok {
-					if prevPos, exists := seen[vdef.Name]; exists {
+					// Variables are scoped to their block body: a name may be
+					// declared again in a sibling block. Compare within the
+					// same fragment branch.
+					scopeKey := frag.BranchID + "\x00" + vdef.Name
+					if prevPos, exists := seen[scopeKey]; exists {
 						v.report(node, "duplicate_variable", LevelError,
 							fmt.Sprintf("Duplicate variable definition: '%s' was already defined at %d:%d", vdef.Name, prevPos.Line, prevPos.Column),
 							vdef.Position, frag.File)
 					}
-					seen[vdef.Name] = vdef.Position
+					seen[scopeKey] = vdef.Position
 
 					if vdef.IsConst && vdef.DefaultValue == nil {
 						v.report(node, "missing_variable_value", LevelError,
@@ -2929,6 +3164,12 @@ func (v *Validator) CheckUnresolvedVariables(ctx context.Context) {
 			continue
 		}
 		if ref.IsVariable && ref.TargetVariable == nil {
+			name := strings.TrimPrefix(strings.TrimPrefix(ref.Name, "@"), "$")
+			if v.Tree.BlockVars[name] {
+				// Declared by a `let`/`var` inside a block body: bound by the
+				// block expansion, not by a node variable.
+				continue
+			}
 			v.report(nil, "unresolved_variable", LevelError,
 				fmt.Sprintf("Unresolved variable reference: '@%s'", ref.Name),
 				ref.Position, ref.File)

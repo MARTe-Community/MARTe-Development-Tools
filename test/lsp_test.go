@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"io/ioutil"
+	"strings"
 	"testing"
 
 	"github.com/marte-community/marte-dev-tools/internal/index"
@@ -38,7 +39,10 @@ func TestLSPDiagnostics(t *testing.T) {
 	// Check for expected diagnostics
 	found := false
 	for _, d := range v.Diagnostics {
-		if d.Message == "Duplicate Field Definition: 'Field' is already defined in integration/check_dup.marte" {
+		// The message names the owning object so field errors in generated
+		// (data-driven) configurations can be traced back to their node.
+		if strings.Contains(d.Message, "Duplicate Field Definition: 'Field' is already defined in object ") &&
+			strings.Contains(d.Message, "integration/check_dup.marte") {
 			found = true
 			if d.Position.Line != 5 {
 				t.Errorf("Expected diagnostic at line 5, got %d", d.Position.Line)

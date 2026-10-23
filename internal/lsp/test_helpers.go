@@ -9,11 +9,18 @@ import (
 // and allow tests to inspect internal state.
 
 func ResetTestServer() {
+	// Debounce timers outlive a test: a pending validation would otherwise
+	// activate the previous test's tree while the next one mutates its own.
+	stopAllValidations()
+	diagMu.Lock()
+	lastPublished = make(map[string]string)
+	diagMu.Unlock()
 	GlobalSession = cache.NewSession("test")
 	GlobalSession.CreateView("default", "/")
 }
 
 func SetTestProjectRoot(root string) {
+	stopAllValidations()
 	GlobalSession = cache.NewSession("test")
 	GlobalSession.CreateView("default", root)
 }
