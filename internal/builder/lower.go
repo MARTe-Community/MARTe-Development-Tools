@@ -141,7 +141,14 @@ func (b *Builder) lowerAll() (LowerReport, error) {
 // Lower expands copy/wiring sugar on a tree without writing it. Used by
 // `mdt check` so sugar-backed configurations validate like lowered ones.
 func Lower(tree *index.ProjectTree) (LowerReport, error) {
-	b := NewBuilder(nil, nil)
+	return LowerWithOverrides(tree, nil)
+}
+
+// LowerWithOverrides is Lower with variable overrides applied, so sugar
+// materialized under conditions (`if @x`, loop documents) matches the same
+// values validation and the build see.
+func LowerWithOverrides(tree *index.ProjectTree, overrides map[string]string) (LowerReport, error) {
+	b := NewBuilder(nil, overrides)
 	b.tree = tree
 	// Expansion needs the same scope evaluation as a build: dynamic copy
 	// endpoints are materialized per foreach/with expansion during

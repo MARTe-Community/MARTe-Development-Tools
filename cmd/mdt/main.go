@@ -430,7 +430,7 @@ func runBuild(args []string) {
 	if projectRoot == "" {
 		projectRoot = "."
 	}
-	if _, err := builder.Lower(tree); err != nil {
+	if _, err := builder.LowerWithOverrides(tree, overrides); err != nil {
 		logger.Printf("Copy/wiring error: %v\n", err)
 		os.Exit(1)
 	}
@@ -590,7 +590,7 @@ func runCheck(args []string) {
 	if projectRoot == "" {
 		projectRoot = "."
 	}
-	if _, err := builder.Lower(tree); err != nil {
+	if _, err := builder.LowerWithOverrides(tree, overrides); err != nil {
 		logger.Printf("Copy/wiring error: %v\n", err)
 		os.Exit(1)
 	}

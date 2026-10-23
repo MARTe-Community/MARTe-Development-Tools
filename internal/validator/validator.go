@@ -1502,10 +1502,20 @@ func (v *Validator) report(node *index.ProjectNode, tag string, level Diagnostic
 }
 
 func shouldAutoQuoteWithDef(valStr string, def *parser.VariableDefinition) bool {
-	if strings.HasPrefix(valStr, "\"") && strings.HasSuffix(valStr, "\"") {
+	trimmed := strings.TrimSpace(valStr)
+	if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
 		return false
 	}
-	typeExpr := def.TypeExpr
+	// JSON/YAML override objects and lists are already MARTe literals.
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return false
+	}
+	typeExpr := strings.TrimSpace(def.TypeExpr)
+	// Structured or list types may contain the word "string" in a field
+	// type; the override is a whole literal, not a string.
+	if strings.HasPrefix(typeExpr, "{") || strings.HasPrefix(typeExpr, "[") {
+		return false
+	}
 	if strings.Contains(typeExpr, "string") || strings.Contains(typeExpr, "char8") {
 		return true
 	}
