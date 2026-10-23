@@ -279,7 +279,8 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 					// variable loads the document.
 					continue
 				}
-				resolved := loader.ResolvePath(ed.File, b.tree.ValueToString(b.tree.EvaluateValue(d.Path, ed.Ctx)))
+				home := loader.ProjectHome(ed.File, b.ProjectRoot)
+				resolved := loader.ResolvePathFrom(ed.File, home, b.tree.ValueToString(b.tree.EvaluateValue(d.Path, ed.Ctx)))
 				val, err := loader.Load(d.Format, resolved)
 				if err != nil {
 					// Validation reports the failed load with the sugar

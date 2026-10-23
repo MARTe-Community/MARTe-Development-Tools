@@ -56,6 +56,10 @@ type assertInstance struct {
 type Validator struct {
 	Diagnostics []Diagnostic
 	Tree        *index.ProjectTree
+	// ProjectRoot is the workspace directory (from -P or the first file); it
+	// anchors relative document paths when no git root or marte_project.json
+	// marks the project.
+	ProjectRoot string
 	Schema      *schema.Schema
 	// MissingFilesAreWarnings makes a failed `with` document load a warning
 	// whose binding resolves to an empty document, instead of an error.
@@ -421,7 +425,8 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 					v.muActive.Unlock()
 					continue
 				}
-				resolved := loader.ResolvePath(ed.File, v.ValueToString(d.Path, ed.Ctx))
+				home := loader.ProjectHome(ed.File, v.ProjectRoot)
+				resolved := loader.ResolvePathFrom(ed.File, home, v.ValueToString(d.Path, ed.Ctx))
 				v.muActive.Lock()
 				if v.loadedWith == nil {
 					v.loadedWith = make(map[*parser.WithBlock]bool)

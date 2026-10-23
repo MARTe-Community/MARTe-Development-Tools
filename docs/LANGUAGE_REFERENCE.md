@@ -703,8 +703,13 @@ end
 
 - `with <format>("path") as <name>` — supported formats: `json`, `csv`
   and Excel workbooks (`xlsx`; `xls` and `excel` are aliases). The path
-  expression may use variables and `..`; relative paths resolve against
-  the directory of the file containing the block. Excel files are read
+  expression may use variables and `..`. Relative paths are resolved
+  against the **project home** first — the nearest ancestor directory
+  containing `marte_project.json`, otherwise the git root — and fall back
+  to the directory of the file containing the block, so a document kept at
+  the project root works from any subdirectory while single-file configs
+  keep their old behaviour. Absolute paths are used as written. Excel
+  files are read
   from their first worksheet like CSV: the first row names the columns
   and every row becomes a dict of strings; shared strings, formula
   results and gaps are handled. Legacy binary `.xls` files are not

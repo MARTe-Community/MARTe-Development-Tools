@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/marte-community/marte-dev-tools/internal/parser"
 )
@@ -42,13 +43,94 @@ func Load(format, path string) (parser.Value, error) {
 	}
 }
 
-// ResolvePath resolves p relative to the directory of the
-// configuration file that references it, unless p is absolute.
+// projectMarker names the directory that acts as the project home. Its
+// presence (no content is read) anchors relative document paths.
+const projectMarker = "marte_project.json"
+
+var homeCache sync.Map // "<dir>\x00<fallback>" → home
+
+// ProjectHome returns the directory that relative document paths resolve
+// against: the nearest ancestor of baseFile containing marte_project.json,
+// otherwise the nearest git root, otherwise fallback (which may be empty).
+func ProjectHome(baseFile, fallback string) string {
+	dir := filepath.Dir(baseFile)
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	key := dir + "\x00" + fallback
+	if cached, ok := homeCache.Load(key); ok {
+		return cached.(string)
+	}
+	home := discoverProjectHome(dir, fallback)
+	homeCache.Store(key, home)
+	return home
+}
+
+func discoverProjectHome(dir, fallback string) string {
+	gitRoot := ""
+	for {
+		if entryExists(filepath.Join(dir, projectMarker)) {
+			return dir
+		}
+		// .git is usually a directory; some setups use a file.
+		if gitRoot == "" && entryExists(filepath.Join(dir, ".git")) {
+			gitRoot = dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	if gitRoot != "" {
+		return gitRoot
+	}
+	return fallback
+}
+
+// ResolvePath resolves p relative to the directory of the configuration file
+// that references it, unless p is absolute.
 func ResolvePath(baseFile, p string) string {
+	return ResolvePathFrom(baseFile, "", p)
+}
+
+// ResolvePathFrom resolves a document path for a configuration file. Absolute
+// paths are returned unchanged. A relative path is first tried against the
+// project home (git root or the directory holding marte_project.json) and
+// then against the directory of the configuration file, so projects can keep
+// documents at their root while single-file configs keep working. When the
+// file exists in neither place, the project-home form is returned so the
+// diagnostic points at the canonical location.
+func ResolvePathFrom(baseFile, home, p string) string {
 	if filepath.IsAbs(p) {
 		return p
 	}
-	return filepath.Join(filepath.Dir(baseFile), p)
+	fromHome := ""
+	if home != "" {
+		fromHome = filepath.Join(home, p)
+		if fileExists(fromHome) {
+			return fromHome
+		}
+	}
+	fromFile := filepath.Join(filepath.Dir(baseFile), p)
+	if fileExists(fromFile) {
+		return fromFile
+	}
+	if fromHome != "" {
+		return fromHome
+	}
+	return fromFile
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// entryExists reports whether path exists (file or directory).
+func entryExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func loadJSON(path string) (parser.Value, error) {
