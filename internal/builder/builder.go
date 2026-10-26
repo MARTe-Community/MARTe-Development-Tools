@@ -41,6 +41,11 @@ type Builder struct {
 	// baseCtx evaluates unscoped (index-time) fragments: they belong to the
 	// base scope, not to any loop/with context a traversal carries.
 	baseCtx *index.EvaluationContext
+	// fileOrder ranks input files by the order they were handed to the
+	// builder. Source ordering across files follows file order first and
+	// position within the file second; comparing raw line numbers let a
+	// later file's early definition jump ahead of an earlier file's output.
+	fileOrder map[string]int
 }
 
 func NewBuilder(files []string, overrides map[string]string) *Builder {
@@ -50,6 +55,12 @@ func NewBuilder(files []string, overrides map[string]string) *Builder {
 			root = d
 		}
 	}
+	order := make(map[string]int, len(files))
+	for i, f := range files {
+		if _, ok := order[f]; !ok {
+			order[f] = i
+		}
+	}
 	return &Builder{
 		Files:           files,
 		Overrides:       overrides,
@@ -57,6 +68,7 @@ func NewBuilder(files []string, overrides map[string]string) *Builder {
 		variables:       make(map[string]parser.Value),
 		activeNodes:     make(map[*index.ProjectNode]bool),
 		activeFragments: make(map[*index.Fragment]bool),
+		fileOrder:       order,
 	}
 }
 
@@ -953,13 +965,16 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 		childNames = append(childNames, name)
 	}
 	sort.SliceStable(childNames, func(i, j int) bool {
-		gi, si, li, ci := nodeOrderKey(node.Children[childNames[i]])
-		gj, sj, lj, cj := nodeOrderKey(node.Children[childNames[j]])
+		gi, si, fi, li, ci := b.nodeOrderKey(node.Children[childNames[i]])
+		gj, sj, fj, lj, cj := b.nodeOrderKey(node.Children[childNames[j]])
 		if gi != gj {
 			return gi < gj
 		}
 		if si != sj {
 			return si < sj
+		}
+		if fi != fj {
+			return fi < fj
 		}
 		if li != lj {
 			return li < lj
@@ -1006,19 +1021,52 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 		frags = append(frags, frag)
 	}
 	sort.SliceStable(frags, func(i, j int) bool {
-		gi, si, li, ci := fragmentOrderKey(frags[i])
-		gj, sj, lj, cj := fragmentOrderKey(frags[j])
+		gi, si, fi, li, ci := b.fragmentOrderKey(frags[i])
+		gj, sj, fj, lj, cj := b.fragmentOrderKey(frags[j])
 		if gi != gj {
 			return gi < gj
 		}
 		if si != sj {
 			return si < sj
 		}
+		if fi != fj {
+			return fi < fj
+		}
 		if li != lj {
 			return li < lj
 		}
 		return ci < cj
 	})
+	// Conditional blocks (`if`/`foreach`/`with`) are indexed as extra
+	// fragments of the enclosing node, so one source file contributes several
+	// fragments interleaved with the base fragment. Emitting whole fragments
+	// in turn put every base definition of a file before the conditional
+	// objects that precede it in the source. Merge the fragments' definition
+	// streams instead, so a definition lands at its position in the source.
+	// Within one stream the slice order is kept verbatim: the optimizer
+	// reorders definitions in place (signal grouping), and their source
+	// positions no longer reflect the intended order.
+	type definitionKey struct {
+		file int
+		line int
+		col  int
+	}
+	type definitionStream struct {
+		defs []index.EvaluatedDefinition
+		keys []definitionKey
+		next int
+	}
+	type definitionGroup struct {
+		streams []*definitionStream
+	}
+	type definitionGroupKey struct {
+		group int
+		scope string
+	}
+	// The base (unscoped) group comes before every scoped expansion; within
+	// a group the source position decides, file order first.
+	groups := make(map[definitionGroupKey]*definitionGroup)
+	groupOrder := make([]definitionGroupKey, 0, len(frags))
 	for _, frag := range frags {
 		c := ctx
 		if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
@@ -1029,7 +1077,59 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 		} else if frag.BranchID == "" && frag.Source != nil && (c == nil || c.Scope != "") && b.baseCtx != nil {
 			c = b.baseCtx
 		}
-		evaluated = append(evaluated, b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)...)
+		group, scope, file, fragLine, fragCol := b.fragmentOrderKey(frag)
+		defs := b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)
+		if len(defs) == 0 {
+			continue
+		}
+		stream := &definitionStream{defs: defs, keys: make([]definitionKey, len(defs))}
+		for i, ed := range defs {
+			p := ed.Def.Pos()
+			if p.Line == 0 {
+				// Synthetic definition: locate it at the fragment start.
+				p = parser.Position{Line: fragLine, Column: fragCol}
+			}
+			stream.keys[i] = definitionKey{file: file, line: p.Line, col: p.Column}
+		}
+		key := definitionGroupKey{group: group, scope: scope}
+		grp, ok := groups[key]
+		if !ok {
+			grp = &definitionGroup{}
+			groups[key] = grp
+			groupOrder = append(groupOrder, key)
+		}
+		grp.streams = append(grp.streams, stream)
+	}
+	ordered := make([]index.EvaluatedDefinition, 0, len(node.Fragments))
+	for _, key := range groupOrder {
+		streams := groups[key].streams
+		for {
+			best := -1
+			for i, st := range streams {
+				if st.next >= len(st.defs) {
+					continue
+				}
+				if best < 0 {
+					best = i
+					continue
+				}
+				cur, alt := streams[best].keys[streams[best].next], st.keys[st.next]
+				if alt.file < cur.file ||
+					(alt.file == cur.file && (alt.line < cur.line ||
+						(alt.line == cur.line && alt.col < cur.col))) {
+					best = i
+				}
+			}
+			if best < 0 {
+				break
+			}
+			st := streams[best]
+			ordered = append(ordered, st.defs[st.next])
+			st.next++
+		}
+	}
+	for _, od := range ordered {
+		evaluated = append(evaluated, od)
 	}
 
 	// A node may carry several fragments for the same definition when the
@@ -1055,14 +1155,16 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 }
 
 // fragmentOrderKey orders fragments for writing: base definitions before
-// scoped expansions, then by scope (numeric-aware) and source position.
-func fragmentOrderKey(frag *index.Fragment) (group int, scope string, line, col int) {
+// scoped expansions, then by scope (numeric-aware), input file order and
+// source position.
+func (b *Builder) fragmentOrderKey(frag *index.Fragment) (group int, scope string, file, line, col int) {
 	if frag.EvalCtx != nil {
 		scope = frag.EvalCtx.Scope
 	}
 	if scope != "" {
 		group = 1
 	}
+	file = b.fileRank(frag.File)
 	if frag.Source != nil {
 		p := frag.Source.Pos()
 		line, col = p.Line, p.Column
@@ -1070,22 +1172,31 @@ func fragmentOrderKey(frag *index.Fragment) (group int, scope string, line, col 
 	if line == 0 {
 		line, col = frag.ObjectPos.Line, frag.ObjectPos.Column
 	}
-	return group, padScopeDigits(scope), line, col
+	return group, padScopeDigits(scope), file, line, col
 }
 
-func nodeOrderKey(node *index.ProjectNode) (group int, scope string, line, col int) {
+// fileRank returns the input order of file. Files that were not part of the
+// build (synthetic or generated ones) sort after every known file.
+func (b *Builder) fileRank(file string) int {
+	if r, ok := b.fileOrder[file]; ok {
+		return r
+	}
+	return len(b.fileOrder)
+}
+
+func (b *Builder) nodeOrderKey(node *index.ProjectNode) (group int, scope string, file, line, col int) {
 	if node == nil || len(node.Fragments) == 0 {
-		return 2, "", 0, 0
+		return 2, "", len(b.fileOrder), 0, 0
 	}
 	best := true
 	for _, frag := range node.Fragments {
-		g, s, l, c := fragmentOrderKey(frag)
-		if best || g < group || (g == group && (s < scope || (s == scope && (l < line || (l == line && c < col))))) {
-			group, scope, line, col = g, s, l, c
+		g, s, f, l, c := b.fragmentOrderKey(frag)
+		if best || g < group || (g == group && (s < scope || (s == scope && (f < file || (f == file && (l < line || (l == line && c < col))))))) {
+			group, scope, file, line, col = g, s, f, l, c
 			best = false
 		}
 	}
-	return group, scope, line, col
+	return group, scope, file, line, col
 }
 
 // padScopeDigits zero-pads numbers so string order matches numeric order
