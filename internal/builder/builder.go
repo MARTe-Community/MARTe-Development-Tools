@@ -945,12 +945,30 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 	written := make(map[string]bool)
 	b.writeEvaluatedBody(f, node, ctx, indent, node, written)
 
-	// Write remaining children (e.g. packages implicit nodes)
+	// Write remaining children (e.g. packages implicit nodes) in source
+	// order: their own fragments locate them, and scoped expansions order by
+	// iteration. Alphabetical order destroyed the loop-generated order.
 	var childNames []string
 	for name := range node.Children {
 		childNames = append(childNames, name)
 	}
-	sort.Strings(childNames)
+	sort.SliceStable(childNames, func(i, j int) bool {
+		gi, si, li, ci := nodeOrderKey(node.Children[childNames[i]])
+		gj, sj, lj, cj := nodeOrderKey(node.Children[childNames[j]])
+		if gi != gj {
+			return gi < gj
+		}
+		if si != sj {
+			return si < sj
+		}
+		if li != lj {
+			return li < lj
+		}
+		if ci != cj {
+			return ci < cj
+		}
+		return childNames[i] < childNames[j]
+	})
 
 	for _, name := range childNames {
 		if !written[name] {
@@ -971,6 +989,11 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 
 func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *index.EvaluationContext, indent int, parentNode *index.ProjectNode, writtenChildren map[string]bool) {
 	var evaluated []index.EvaluatedDefinition
+	// Emit in source order: the base (unscoped) definition first, then the
+	// scoped expansions ordered by iteration. Fragment creation order is not
+	// source order: a generated copy of the later `with`/`foreach` content
+	// can precede the file's own fragment, which scrambled the signal list.
+	frags := make([]*index.Fragment, 0, len(node.Fragments))
 	for _, frag := range node.Fragments {
 		if !b.activeFragments[frag] {
 			continue
@@ -980,6 +1003,23 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 			// copy carries the content.
 			continue
 		}
+		frags = append(frags, frag)
+	}
+	sort.SliceStable(frags, func(i, j int) bool {
+		gi, si, li, ci := fragmentOrderKey(frags[i])
+		gj, sj, lj, cj := fragmentOrderKey(frags[j])
+		if gi != gj {
+			return gi < gj
+		}
+		if si != sj {
+			return si < sj
+		}
+		if li != lj {
+			return li < lj
+		}
+		return ci < cj
+	})
+	for _, frag := range frags {
 		c := ctx
 		if frag.EvalCtx != nil && frag.EvalCtx.Scope != "" {
 			// Fragment materialized under a loop iteration or template
@@ -1012,6 +1052,63 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 		deduped = append(deduped, ed)
 	}
 	b.writeEvaluatedDefinitions(f, deduped, indent, parentNode, writtenChildren, ctx)
+}
+
+// fragmentOrderKey orders fragments for writing: base definitions before
+// scoped expansions, then by scope (numeric-aware) and source position.
+func fragmentOrderKey(frag *index.Fragment) (group int, scope string, line, col int) {
+	if frag.EvalCtx != nil {
+		scope = frag.EvalCtx.Scope
+	}
+	if scope != "" {
+		group = 1
+	}
+	if frag.Source != nil {
+		p := frag.Source.Pos()
+		line, col = p.Line, p.Column
+	}
+	if line == 0 {
+		line, col = frag.ObjectPos.Line, frag.ObjectPos.Column
+	}
+	return group, padScopeDigits(scope), line, col
+}
+
+func nodeOrderKey(node *index.ProjectNode) (group int, scope string, line, col int) {
+	if node == nil || len(node.Fragments) == 0 {
+		return 2, "", 0, 0
+	}
+	best := true
+	for _, frag := range node.Fragments {
+		g, s, l, c := fragmentOrderKey(frag)
+		if best || g < group || (g == group && (s < scope || (s == scope && (l < line || (l == line && c < col))))) {
+			group, scope, line, col = g, s, l, c
+			best = false
+		}
+	}
+	return group, scope, line, col
+}
+
+// padScopeDigits zero-pads numbers so string order matches numeric order
+// (`#2` before `#10`).
+func padScopeDigits(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] >= '0' && s[i] <= '9' {
+			j := i
+			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+				j++
+			}
+			if n := j - i; n < 10 {
+				b.WriteString(strings.Repeat("0", 10-n))
+			}
+			b.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 func scopeOf(ctx *index.EvaluationContext) string {
