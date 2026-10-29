@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
+	cueerrors "cuelang.org/go/cue/errors"
 )
 
 //go:embed marte.cue
@@ -17,6 +19,28 @@ var defaultSchemaCUE []byte
 type Schema struct {
 	Context *cue.Context
 	Value   cue.Value
+	// Errors lists schema files that could not be applied to Value, with the
+	// reason. A file that fails to compile (or conflicts with a lower layer)
+	// contributes nothing, so every class it declares is reported as unknown
+	// unless the failure itself is surfaced.
+	Errors []LoadError
+}
+
+// LoadError reports one schema file that was skipped while assembling the
+// effective schema.
+type LoadError struct {
+	Path string
+	Err  error
+}
+
+// Message renders the failure as one line, including the CUE details.
+func (e LoadError) Message() string {
+	detail := cueerrors.Details(e.Err, nil)
+	detail = strings.Join(strings.Fields(detail), " ")
+	if detail == "" {
+		detail = e.Err.Error()
+	}
+	return fmt.Sprintf("Ignoring schema file %s: %s (classes it declares will be reported as unknown)", e.Path, detail)
 }
 
 func NewSchema() *Schema {
@@ -126,14 +150,33 @@ func loadFullSchemaUncached(paths []string) *Schema {
 		panic(fmt.Sprintf("Embedded schema invalid: %v", baseVal.Err()))
 	}
 
+	var loadErrors []LoadError
 	for _, path := range paths {
-		if val, err := LoadSchema(ctx, path); err == nil && val.Err() == nil {
-			baseVal = baseVal.Unify(val)
+		val, err := LoadSchema(ctx, path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			loadErrors = append(loadErrors, LoadError{Path: path, Err: err})
+			continue
 		}
+		if val.Err() != nil {
+			loadErrors = append(loadErrors, LoadError{Path: path, Err: val.Err()})
+			continue
+		}
+		merged := baseVal.Unify(val)
+		if merged.Err() != nil {
+			// A conflicting overlay must not replace the schema assembled so
+			// far: an error value would make every lookup fail.
+			loadErrors = append(loadErrors, LoadError{Path: path, Err: merged.Err()})
+			continue
+		}
+		baseVal = merged
 	}
 
 	return &Schema{
 		Context: ctx,
 		Value:   baseVal,
+		Errors:  loadErrors,
 	}
 }

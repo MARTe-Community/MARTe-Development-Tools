@@ -897,6 +897,7 @@ func (v *Validator) ValidateProject(ctx context.Context) {
 	if v.Tree == nil {
 		return
 	}
+	v.reportSchemaLoadErrors()
 	v.Activate(ctx)
 	if ctx.Err() != nil {
 		return
@@ -1532,6 +1533,19 @@ func nodePath(node *index.ProjectNode) string {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
 	return "/" + strings.Join(parts, "/")
+}
+
+// reportSchemaLoadErrors surfaces schema files that could not be applied.
+// Without it, a local schema with a CUE error silently contributes nothing
+// and the only symptom is a flood of "Unknown Class" warnings for classes
+// that the file does declare.
+func (v *Validator) reportSchemaLoadErrors() {
+	if v.Schema == nil {
+		return
+	}
+	for _, e := range v.Schema.Errors {
+		v.report(nil, "schema_error", LevelWarning, e.Message(), parser.Position{}, e.Path)
+	}
 }
 
 func (v *Validator) report(node *index.ProjectNode, tag string, level DiagnosticLevel, msg string, pos parser.Position, file string) {

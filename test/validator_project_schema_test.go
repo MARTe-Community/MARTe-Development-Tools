@@ -69,3 +69,54 @@ package schema
 		t.Error("Expected error for missing 'CustomField' defined in project schema")
 	}
 }
+
+// A project schema that fails to compile contributes nothing; the validator
+// must say so instead of only flooding "Unknown Class" warnings for the
+// classes the file declares.
+func TestProjectSchemaCompileErrorReported(t *testing.T) {
+	tmpDir := t.TempDir()
+	schemaContent := `package schema
+
+#Classes: {
+	ProjectClass: {
+		InputSize: list.Sum([1, 2])
+		...
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, ".marte_schema.cue"), []byte(schemaContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := parser.NewParser("+Obj = {\n    Class = ProjectClass\n}\n").Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := index.NewProjectTree()
+	idx.AddFile(filepath.Join(tmpDir, "project.marte"), config)
+
+	v := validator.NewValidator(idx, tmpDir, nil)
+	v.ValidateProject(context.Background())
+
+	var schemaErr, unknown bool
+	for _, d := range v.Diagnostics {
+		if d.Level == validator.LevelWarning && strings.Contains(d.Message, "Ignoring schema file") {
+			schemaErr = true
+			if !strings.Contains(d.Message, ".marte_schema.cue") || !strings.Contains(d.Message, "list") {
+				t.Errorf("schema warning lacks the file or cause: %s", d.Message)
+			}
+			if d.File != filepath.Join(tmpDir, ".marte_schema.cue") {
+				t.Errorf("schema warning anchored to %q, want the schema path", d.File)
+			}
+		}
+		if strings.Contains(d.Message, "Unknown Class 'ProjectClass'") {
+			unknown = true
+		}
+	}
+	if !schemaErr {
+		t.Errorf("schema compile error not reported, diagnostics: %+v", v.Diagnostics)
+	}
+	if !unknown {
+		t.Errorf("expected the class to be unknown when its schema is ignored: %+v", v.Diagnostics)
+	}
+}
