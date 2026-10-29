@@ -424,11 +424,27 @@ type EvaluationContext struct {
 	Variables map[string]parser.Value
 	Parent    *EvaluationContext
 	Tree      *ProjectTree
+	// Node is the configuration node the expression is evaluated in. It
+	// anchors relative reference paths (`SynchThread.Signals`) to the
+	// lexical scope where they appear; child contexts fall back to their
+	// parent's node via ScopeNode.
+	Node *ProjectNode
 	// Scope identifies the concrete expansion this context belongs to
 	// (foreach iteration, with block, template instance). It is stable
 	// across activation passes, unlike the context pointer, so fragment
 	// materialization can tell "same expansion" from "another iteration".
 	Scope string
+}
+
+// ScopeNode returns the configuration node anchoring this evaluation scope:
+// the first context in the parent chain that records one.
+func (ctx *EvaluationContext) ScopeNode() *ProjectNode {
+	for c := ctx; c != nil; c = c.Parent {
+		if c.Node != nil {
+			return c.Node
+		}
+	}
+	return nil
 }
 
 func (ctx *EvaluationContext) Resolve(name string) parser.Value {
@@ -1853,6 +1869,7 @@ func (pt *ProjectTree) GetActiveField(node *ProjectNode, key string, container *
 						Variables: make(map[string]parser.Value),
 						Parent:    nil,
 						Tree:      pt,
+						Node:      node,
 					}
 					if container != nil {
 						for _, cf := range container.Fragments {
@@ -1999,6 +2016,59 @@ func (pt *ProjectTree) EvaluateDefinitions(defs []parser.Definition, ctx *Evalua
 	return result
 }
 
+// referencePath returns the dotted name of a bare reference expression
+// (`RTApp.Data.SynchThread.Signals`), including explicit member accesses on
+// such a reference. It reports false for anything else (variables, calls).
+func referencePath(val parser.Value) (string, bool) {
+	switch v := val.(type) {
+	case *parser.ReferenceValue:
+		return NormalizeName(v.Value), true
+	case *parser.MemberAccess:
+		base, ok := referencePath(v.Base)
+		if !ok {
+			return "", false
+		}
+		return base + "." + v.Member, true
+	}
+	return "", false
+}
+
+// referenceNode resolves a reference path to the configuration node it names.
+// It starts at the expression's lexical scope (ctx.ScopeNode) and then falls
+// back to a tree-wide lookup, so `RTApp.Data.DDB.Signals` and a relative
+// `DDB.Signals` both work.
+func (pt *ProjectTree) referenceNode(val parser.Value, ctx *EvaluationContext) *ProjectNode {
+	name, ok := referencePath(val)
+	if !ok {
+		return nil
+	}
+	if scope := ctx.ScopeNode(); scope != nil {
+		if node := pt.ResolveName(scope, name, nil); node != nil {
+			return node
+		}
+	}
+	return pt.FindNode(pt.Root, name, nil, false)
+}
+
+// nodeKeys renders a configuration node's child names as a list, the object
+// counterpart of keys() on a map. Names keep their source spelling.
+func nodeKeys(node *ProjectNode, pos parser.Position) *parser.ArrayValue {
+	names := make([]string, 0, len(node.Children))
+	for _, child := range node.Children {
+		name := child.RealName
+		if name == "" {
+			name = child.Name
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := &parser.ArrayValue{Position: pos, EndPosition: pos}
+	for _, name := range names {
+		out.Elements = append(out.Elements, &parser.StringValue{Value: name})
+	}
+	return out
+}
+
 func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) parser.Value {
 	switch v := val.(type) {
 	case *parser.VariableReferenceValue:
@@ -2050,6 +2120,15 @@ func (pt *ProjectTree) EvaluateValue(val parser.Value, ctx *EvaluationContext) p
 		}
 		if res := loader.FunctionCall(v.Name, args); res != nil {
 			return res
+		}
+		// `keys(<reference path>)`: the argument names a configuration
+		// object (e.g. a DataSource's Signals block) whose children are
+		// the keys. A bare reference value does not evaluate to a map, so
+		// the generic call above leaves the call symbolic.
+		if v.Name == "keys" && len(v.Args) == 1 {
+			if node := pt.referenceNode(v.Args[0], ctx); node != nil {
+				return nodeKeys(node, v.Position)
+			}
 		}
 		return v
 	case *parser.ListComprehension:
@@ -2671,6 +2750,13 @@ func (pt *ProjectTree) evaluate(val parser.Value, ctx *ProjectNode) parser.Value
 		}
 		if res := loader.FunctionCall(v.Name, args); res != nil {
 			return res
+		}
+		if v.Name == "keys" && len(v.Args) == 1 {
+			if name, ok := referencePath(v.Args[0]); ok && ctx != nil {
+				if node := pt.resolveName(ctx, name, nil); node != nil {
+					return nodeKeys(node, v.Position)
+				}
+			}
 		}
 		// Unknown function or incompatible arguments: keep the node so it
 		// renders symbolically instead of silently vanishing.

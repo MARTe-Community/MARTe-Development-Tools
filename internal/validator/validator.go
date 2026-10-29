@@ -260,6 +260,14 @@ func (v *Validator) collectActiveNodes(ctx context.Context, node *index.ProjectN
 	scopeKey := ""
 	if evalCtx != nil {
 		scopeKey = evalCtx.Scope
+		if evalCtx.ScopeNode() == nil {
+			// Anchor relative reference paths in conditions to this node.
+			// The context is shared (base context) across nodes, so copy
+			// it instead of mutating.
+			scoped := *evalCtx
+			scoped.Node = node
+			evalCtx = &scoped
+		}
 	}
 	if v.expandedScopes == nil {
 		v.expandedScopes = make(map[*index.ProjectNode]map[string]bool)

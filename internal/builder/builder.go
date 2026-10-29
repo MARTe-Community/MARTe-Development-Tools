@@ -109,6 +109,14 @@ func (b *Builder) collectActiveNodes(node *index.ProjectNode, evalCtx *index.Eva
 	scopeKey := ""
 	if evalCtx != nil {
 		scopeKey = evalCtx.Scope
+		if evalCtx.ScopeNode() == nil {
+			// Anchor relative reference paths in conditions to this node.
+			// The context is shared (baseCtx) across nodes, so copy it
+			// instead of mutating.
+			scoped := *evalCtx
+			scoped.Node = node
+			evalCtx = &scoped
+		}
 	}
 	if b.expandedScopes == nil {
 		b.expandedScopes = make(map[*index.ProjectNode]map[string]bool)
@@ -1003,6 +1011,11 @@ func (b *Builder) writeNodeBody(f *os.File, node *index.ProjectNode, indent int,
 }
 
 func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *index.EvaluationContext, indent int, parentNode *index.ProjectNode, writtenChildren map[string]bool) {
+	if ctx != nil && ctx.ScopeNode() == nil {
+		scoped := *ctx
+		scoped.Node = node
+		ctx = &scoped
+	}
 	var evaluated []index.EvaluatedDefinition
 	// Emit in source order: the base (unscoped) definition first, then the
 	// scoped expansions ordered by iteration. Fragment creation order is not
@@ -1076,6 +1089,11 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 			c = frag.EvalCtx
 		} else if frag.BranchID == "" && frag.Source != nil && (c == nil || c.Scope != "") && b.baseCtx != nil {
 			c = b.baseCtx
+		}
+		if c != nil && c.ScopeNode() == nil {
+			scoped := *c
+			scoped.Node = node
+			c = &scoped
 		}
 		group, scope, file, fragLine, fragCol := b.fragmentOrderKey(frag)
 		defs := b.tree.EvaluateDefinitions(frag.Definitions, c, frag.File)

@@ -489,6 +489,7 @@ Call expressions evaluate pure iterator helpers; both `name(args)` and
 | `zip(a, b, …)` | list of `[a[i], b[i], …]` rows, stopping at the shortest input |
 | `range(n)` / `range(start, stop[, step])` | half-open integer sequence; `step` may be negative |
 | `keys(map)` / `values(map)` | keys (sorted) or values in key order |
+| `keys(path)` | child names of a configuration object (`keys(App.Data.DDB.Signals)`) |
 | `len(x)` | element count of a list/dict, rune count of a string |
 | `reversed(x)` | list or string in reverse order |
 | `concat(a, b, …)` | the arguments' elements spliced into one list |
@@ -505,6 +506,20 @@ foreach name, channel in zip(@names, @chans)
     Class = ReferenceContainer
     Id = @channel
   }
+end
+```
+
+`keys` also accepts a reference to a configuration object instead of a
+map: it lists the object's child names, which lets a condition test
+whether a signal is declared in a DataSource. The path resolves from the
+enclosing package and falls back to the whole tree, so both
+`keys(App.Data.DDB.Signals)` and a relative `keys(DDB.Signals)` work:
+
+```marte
+foreach sig in @signals.DigitalInputSignals
+  if (@sig.name in keys(App.Data.DDB.Signals))
+    copy WaitForDio { DDB::@sig.name -> Other::@sig.name }
+  end
 end
 ```
 
