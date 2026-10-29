@@ -93,6 +93,9 @@ import "list"
 
 		InputSize: OutputSize
 	}
+	ConfigurationDatabase: {
+		...
+	}
 	ReferenceContainer: {
 		...
 	}
