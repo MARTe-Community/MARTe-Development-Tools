@@ -1156,17 +1156,38 @@ func (b *Builder) writeEvaluatedBody(f *os.File, node *index.ProjectNode, ctx *i
 	// source definitions, so emitting every copy duplicates fields (invalid
 	// MARTe configuration). Keep one per definition pointer, preferring a
 	// scoped fragment (its values have the loop/with bindings applied).
+	// Objects are keyed by their evaluated name as well: a definition inside
+	// a loop names a different child on every iteration, and deduplicating
+	// by the AST node alone would keep only the first one.
+	type dedupKey struct {
+		def  parser.Definition
+		name string
+	}
+	dedupKeyOf := func(ed index.EvaluatedDefinition) dedupKey {
+		key := dedupKey{def: ed.Def}
+		switch d := ed.Def.(type) {
+		case *parser.ObjectNode:
+			key.name = b.formatValueWithCtx(d.Name, ed.Ctx)
+		case *parser.SignalShorthand:
+			key.name = d.SignalName
+			if d.AliasName != "" {
+				key.name = d.AliasName
+			}
+		}
+		return key
+	}
 	deduped := make([]index.EvaluatedDefinition, 0, len(evaluated))
-	seen := make(map[parser.Definition]int, len(evaluated))
+	seen := make(map[dedupKey]int, len(evaluated))
 	for _, ed := range evaluated {
-		if idx, ok := seen[ed.Def]; ok {
+		key := dedupKeyOf(ed)
+		if idx, ok := seen[key]; ok {
 			cur := deduped[idx]
 			if scopeOf(cur.Ctx) == "" && scopeOf(ed.Ctx) != "" {
 				deduped[idx] = ed
 			}
 			continue
 		}
-		seen[ed.Def] = len(deduped)
+		seen[key] = len(deduped)
 		deduped = append(deduped, ed)
 	}
 	b.writeEvaluatedDefinitions(f, deduped, indent, parentNode, writtenChildren, ctx)
